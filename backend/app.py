@@ -112,6 +112,12 @@ def upload_resume():
     
     # Generate unique filename to prevent conflicts
     original_filename = secure_filename(file.filename)
+    # Ensure secure_filename produced a valid filename with an extension
+    if not original_filename or "." not in original_filename:
+        return jsonify({
+            "status": "error",
+            "message": "Invalid filename after sanitization"
+        }), 400
     unique_filename = f"{uuid.uuid4()}_{original_filename}"
     
     # Save file to uploads folder
