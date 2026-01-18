@@ -8,12 +8,12 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%
+### **Overall Completion:** 🟢⬜⬜⬜⬜⬜⬜⬜⬜⬜ 5%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Infrastructure | ⬜ Not Started | Prashanth | 0% |
-| 📄 Resume System | ⬜ Not Started | Akshat | 0% |
+| 📄 Resume System | 🟡 In Progress | Akshat | 15% |
 | 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
@@ -145,7 +145,7 @@
 
 ## 🔧 AKSHAT - BACKEND ARCHITECT
 
-### **PHASE 1: API Foundation** ⬜
+### **PHASE 1: API Foundation** 🟡
 
 #### ✅ Task 2.1: Flask API Setup
 **Time:** 30 mins | **Priority:** 🔥 CRITICAL
@@ -153,12 +153,12 @@
 **Goal:** Get Flask server running with basic endpoint
 
 **What to do:**
-- [ ] Update `backend/requirements.txt` with: flask, flask-cors, PyPDF2, python-docx
-- [ ] Run `pip install -r requirements.txt`
-- [ ] Create basic Flask app in `app.py`
-- [ ] Enable CORS (so frontend can call your APIs)
-- [ ] Create `/api/health` endpoint that returns `{"status": "ok"}`
-- [ ] Create `uploads/` folder for resume storage
+- [x] Update `backend/requirements.txt` with: flask, flask-cors, PyPDF2, python-docx
+- [x] Run `pip install -r requirements.txt`
+- [x] Create basic Flask app in `app.py`
+- [x] Enable CORS (so frontend can call your APIs)
+- [x] Create `/api/health` endpoint that returns `{"status": "ok"}`
+- [x] Create `uploads/` folder for resume storage
 
 **Hints:**
 - Import Flask and CORS
