@@ -21,7 +21,8 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 
 # Email validation pattern (RFC 5322 compliant, simplified)
-EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+# Prevents consecutive dots, leading/trailing hyphens in domain
+EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
 
 
 def allowed_file(filename):
@@ -31,7 +32,7 @@ def allowed_file(filename):
 
 def is_valid_email(email):
     """Validate email format using regex pattern"""
-    if not email or not isinstance(email, str):
+    if email is None or not isinstance(email, str) or not email.strip():
         return False
     return re.match(EMAIL_PATTERN, email) is not None
 
