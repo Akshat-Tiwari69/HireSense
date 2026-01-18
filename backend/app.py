@@ -87,7 +87,20 @@ def upload_resume():
     
     # Save file to uploads folder
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-    file.save(filepath)
+    try:
+        file.save(filepath)
+    except OSError as e:
+        app.logger.error("Failed to save uploaded file '%s': %s", filepath, e)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to save uploaded file. Please try again later."
+        }), 500
+    except Exception as e:
+        app.logger.exception("Unexpected error while saving uploaded file '%s'", filepath)
+        return jsonify({
+            "status": "error",
+            "message": "An unexpected error occurred while saving the file."
+        }), 500
     
     # Return success response
     return jsonify({
