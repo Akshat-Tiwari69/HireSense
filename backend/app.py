@@ -17,6 +17,10 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# Set maximum file upload size to 10MB for resume uploads
+MAX_FILE_SIZE_MB = 10
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_MB * 1024 * 1024  # Convert MB to bytes
+
 # Allowed file extensions for resume upload
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 
@@ -30,6 +34,13 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle file upload exceeding MAX_CONTENT_LENGTH"""
+    return jsonify({
+        "status": "error",
+        "message": f"File size exceeds the maximum allowed limit of {MAX_FILE_SIZE_MB}MB"
+    }), 413
 def is_valid_email(email):
     """Validate email format using regex pattern"""
     if email is None or not isinstance(email, str) or not email.strip():
