@@ -7,11 +7,11 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢⬜⬜⬜⬜⬜⬜⬜⬜⬜ 5%
+### **Overall Completion:** 🟢⬜⬜⬜⬜⬜⬜⬜⬜⬜ 10%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
-| 🏗️ Infrastructure | ⬜ Not Started | Prashanth | 0% |
+| 🏗️ Infrastructure | 🟡 In Progress | Prashanth | 33% |
 | 📄 Resume System | 🟡 In Progress | Akshat | 15% |
 | 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
@@ -360,7 +360,7 @@
 ---
 
 ### 📌 AKSHAT'S DELIVERABLES CHECKLIST
-- [ ] Flask server running
+- [x] Flask server running
 - [ ] Resume upload working
 - [ ] Resume parsing extracting data correctly
 - [ ] Assessment APIs created
