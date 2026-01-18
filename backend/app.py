@@ -69,9 +69,9 @@ def upload_resume():
         }), 400
     
     # Get form data
-    name = request.form.get('name')
-    email = request.form.get('email')
-    phone = request.form.get('phone', '')  # Optional field
+    name = request.form.get('name', '').strip()
+    email = request.form.get('email', '').strip()
+    phone = request.form.get('phone', '').strip()  # Optional field
     
     # Validate required fields
     if not name or not email:
