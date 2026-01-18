@@ -15,6 +15,8 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'upload
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Set maximum file upload size to 10MB for resume uploads
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB in bytes
 
 # Allowed file extensions for resume upload
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
@@ -23,6 +25,15 @@ ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 def allowed_file(filename):
     """Check if file has an allowed extension"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle file upload exceeding MAX_CONTENT_LENGTH"""
+    return jsonify({
+        "status": "error",
+        "message": "File size exceeds the maximum allowed limit of 10MB"
+    }), 413
 
 
 @app.route('/api/health', methods=['GET'])
