@@ -20,6 +20,9 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Allowed file extensions for resume upload
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 
+# Email validation pattern (RFC 5322 compliant, simplified)
+EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
 
 def allowed_file(filename):
     """Check if file has an allowed extension"""
@@ -28,9 +31,9 @@ def allowed_file(filename):
 
 def is_valid_email(email):
     """Validate email format using regex pattern"""
-    # RFC 5322 compliant email regex pattern (simplified)
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(email_pattern, email) is not None
+    if not email or not isinstance(email, str):
+        return False
+    return re.match(EMAIL_PATTERN, email) is not None
 
 
 @app.route('/api/health', methods=['GET'])
