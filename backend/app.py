@@ -3,6 +3,7 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
 import uuid
+import re
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -19,10 +20,21 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Allowed file extensions for resume upload
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 
+# Email validation pattern (RFC 5322 compliant, simplified)
+# Prevents consecutive dots, leading/trailing hyphens in domain
+EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
+
 
 def allowed_file(filename):
     """Check if file has an allowed extension"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def is_valid_email(email):
+    """Validate email format using regex pattern"""
+    if email is None or not isinstance(email, str) or not email.strip():
+        return False
+    return re.match(EMAIL_PATTERN, email) is not None
 
 
 @app.route('/api/health', methods=['GET'])
@@ -78,6 +90,13 @@ def upload_resume():
         return jsonify({
             "status": "error",
             "message": "Name and email are required"
+        }), 400
+    
+    # Validate email format
+    if not is_valid_email(email):
+        return jsonify({
+            "status": "error",
+            "message": "Invalid email format"
         }), 400
     
     # Generate unique filename to prevent conflicts
