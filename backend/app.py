@@ -3,6 +3,7 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
 import uuid
+import re
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -23,6 +24,13 @@ ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 def allowed_file(filename):
     """Check if file has an allowed extension"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def is_valid_email(email):
+    """Validate email format using regex pattern"""
+    # RFC 5322 compliant email regex pattern (simplified)
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(email_pattern, email) is not None
 
 
 @app.route('/api/health', methods=['GET'])
@@ -78,6 +86,13 @@ def upload_resume():
         return jsonify({
             "status": "error",
             "message": "Name and email are required"
+        }), 400
+    
+    # Validate email format
+    if not is_valid_email(email):
+        return jsonify({
+            "status": "error",
+            "message": "Invalid email format"
         }), 400
     
     # Generate unique filename to prevent conflicts
