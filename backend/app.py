@@ -82,7 +82,6 @@ def upload_resume():
     
     # Generate unique filename to prevent conflicts
     original_filename = secure_filename(file.filename)
-    file_extension = original_filename.rsplit('.', 1)[1].lower()
     unique_filename = f"{uuid.uuid4()}_{original_filename}"
     
     # Save file to uploads folder
