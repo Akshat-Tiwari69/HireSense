@@ -103,11 +103,13 @@ def upload_resume():
         }), 500
     
     # Return success response
+    # Use the configured upload folder name for consistency
+    relative_path = os.path.join(os.path.basename(app.config['UPLOAD_FOLDER']), unique_filename)
     return jsonify({
         "status": "success",
         "message": "Resume uploaded successfully",
         "data": {
-            "file_path": f"uploads/{unique_filename}",
+            "file_path": relative_path,
             "original_filename": original_filename,
             "candidate": {
                 "name": name,
