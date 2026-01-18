@@ -2,7 +2,6 @@
 
 > **Team:** Akshat (Backend) | Shaivi (Frontend) | Prashanth (Database)  
 > **Hackathon:** SRM Innovation Hackathon - Edition 1  
-> **Prize:** ₹10,000 (Winner) | ₹5,000 (Runner-up)
 
 ---
 
