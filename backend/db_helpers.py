@@ -15,7 +15,7 @@ class DatabaseError(Exception):
 
 
 # ============================================================================
-# CANDIDATE FUNCTIONS
+#                            CANDIDATE FUNCTIONS
 # ============================================================================
 
 def insert_candidate(name, email, phone, resume_path, parsed_data):
@@ -46,7 +46,7 @@ def insert_candidate(name, email, phone, resume_path, parsed_data):
         match_score = parsed_data.get('match_score', 0)
         shortlist_status = parsed_data.get('shortlist_status', 'Potential')
         
-        # Convert skills list to JSON string
+        # Converting skills list to JSON string
         skills_json = json.dumps(skills)
         
         cursor.execute("""
@@ -195,7 +195,7 @@ def update_candidate_shortlist(candidate_id, status, score):
 
 
 # ============================================================================
-# ASSESSMENT FUNCTIONS
+#                           ASSESSMENT FUNCTIONS
 # ============================================================================
 
 def create_assessment(candidate_id, job_id=None):
@@ -319,7 +319,7 @@ def get_assessment_by_id(assessment_id):
 
 
 # ============================================================================
-# RESPONSE TRACKING FUNCTIONS
+#                       RESPONSE TRACKING FUNCTIONS
 # ============================================================================
 
 def save_mcq_response(assessment_id, question_id, selected_answer, is_correct, time_spent):
@@ -454,7 +454,7 @@ def save_psychometric_response(assessment_id, question_id, trait, score, scenari
 
 
 # ============================================================================
-# SCORE CALCULATION FUNCTIONS
+#                      SCORE CALCULATION FUNCTIONS
 # ============================================================================
 
 def get_mcq_score(assessment_id):
