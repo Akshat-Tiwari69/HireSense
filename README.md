@@ -12,7 +12,7 @@
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Infrastructure | 🟡 In Progress | Prashanth | 33% |
-| 📄 Resume System | 🟡 In Progress | Akshat | 15% |
+| 📄 Resume System | 🟡 In Progress | Akshat | 30% |
 | 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
@@ -182,12 +182,12 @@
 **Create endpoint: `POST /api/resume/upload`**
 
 **What it should do:**
-- [ ] Accept file upload (PDF/DOCX only)
-- [ ] Accept form data: name, email, phone
-- [ ] Validate: file exists, correct type, name and email provided
-- [ ] Generate unique filename (hint: use `uuid`)
-- [ ] Save file to `uploads/` folder
-- [ ] Return success response with file path
+- [x] Accept file upload (PDF/DOCX only)
+- [x] Accept form data: name, email, phone
+- [x] Validate: file exists, correct type, name and email provided
+- [x] Generate unique filename (hint: use `uuid`)
+- [x] Save file to `uploads/` folder
+- [x] Return success response with file path
 
 **Hints:**
 - Use `request.files['file']` to get uploaded file
@@ -361,7 +361,7 @@
 
 ### 📌 AKSHAT'S DELIVERABLES CHECKLIST
 - [x] Flask server running
-- [ ] Resume upload working
+- [x] Resume upload working
 - [ ] Resume parsing extracting data correctly
 - [ ] Assessment APIs created
 - [ ] Code execution working (even if basic)
