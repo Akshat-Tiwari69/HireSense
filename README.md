@@ -1,7 +1,6 @@
 # 🚀 CYGNUSA Elite-Hire - AI-Enabled HR Evaluation System
 
 > **Team:** Akshat (Backend) | Shaivi (Frontend) | Prashanth (Database)  
-> **Hackathon:** SRM Innovation Hackathon - Edition 1  
 
 ---
 
@@ -36,23 +35,23 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 25% (Architecture Redesigned)
+### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 25%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Infrastructure | 🟢 COMPLETE | Prashanth | 100% |
 | 🔐 Authentication | ⬜ Not Started | Shaivi + Akshat | 0% |
-| 📄 Resume System | 🟡 In Progress | Akshat | 70% (needs email) |
-| 📝 Assessment Engine | 🟡 In Progress | Akshat + Shaivi | 60% (needs scheduling) |
+| 📄 Resume System | 🟡 In Progress | Akshat | 70% |
+| 📝 Assessment Engine | 🟡 In Progress | Akshat + Shaivi | 60% |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
 | 📧 Email System | ⬜ Not Started | Akshat | 0% |
-| 🎨 UI/UX | 🟡 In Progress | Shaivi | 30% (needs redesign) |
+| 🎨 UI/UX | 🟡 In Progress | Shaivi | 30% |
 | 🧪 Integration | 🟡 In Progress | All | 25% |
 
 **Legend:** 🟢 Done | 🟡 In Progress | 🔴 Blocked | ⬜ Not Started
 
-**Latest Update:** 🔄 MAJOR ARCHITECTURE CHANGE - Two-sided platform with separate Interviewer/Interviewee flows!
+**Latest Update:** Architecture redesigned for two-sided platform with separate Interviewer/Interviewee workflows.
 
 ---
 
@@ -98,28 +97,26 @@
 
 ---
 
-## 🗓️ REVISED 3-Day Battle Plan
+## 🗓️ Development Roadmap
 
-### **Day 1 (Today):** Core Foundation
-- ✅ Database setup (DONE)
-- 🔄 Authentication & Login System (NEW - CRITICAL)
-- 🔄 Resume upload (refactor for new flow)
-- 🔄 AI Match Score & Pros/Cons generation (NEW - CRITICAL)
-- 🔄 Email notification system setup (NEW - CRITICAL)
+### **Phase 1:** Core Foundation
+- ✅ Database setup
+- 🔄 Authentication & login system
+- 🔄 Resume upload with AI analysis
+- 🔄 Email notification system
 
-### **Day 2:** Interviewer Dashboard & Assessment
-- Interviewer dashboard (view candidates, scores, pros/cons)
-- Accept/Reject functionality with emails
-- Assessment scheduling system
+### **Phase 2:** Assessment & Dashboard
+- Interviewer dashboard
+- Accept/reject functionality
+- Assessment scheduling
 - Assessment interface for candidates
 - AI hiring decision engine
 
-### **Day 3:** Polish & Integration
-- Proctoring (basic tab detection)
-- End-to-end testing both flows
-- Email templates and deliverability
-- UI/UX polish
-- Demo preparation
+### **Phase 3:** Polish & Testing
+- Proctoring features
+- End-to-end testing
+- UI/UX improvements
+- Deployment preparation
 
 ---
 
@@ -132,245 +129,296 @@
 ### **PHASE 1: Database Foundation** 🟡
 
 #### ✅ Task 1.1: Database Connection (COMPLETED)
-**Time:** 30 mins | **Priority:** 🔥 CRITICAL
+**Priority:** 🔥 CRITICAL | **Status:** ✅ COMPLETE
 
-**Goal:** Get database up and running
+**Objective:** Establish database connection and verification
 
-**What you need:**
-- [x] Choose: SQLite (easier) or PostgreSQL (production-ready)
-- [x] Create `backend/db_config.py`
-- [x] Write a `get_connection()` function
-- [x] Write a `test_connection()` function that prints success/failure
+**Deliverables:**
+- [x] `backend/db_config.py` with connection functions
+- [x] Connection test functionality
 
-**Hints:**
-- SQLite: `import sqlite3`, then `sqlite3.connect('filename.db')`
-- PostgreSQL: `import psycopg2`, needs connection params
-- Test by running the file directly: `python db_config.py`
-
-**Success criteria:** Running the file prints "Database connected!" ✅
-
-**Commit message:** `db: setup database connection`
-
-**Status:** ✅ COMPLETED - Database connection working!
+**Tech Stack:** SQLite
 
 ---
 
-#### ✅ Task 1.2: Create Database Tables
-**Time:** 1-2 hours | **Priority:** 🔥 CRITICAL
+#### ✅ Task 1.2: Create Database Tables (COMPLETED)
+**Priority:** 🔥 CRITICAL | **Status:** ✅ COMPLETE
 
-**Goal:** Design and create all tables for the system
+**Objective:** Design and implement database schema
 
-**Tables you need:**
-- [x] `candidates` - Store resume data and match scores
-- [x] `job_descriptions` - Store JD requirements  
-- [x] `assessments` - Track each candidate's test
-- [x] `mcq_responses` - Store MCQ answers
-- [x] `coding_submissions` - Store code submissions
-- [x] `proctoring_events` - Log suspicious activities
-- [x] `psychometric_responses` - Store personality test data
+**Tables Created:**
+- [x] `candidates` - Resume data and match scores
+- [x] `job_descriptions` - Job requirements
+- [x] `assessments` - Assessment tracking
+- [x] `mcq_responses` - MCQ answers
+- [x] `coding_submissions` - Code submissions
+- [x] `proctoring_events` - Activity logs
+- [x] `psychometric_responses` - Trait assessments
 
-**Hints:**
-- Create `database/schema.sql` with CREATE TABLE statements
-- Think about: What fields? What data types? What's the primary key?
-- Use FOREIGN KEYs to link tables (e.g., assessment links to candidate)
-- Create `backend/init_db.py` that reads schema.sql and executes it
-- Candidates need: id, name, email, resume_path, parsed_skills (JSON/TEXT), match_score
-- Assessments need: id, candidate_id, technical_score, psychometric_score, decision, rationale
-
-**Success criteria:** Running `python init_db.py` creates all tables without errors ✅
-
-**Commit message:** `db: create database schema with all tables`
-
-**Status:** ✅ COMPLETED - All 8 tables created with proper relationships and indices!
+**Files:**
+- [x] `database/schema.sql`
+- [x] `backend/init_db.py`
 
 ---
 
 #### ✅ Task 1.3: Database Helper Functions (COMPLETED)
-**Time:** 2-3 hours | **Priority:** 🔥 CRITICAL
+**Priority:** 🔥 CRITICAL | **Status:** ✅ COMPLETE
 
-**Goal:** Create reusable functions for database operations
+**Objective:** Create database operation abstractions
 
-**Create `backend/db_helpers.py` with these functions:**
+**Functions Implemented (13 total):**
+- [x] Candidate management (insert, get, update)
+- [x] Assessment operations (create, update, retrieve)
+- [x] Response tracking (MCQ, coding, psychometric, proctoring)
+- [x] Score calculations
 
-**Candidate functions:**
-- [x] `insert_candidate(name, email, phone, resume_path, parsed_data)` → returns candidate_id
-- [x] `get_candidate_by_id(id)` → returns candidate dict
-- [x] `get_all_candidates()` → returns list of all candidates
-- [x] `update_candidate_shortlist(id, status, score)` → updates match score
-
-**Assessment functions:**
-- [x] `create_assessment(candidate_id)` → returns assessment_id
-- [x] `update_assessment_scores(assessment_id, scores, decision, rationale)`
-- [x] `get_assessment_by_id(id)` → returns assessment details
-
-**Response tracking:**
-- [x] `save_mcq_response(assessment_id, question_id, answer, is_correct, time)`
-- [x] `save_coding_submission(assessment_id, problem_id, code, passed, total)`
-- [x] `log_proctoring_event(assessment_id, event_type, severity, details)`
-- [x] `save_psychometric_response(assessment_id, trait, score)`
-
-**Score calculation:**
-- [x] `get_mcq_score(assessment_id)` → returns percentage
-- [x] `get_coding_score(assessment_id)` → returns percentage  
-- [x] `get_psychometric_scores(assessment_id)` → returns trait scores
-
-**Hints:**
-- Use `cursor.execute()` for SQL queries
-- Use `cursor.lastrowid` to get ID of inserted row
-- Use `cursor.fetchone()` for single result, `cursor.fetchall()` for multiple
-- Always `conn.commit()` after INSERT/UPDATE
-- Store lists/dicts as JSON strings: `json.dumps()` and `json.loads()`
-- Add try-except blocks for error handling
-
-**Success criteria:** Create a test file that inserts a candidate, creates an assessment, and retrieves it ✅
-
-**Commit message:** `db: add database helper functions`
-
-**Status:** ✅ COMPLETED - All 13 helper functions created and tested successfully!
+**File:** `backend/db_helpers.py`
 
 ---
 
-### 📌 PRASHANTH'S DELIVERABLES CHECKLIST
-- [x] Database connection working ✅
-- [x] All 8 tables created ✅
-- [x] Helper functions written and tested ✅
-- [x] Can insert and retrieve data successfully ✅
-- [ ] **NEW:** Add `users` table (interviewer/interviewee, email, password_hash, role)
-- [ ] **NEW:** Add `scheduled_assessments` table (candidate_id, interviewer_id, scheduled_time, status)
-- [ ] **NEW:** Update `assessments` table to link to scheduled_assessments
-- [ ] **NEW:** Add email_logs table (to track sent emails)
-- [ ] Pull Request created to merge into `dev`
+### **PHASE 2: Database Extension for New Architecture** ⬜
+
+#### Task 1.4: Add Authentication Tables
+**Priority:** 🔥 CRITICAL | **Status:** ⬜ TODO
+
+**Objective:** Support user authentication system
+
+**Requirements:**
+- [ ] Create `users` table with fields: id, email (unique), password_hash, role (interviewer/interviewee), name, timestamps
+- [ ] Add indexes on email and role
+- [ ] Implement helper functions:
+  - `create_user(email, password_hash, role, name)` - returns user_id
+  - `get_user_by_email(email)` - for login validation
+  - `get_user_by_id(user_id)` - for JWT token validation
+
+---
+
+#### Task 1.5: Add Assessment Scheduling Tables
+**Priority:** 🔥 CRITICAL | **Status:** ⬜ TODO
+
+**Objective:** Track scheduled assessments with time validation
+
+**Requirements:**
+- [ ] Create `scheduled_assessments` table with fields: id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, timestamps
+- [ ] Link to candidates, users, and assessments tables using foreign keys
+- [ ] Add indexes on candidate_id and scheduled_time
+- [ ] Implement helper functions:
+  - `create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time)` - returns scheduled_assessment_id
+  - `get_scheduled_assessment(candidate_id)` - get scheduling details
+  - `update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id)` - update status
+  - `check_assessment_time_valid(candidate_id, current_time)` - validate if current time is within ±30 min window
+
+**Status Values:** scheduled, in_progress, completed, cancelled
+
+---
+
+#### Task 1.6: Add Email Logging Table
+**Priority:** 🟡 MEDIUM | **Status:** ⬜ TODO
+
+**Objective:** Track all sent emails for auditing
+
+**Requirements:**
+- [ ] Create `email_logs` table with fields: id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
+- [ ] Add indexes on recipient_email and email_type
+- [ ] Implement helper functions:
+  - `log_email(recipient_email, recipient_name, email_type, subject, status, error_message)` - log email attempt
+  - `get_candidate_emails(candidate_email)` - retrieve email history
+
+**Email Types:** rejection, invitation, final_decision  
+**Status Values:** sent, failed
+
+---
+
+#### Task 1.7: Modify Existing Tables
+**Priority:** 🔥 CRITICAL | **Status:** ⬜ TODO
+
+**Objective:** Update existing schema for two-sided platform
+
+**Requirements:**
+- [ ] Add to `candidates` table: pros (TEXT for JSON list), cons (TEXT for JSON list), status (with check constraint)
+- [ ] Add to `assessments` table: scheduled_assessment_id (foreign key), hiring_recommendation (TEXT)
+- [ ] Update helper functions:
+  - Modify `insert_candidate()` to accept pros, cons, status parameters
+  - Add `update_candidate_status(candidate_id, status)` function
+  - Modify `update_assessment_scores()` to accept hiring_recommendation and scheduled_assessment_id
+
+**Candidate Status Values:** pending, rejected, scheduled, assessment_complete, hired, not_hired
+
+---
+
+### 📌 PRASHANTH'S DELIVERABLES
+- [x] Database connection ✅
+- [x] All 8 base tables ✅
+- [x] 13 helper functions ✅
+- [ ] **NEW:** Authentication tables
+- [ ] **NEW:** Scheduling tables
+- [ ] **NEW:** Email logging
+- [ ] **NEW:** Table modifications
 
 ---
 
 ## 🔧 AKSHAT - BACKEND ARCHITECT
 
-### **PHASE 0: Authentication System** ⬜ NEW - CRITICAL
+### **PHASE 0: Authentication System** ⬜ NEW
 
-#### Task 2.0.1: User Authentication APIs
-**Time:** 2-3 hours | **Priority:** 🔥 CRITICAL
+#### Task 2.0: User Authentication APIs
+**Priority:** 🔥 CRITICAL | **Status:** ⬜ TODO
 
-**Goal:** Enable login/signup for interviewers and interviewees
+**Objective:** Enable role-based authentication for interviewers and interviewees
 
-**Create these endpoints:**
-
-**Authentication:**
-- [ ] `POST /api/auth/register` - Register new user (email, password, role: "interviewer" or "interviewee")
-- [ ] `POST /api/auth/login` - Login user, return JWT token
-- [ ] `POST /api/auth/logout` - Logout user (optional, mainly frontend)
-- [ ] `GET /api/auth/me` - Get current user info from token
-
-**What you need:**
-- Use `flask-jwt-extended` for JWT tokens
-- Hash passwords with `bcrypt` or `werkzeug.security`
-- Store users in Prashanth's new `users` table
-- Return role in JWT token so frontend knows interviewer vs interviewee
-
-**Hints:**
-- Install: `pip install flask-jwt-extended`
-- Use `@jwt_required()` decorator to protect routes
-- Store JWT in localStorage on frontend
-- Include role in JWT claims: `additional_claims={"role": user_role}`
-
-**Success criteria:** Can register, login, and get protected user info
-
-**Commit message:** `feat: add user authentication with JWT`
+**Requirements:**
+- [ ] Install flask-jwt-extended and password hashing library
+- [ ] Create endpoints:
+  - `POST /api/auth/register` - accepts email, password, role, name; returns user_id
+  - `POST /api/auth/login` - validates credentials, returns JWT token with role in claims  
+  - `GET /api/auth/me` - protected endpoint, returns current user info
+- [ ] Use Prashanth's user helper functions
+- [ ] Hash passwords before database storage
+- [ ] Include user role in JWT claims for frontend routing
 
 ---
 
-#### ✅ Task 2.1: Flask API Setup
-**Time:** 30 mins | **Priority:** 🔥 CRITICAL
+### **PHASE 1: AI Resume Analysis** ⬜ NEW
 
-**Goal:** Get Flask server running with basic endpoint
+#### Task 2.1: AI Pros & Cons Generator  
+**Priority:** 🔥 CRITICAL | **Status:** ⬜ TODO
 
-**What to do:**
-- [x] Update `backend/requirements.txt` with: flask, flask-cors, PyPDF2, python-docx
-- [x] Run `pip install -r requirements.txt`
-- [x] Create basic Flask app in `app.py`
-- [x] Enable CORS (so frontend can call your APIs)
-- [x] Create `/api/health` endpoint that returns `{"status": "ok"}`
-- [x] Create `uploads/` folder for resume storage
+**Objective:** Generate AI-powered resume analysis
 
-**Hints:**
-- Import Flask and CORS
-- `app = Flask(__name__)` and `CORS(app)`
-- Use `@app.route()` decorator for endpoints
-- Run with `app.run(debug=True, port=5000)`
-- Test by visiting `http://localhost:5000/api/health` in browser
-
-**Success criteria:** Browser shows your JSON response
-
-**Commit message:** `feat: setup Flask API with health check`
+**Requirements:**
+- [ ] Create function `generate_pros_cons(resume_text, job_requirements, skills, experience)` - returns dict with pros/cons lists
+- [ ] Integrate Claude API or OpenAI API with appropriate prompt
+- [ ] Update `/api/resume/upload` endpoint to call this function
+- [ ] Store results using Prashanth's updated candidates table
+- [ ] Return pros/cons with match score in response
 
 ---
 
-#### ✅ Task 2.2: Resume Upload Endpoint
-**Time:** 1 hour | **Priority:** 🔥 CRITICAL
+### **PHASE 2: Email Notification System** ⬜ NEW
 
-**Goal:** Accept resume files from frontend
+#### Task 2.2: Email Service
+**Priority:** 🔥 CRITICAL | **Status:** ⬜ TODO
 
-**Create endpoint: `POST /api/resume/upload`**
+**Objective:** Automated email notifications at key decision points
 
-**What it should do:**
-- [x] Accept file upload (PDF/DOCX only)
-- [x] Accept form data: name, email, phone
-- [x] Validate: file exists, correct type, name and email provided
-- [x] Generate unique filename (hint: use `uuid`)
-- [x] Save file to `uploads/` folder
-- [x] Return success response with file path
+**Requirements:**
+- [ ] Create `backend/email_service.py` with email functions
+- [ ] Implement three email types: rejection, assessment invitation, final decision
+- [ ] Create functions:
+  - `send_rejection_email(candidate_email, candidate_name)`
+  - `send_assessment_invitation(candidate_email, candidate_name, assessment_link, scheduled_time)`
+  - `send_final_decision_email(candidate_email, candidate_name, decision, rationale)`
+- [ ] Use flask-mail or smtplib with Gmail/SendGrid
+- [ ] Log all attempts using Prashanth's email_logs table
+- [ ] Handle errors and log failures
 
-**Hints:**
-- Use `request.files['file']` to get uploaded file
-- Use `request.form.get('name')` for form data
-- Check file extension: `filename.endswith('.pdf')`
-- Save with: `file.save(filepath)`
-- Use `werkzeug.utils.secure_filename()` for security
-- Return JSON with status and file path
-
-**Success criteria:** Can upload a file using Postman/curl and see it in uploads folder
-
-**Commit message:** `feat: add resume upload endpoint`
+**Integration:** Triggered by interviewer actions (reject, schedule, final decision)
 
 ---
 
-#### ✅ Task 2.3: Resume Parsing Engine
-**Time:** 3-4 hours | **Priority:** 🔥 CRITICAL
+### **PHASE 3: Interviewer Dashboard APIs** ⬜ NEW
 
-**Goal:** Extract meaningful data from resumes
+#### Task 2.3: Interviewer Management Endpoints
+**Priority:** 🔥 CRITICAL | **Status:** ⬜ TODO
 
-**Create `backend/resume_parser.py` with:**
+**Objective:** APIs for candidate review and decision workflow
 
-**Text extraction:**
-- [x] `extract_text_from_pdf(filepath)` → returns text string
-- [x] `extract_text_from_docx(filepath)` → returns text string
+**Requirements:**
+- [ ] Create JWT-protected endpoints (require role=interviewer):
+  - `GET /api/interviewer/candidates` - list all with resume data, scores, pros/cons, status
+  - `GET /api/interviewer/candidates/:id` - detailed candidate info
+  - `POST /api/interviewer/candidates/:id/reject` - reject + send email + update status
+  - `POST /api/interviewer/candidates/:id/schedule` - schedule assessment (body: scheduled_time) + send invite
+  - `GET /api/interviewer/assessments/:candidate_id` - results with AI recommendation
+  - `POST /api/interviewer/assessments/:id/final-decision` - hire/no-hire (body: decision, notes) + send email
+- [ ] Validate JWT and role on all endpoints
+- [ ] Use Prashanth's helper functions
+- [ ] Integrate email service
 
-**Data extraction:**
-- [x] `extract_skills(text)` → returns list of skills found
-- [x] `extract_experience(text)` → returns years as integer
-- [x] `extract_education(text)` → returns degree string
+---
 
-**Matching logic:**
-- [x] `calculate_match_score(candidate_skills, candidate_exp, jd_skills, jd_min_exp)` → returns score 0-100
-- [x] `get_shortlist_status(score)` → returns "High Match" / "Potential" / "Reject"
+### **PHASE 4: Assessment Scheduling** ⬜ NEW
 
-**Main function:**
-- [x] `parse_resume(filepath, job_description)` → returns dict with all parsed data
+#### Task 2.4: Time-Based Assessment Access
+**Priority:** 🟡 MEDIUM | **Status:** ⬜ TODO
 
-**Hints:**
-- For PDF: Use `PyPDF2.PdfReader`, loop through pages, extract text
-- For DOCX: Use `python-docx`, loop through paragraphs
-- For skills: Create a list of common skills, search for them in text (case-insensitive)
-- For experience: Use regex to find patterns like "X years of experience"
-- For education: Search for keywords like "B.Tech", "M.Tech", "Bachelor", "Master"
-- Match score: Weight skills (70%) + experience (30%)
-- High Match: 70+, Potential: 40-69, Reject: <40
+**Objective:** Enforce scheduled time windows for assessments
 
-**Integration:**
-- [x] Update upload endpoint to call `parse_resume()` after saving file
-- [x] Use Prashanth's `insert_candidate()` to save parsed data to database
-- [x] Return parsed data in API response
+**Requirements:**
+- [ ] Update `POST /api/assessment/start`:
+  - Check for scheduled assessment
+  - Validate current time within ±30 min window
+  - Return 403 if outside window
+  - Update status to "in_progress" if valid
+- [ ] Create `GET /api/interviewee/my-assessment/:candidate_id` - returns scheduled_time, status, can_start flag
+- [ ] Mark "completed" when assessment finished
 
-**Success criteria:** Upload resume → Get JSON with skills, experience, education, match score
+---
+
+### **COMPLETED TASKS**
+
+#### ✅ Task 2.5: Flask API Setup
+**Status:** ✅ COMPLETE
+
+**Completed:**
+- Flask server on port 5000
+- CORS enabled
+- Health check endpoint
+- Uploads directory
+
+---
+
+#### ✅ Task 2.6: Resume Upload Endpoint
+**Status:** ✅ COMPLETE
+
+**Completed:**
+- `POST /api/resume/upload` endpoint
+- File validation (PDF/DOCX)
+- Form data handling
+- Secure file storage
+
+---
+
+#### ✅ Task 2.7: Resume Parsing Engine
+**Status:** ✅ COMPLETE
+
+**Completed:**
+- Text extraction (PDF/DOCX)
+- Skills, experience, education parsing
+- Match score calculation
+- Database integration
+
+**Test Results:** 32 skills, 5 years exp, Bachelor's degree, 83% match
+
+---
+
+#### ✅ Task 2.8: Assessment APIs
+**Status:** ✅ COMPLETE
+
+**Completed:**
+- 5 assessment endpoints (start, mcq/submit, code/submit, psychometric/submit, complete)
+- `backend/questions_bank.py` with 10 MCQs, 3 coding problems, 5 psychometric scenarios
+- Score calculation (MCQ 60% + Coding 40% = Technical; Technical 70% + Psychometric 30% = Overall)
+- Decision generation based on thresholds
+
+**Test Results:** MCQ 66.67%, Coding 66.67%, Technical 66.67%, Psychometric 80%, Overall 70.67%, Decision: Recommend for Hire
+
+---
+
+### 📌 AKSHAT'S DELIVERABLES
+- [x] Flask server running ✅
+- [x] Resume upload + parsing ✅
+- [x] Assessment APIs ✅
+- [x] Basic scoring system ✅
+- [ ] **NEW:** JWT authentication
+- [ ] **NEW:** AI pros/cons generator
+- [ ] **NEW:** Email notification service
+- [ ] **NEW:** Interviewer dashboard APIs
+- [ ] **NEW:** Assessment scheduling
+
+---
+
+## 🎨 SHAIVI - FRONTEND ARCHITECT
 
 **Commit message:** `feat: add resume parsing and matching logic`
 
@@ -1168,302 +1216,117 @@
 
 ---
 
-#### ✅ Everyone: Demo Preparation
-**Time:** 2 hours | **Priority:** 🔥 CRITICAL
+## 🔧 Setup Instructions
 
-**Prepare for judges:**
-- [ ] Create sample resumes (3-4 test candidates)
-- [ ] Prepare demo script (what to show in what order)
-- [ ] Practice the demo (5-7 minutes)
-- [ ] Prepare to answer questions about architecture
-- [ ] Each person knows their part inside-out
+### Prerequisites
+- Python 3.8+
+- Node.js 16+
+- SQLite (or PostgreSQL)
 
-**Demo flow:**
-1. Show resume upload + parsing + scoring (30 sec)
-2. Show assessment interface (1 min)
-3. Show proctoring in action (30 sec)
-4. Show AI decision with rationale (1 min)
-5. Show recruiter dashboard (1 min)
-6. Explain architecture briefly (1 min)
+### Backend Setup
+```bash
+cd backend
+pip install -r requirements.txt
+python init_db.py
+python app.py
+```
+
+### Frontend Setup
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Environment Variables
+Create `.env` file in backend directory:
+```
+SECRET_KEY=your_secret_key
+JWT_SECRET_KEY=your_jwt_secret
+AI_API_KEY=your_ai_api_key
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email
+SMTP_PASS=your_password
+```
 
 ---
 
-## � API ENDPOINTS REFERENCE
+## 📄 License
+MIT License
 
-### **Backend Server:** `http://localhost:5000`
+---
 
-#### **Health Check**
-- **GET** `/api/health` - Check if server is running
-  - Response: `{"status": "ok"}`
+## 📚 Technical Documentation
 
-#### **Resume Management**
-- **POST** `/api/resume/upload` - Upload and parse resume
-  - Body (multipart/form-data):
-    - `file`: PDF or DOCX file
-    - `name`: Candidate name
-    - `email`: Candidate email
-    - `phone`: Phone number (optional)
-  - Response: Parsed data (skills, experience, education, match_score), candidate_id, file_path
+### API Reference
+For detailed API endpoint documentation, see [API_DOCS.md](docs/API_DOCS.md)
 
-#### **Assessment System**
-- **POST** `/api/assessment/start` - Start assessment for candidate
-  - Body: `{"candidate_id": 1}`
-  - Response: assessment_id, 10 MCQ questions, 1 coding problem, 3 psychometric scenarios
+### System Architecture Files
 
-- **POST** `/api/assessment/mcq/submit` - Submit MCQ answer
-  - Body: `{"assessment_id": 1, "question_id": 1, "answer": 0, "time_taken": 30}`
-  - Response: `{"is_correct": true, "correct_answer": 0}`
+**Backend Files:**
+- `backend/app.py` - Main Flask application
+- `backend/resume_parser.py` - Resume parsing engine
+- `backend/questions_bank.py` - Assessment questions
+- `backend/db_config.py` - Database connection
+- `backend/db_helpers.py` - Database operations
+- `backend/init_db.py` - Database initialization
 
-- **POST** `/api/assessment/code/submit` - Submit code solution
-  - Body: `{"assessment_id": 1, "problem_id": 1, "code": "...", "language": "python"}`
-  - Response: Test results, passed_count, total_count, score
+**To be Created:**
+- `backend/auth.py` - JWT authentication
+- `backend/email_service.py` - Email notifications
+- `backend/resume_analyzer.py` - AI analysis
 
-- **POST** `/api/assessment/psychometric/submit` - Submit psychometric response
-  - Body: `{"assessment_id": 1, "scenario_id": 1, "trait_scores": {"leadership": 8}, "response_text": "..."}`
-  - Response: Success message
+**Frontend Files:**
+- `frontend/src/App.jsx` - Main app component
+- `frontend/src/pages/UploadPage.jsx` - Resume upload (needs refactoring)
+- `frontend/src/pages/AssessmentPage.jsx` - Assessment interface (in progress)
+- `frontend/src/pages/DashboardPage.jsx` - Dashboard (placeholder)
+- `frontend/src/services/api.js` - API client
 
-- **POST** `/api/assessment/complete` - Finalize assessment and get decision
-  - Body: `{"assessment_id": 1}`
-  - Response: All scores (MCQ, coding, technical, psychometric, overall), decision, rationale
+**To be Created:**
+- `frontend/src/pages/LandingPage.jsx` - Role selection
+- `frontend/src/pages/LoginPage.jsx` - Authentication
+- `frontend/src/pages/InterviewerDashboardPage.jsx` - Interviewer view
+- `frontend/src/components/ProtectedRoute.jsx` - Route protection
+- `frontend/src/context/AuthContext.jsx` - Auth state
 
-### **Backend Files Created/To Create**
-**Existing (Keep & Modify):**
-- `backend/app.py` - Main Flask application (needs auth, interviewer APIs, email integration)
-- `backend/resume_parser.py` - Resume parsing (needs AI pros/cons function)
-- `backend/questions_bank.py` - Assessment questions ✅
-- `backend/db_config.py` - Database connection ✅
-- `backend/db_helpers.py` - Database functions (needs new functions for users, scheduling)
-- `backend/init_db.py` - Database initialization (needs new tables)
-
-**New Files to Create:**
-- `backend/auth.py` - JWT authentication functions
-- `backend/email_service.py` - Email sending (rejection, invitation, decision)
-- `backend/resume_analyzer.py` - AI pros/cons generator
-
-### **Frontend Files - Need Major Refactoring**
-**New Files to Create:**
-- `frontend/src/pages/LandingPage.jsx` - Role selection page
-- `frontend/src/pages/LoginPage.jsx` - Interviewer login
-- `frontend/src/pages/IntervieweeApplicationPage.jsx` - Simplified upload (refactor existing)
-- `frontend/src/pages/InterviewerDashboardPage.jsx` - Main interviewer dashboard
-- `frontend/src/pages/AssessmentResultsPage.jsx` - View candidate assessment results
-- `frontend/src/components/ProtectedRoute.jsx` - JWT-based route protection
-- `frontend/src/context/AuthContext.jsx` - Auth state management
-
-**Keep & Modify:**
-- `frontend/src/pages/AssessmentPage.jsx` - Add time validation
-- `frontend/src/services/api.js` - Add new API calls
-
-### **Database Tables - Need Updates**
-**Existing Tables:** candidates, assessments, mcq_responses, coding_submissions, psychometric_responses, job_descriptions, proctoring_events
-
-**New Tables Needed (Prashanth):**
-- `users` - (id, email, password_hash, role, name, created_at)
-- `scheduled_assessments` - (id, candidate_id, interviewer_id, scheduled_time, status, created_at)
-- `email_logs` - (id, recipient_email, email_type, sent_at, status)
-
-**Table Modifications:**
-- `candidates` - Add: pros (TEXT), cons (TEXT), status (pending/rejected/scheduled/completed/hired)
-- `assessments` - Add: scheduled_assessment_id (FK), hiring_recommendation (TEXT)
-- `frontend/src/pages/DashboardPage.jsx` - Dashboard placeholder (13 lines)
-- `frontend/src/services/api.js` - Axios API client (26 lines) ✅
-- `frontend/tailwind.config.js` - Tailwind CSS configuration ✅
-- `frontend/vite.config.js` - Vite build configuration ✅
-- `frontend/package.json` - Dependencies: React 18.2, React Router 7.12, Axios 1.13, Tailwind 4.1 ✅
-
-### **Frontend Server:** `http://localhost:5173` (Vite)
-
-**Routes:**
-- `/` - Resume Upload Page (fully functional) ✅
-- `/assessment/:candidateId` - Assessment Interface (placeholder)
-- `/dashboard` - Recruiter Dashboard (placeholder)
-
-### **Database Tables**
+**Database Tables:**
 - `candidates` - Resume data and match scores
-- `assessments` - Assessment records with scores and decisions
-- `mcq_responses` - MCQ answers tracking
-- `coding_submissions` - Code submissions with test results
-- `psychometric_responses` - Trait scores and responses
+- `assessments` - Assessment records
+- `mcq_responses` - MCQ answers
+- `coding_submissions` - Code submissions
+- `psychometric_responses` - Trait scores
 - `job_descriptions` - Job requirements
-- `proctoring_events` - Suspicious activity logs
+- `proctoring_events` - Activity logs
+
+**To be Created:**
+- `users` - Authentication data
+- `scheduled_assessments` - Scheduling information
+- `email_logs` - Email tracking
 
 ---
 
-## �📊 JUDGING CRITERIA MAPPING
+## 🎯 Core Features
 
-Remember what judges care about:
+### Implemented
+- ✅ Resume upload and parsing
+- ✅ Assessment backend (MCQ, Coding, Psychometric)
+- ✅ Basic scoring system
+- ✅ Database infrastructure
 
-| Criteria | Weight | Who Owns This | How to Win |
-|----------|--------|---------------|------------|
-| **Architectural Depth** | 30% | All | Clean code structure, good API design, proper data flow |
-| **Grading Accuracy** | 20% | Akshat + Prashanth | Resume parser catches skills correctly, code execution works |
-| **Logic Transparency** | 20% | Akshat | AI rationale is detailed and makes sense |
-| **Security & Anti-Cheat** | 15% | Shaivi + Akshat | Proctoring actually works, can't easily bypass |
-| **User Experience** | 15% | Shaivi | Clean UI, intuitive flow, looks professional |
+### In Progress
+- 🔄 Two-sided platform architecture
+- 🔄 AI-powered resume analysis
+- 🔄 Assessment scheduling system
 
----
-
-## 🎯 MINIMUM VIABLE PRODUCT (MVP) - UPDATED
-
-**MUST HAVE for Demo (New Two-Sided Flow):**
-- [ ] **Landing page** - Role selection (Interviewer/Interviewee)
-- [ ] **Authentication** - Login for interviewers, simple form for interviewees
-- [x] **Resume upload** - Interviewee submits resume ✅ (needs minor UI updates)
-- [ ] **AI Analysis** - Match score + Pros/Cons generation
-- [ ] **Interviewer Dashboard** - View candidates, scores, AI insights
-- [ ] **Accept/Reject** - Interviewer can reject (sends email) or schedule assessment
-- [ ] **Email System** - Rejection & invitation emails working
-- [ ] **Scheduled Assessment** - Candidate takes test at scheduled time only
-- [x] **Assessment Flow** - MCQ + Coding + Psychometric ✅ (backend done, frontend needs completion)
-- [ ] **AI Hiring Decision** - Final recommendation for interviewer
-- [ ] **Final Decision** - Interviewer makes hire/no-hire choice, sends email
-
-**NICE TO HAVE (if time permits):**
-- Proctoring (tab detection)
-- Advanced code execution sandbox
-- Beautiful UI animations
-- Detailed charts/visualizations
-- Email templates with HTML styling
-- Assessment rescheduling
+### Planned
+- ⬜ JWT authentication
+- ⬜ Email notification system
+- ⬜ Interviewer dashboard
+- ⬜ AI hiring recommendations
+- ⬜ Proctoring features
 
 ---
 
-## 🏆 PRIORITY TASK LIST FOR TEAM
 
-### **DAY 1 CRITICAL TASKS (Do These First!):**
-
-**Prashanth (Database - 2-3 hours):**
-1. Add `users` table with authentication fields
-2. Add `scheduled_assessments` table
-3. Add `email_logs` table
-4. Modify `candidates` table: add pros, cons, status columns
-5. Create helper functions for new tables
-6. Test all database operations
-
-**Akshat (Backend - 4-5 hours):**
-1. ✅ ~~Resume upload~~ (DONE, needs AI pros/cons integration)
-2. Implement JWT authentication (`POST /api/auth/login`, `/register`)
-3. Create AI pros/cons generator (call Claude/OpenAI API)
-4. Build email service (rejection, invitation, decision emails)
-5. Create interviewer dashboard APIs (GET candidates, POST reject, POST schedule)
-6. Add time validation to assessment start endpoint
-7. Test all new endpoints with Postman
-
-**Shaivi (Frontend - 4-5 hours):**
-1. Create Landing Page with role selection
-2. Create Login Page for interviewers
-3. Set up authentication (JWT storage, protected routes)
-4. Refactor Upload Page for interviewee (remove score display)
-5. Start Interviewer Dashboard (candidate list, match scores)
-6. Add Accept/Reject/Schedule buttons with modals
-7. Test login flow and dashboard
-
-### **DAY 2 TASKS:**
-- Complete Interviewer Dashboard (pros/cons display, assessment results)
-- Implement assessment scheduling UI
-- Complete assessment interface for candidates
-- AI hiring recommendation display
-- Final decision flow (hire/no-hire)
-- Email testing and verification
-
-### **DAY 3 TASKS:**
-- End-to-end testing (both user flows)
-- Proctoring (if time permits)
-- UI/UX polish
-- Demo preparation
-- Bug fixes
-
----
-1. What did you finish yesterday?
-2. What are you working on today?
-3. Any blockers?
-
-**Every evening (5 mins):**
-1. What got done?
-2. What's blocking you?
-3. Plan for tomorrow
-
----
-
-## 🆘 WHEN YOU'RE STUCK
-
-**Check in this order:**
-1. Google the exact error message
-2. Ask your teammates (maybe they faced it)
-3. Ask Claude (me!) - share the error
-4. Check the original README for API contracts
-
-**Don't waste more than 30 minutes stuck on one thing!**
-
----
-
-## ✅ FINAL SUBMISSION CHECKLIST
-
-**Before submitting:**
-- [ ] All code pushed to GitHub
-- [ ] README.md updated with setup instructions
-- [ ] .env files not committed (check .gitignore)
-- [ ] All team members can run the project locally
-- [ ] Demo script prepared
-- [ ] Screenshots/demo video ready (if required)
-- [ ] Each person can explain their part
-
----
-
-## 🏆 LET'S WIN THIS!
-
-**Remember:**
-- **Day 1:** Get the foundation solid
-- **Day 2:** Build features fast
-- **Day 3:** Make it shine
-
-**Communication is key!** Use your group chat actively.
-
-**Questions?** Come back to me anytime. I'll help with:
-- Debugging errors
-- Architecture decisions  
-- Logic clarification
-- Code review
-
-Now go build something amazing! 💪🚀
-
----
-
-## 📝 ARCHITECTURE CHANGE SUMMARY
-
-### **What Changed:**
-- ❌ **OLD:** Single flow where candidates directly see their scores and take assessments
-- ✅ **NEW:** Two-sided platform with distinct Interviewer and Interviewee experiences
-
-### **Key New Features:**
-1. **Role-Based Authentication** - Interviewers login, Interviewees just apply
-2. **AI Resume Analysis** - Auto-generates match score + pros/cons for interviewer
-3. **Interviewer Control** - Accept/Reject decisions before assessment
-4. **Email Notifications** - Automated emails at every stage
-5. **Scheduled Assessments** - Candidates can only take test at assigned time
-6. **Two-Stage AI** - Initial resume review + final hiring recommendation
-
-### **What's Reusable:**
-- ✅ Database infrastructure (with additions)
-- ✅ Resume parsing engine (needs AI pros/cons integration)
-- ✅ Assessment backend APIs (needs scheduling validation)
-- ✅ Basic frontend structure (needs major refactoring)
-
-### **What's New:**
-- Authentication system (JWT)
-- Email service
-- Interviewer dashboard
-- Scheduling system
-- AI pros/cons generator
-- Role-based routing
-
----
-
-**Current Status:** Architecture redesigned, tasks reassigned, ready to implement!
-
-**Next Steps:** 
-1. Prashanth: Update database schema with new tables
-2. Akshat: Implement authentication + email + AI analysis
-3. Shaivi: Build landing page + login + interviewer dashboard
-
-**Let's build this! 🚀**
