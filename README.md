@@ -7,12 +7,12 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢⬜⬜⬜⬜⬜⬜⬜⬜⬜ 5%
+### **Overall Completion:** 🟢🟢⬜⬜⬜⬜⬜⬜⬜⬜ 15%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
-| 🏗️ Infrastructure | ⬜ Not Started | Prashanth | 0% |
-| 📄 Resume System | 🟡 In Progress | Akshat | 15% |
+| 🏗️ Infrastructure | 🟡 In Progress | Prashanth | 33% |
+| 📄 Resume System | 🟡 In Progress | Akshat | 45% |
 | 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
@@ -186,12 +186,12 @@
 **Create endpoint: `POST /api/resume/upload`**
 
 **What it should do:**
-- [ ] Accept file upload (PDF/DOCX only)
-- [ ] Accept form data: name, email, phone
-- [ ] Validate: file exists, correct type, name and email provided
-- [ ] Generate unique filename (hint: use `uuid`)
-- [ ] Save file to `uploads/` folder
-- [ ] Return success response with file path
+- [x] Accept file upload (PDF/DOCX only)
+- [x] Accept form data: name, email, phone
+- [x] Validate: file exists, correct type, name and email provided
+- [x] Generate unique filename (hint: use `uuid`)
+- [x] Save file to `uploads/` folder
+- [x] Return success response with file path
 
 **Hints:**
 - Use `request.files['file']` to get uploaded file
@@ -215,20 +215,20 @@
 **Create `backend/resume_parser.py` with:**
 
 **Text extraction:**
-- [ ] `extract_text_from_pdf(filepath)` → returns text string
-- [ ] `extract_text_from_docx(filepath)` → returns text string
+- [x] `extract_text_from_pdf(filepath)` → returns text string
+- [x] `extract_text_from_docx(filepath)` → returns text string
 
 **Data extraction:**
-- [ ] `extract_skills(text)` → returns list of skills found
-- [ ] `extract_experience(text)` → returns years as integer
-- [ ] `extract_education(text)` → returns degree string
+- [x] `extract_skills(text)` → returns list of skills found
+- [x] `extract_experience(text)` → returns years as integer
+- [x] `extract_education(text)` → returns degree string
 
 **Matching logic:**
-- [ ] `calculate_match_score(candidate_skills, candidate_exp, jd_skills, jd_min_exp)` → returns score 0-100
-- [ ] `get_shortlist_status(score)` → returns "High Match" / "Potential" / "Reject"
+- [x] `calculate_match_score(candidate_skills, candidate_exp, jd_skills, jd_min_exp)` → returns score 0-100
+- [x] `get_shortlist_status(score)` → returns "High Match" / "Potential" / "Reject"
 
 **Main function:**
-- [ ] `parse_resume(filepath, job_description)` → returns dict with all parsed data
+- [x] `parse_resume(filepath, job_description)` → returns dict with all parsed data
 
 **Hints:**
 - For PDF: Use `PyPDF2.PdfReader`, loop through pages, extract text
@@ -240,9 +240,9 @@
 - High Match: 70+, Potential: 40-69, Reject: <40
 
 **Integration:**
-- [ ] Update upload endpoint to call `parse_resume()` after saving file
-- [ ] Use Prashanth's `insert_candidate()` to save parsed data to database
-- [ ] Return parsed data in API response
+- [x] Update upload endpoint to call `parse_resume()` after saving file
+- [x] Use Prashanth's `insert_candidate()` to save parsed data to database
+- [x] Return parsed data in API response
 
 **Success criteria:** Upload resume → Get JSON with skills, experience, education, match score
 
@@ -364,9 +364,9 @@
 ---
 
 ### 📌 AKSHAT'S DELIVERABLES CHECKLIST
-- [ ] Flask server running
-- [ ] Resume upload working
-- [ ] Resume parsing extracting data correctly
+- [x] Flask server running
+- [x] Resume upload working
+- [x] Resume parsing extracting data correctly
 - [ ] Assessment APIs created
 - [ ] Code execution working (even if basic)
 - [ ] AI decision engine generating rationale
