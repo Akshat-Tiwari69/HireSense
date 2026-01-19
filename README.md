@@ -7,7 +7,7 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢⬜⬜⬜⬜⬜⬜⬜⬜ 15%
+### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 30%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
@@ -16,7 +16,7 @@
 | 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
-| 🎨 UI/UX | ⬜ Not Started | Shaivi | 0% |
+| 🎨 UI/UX | 🟡 In Progress | Shaivi | 20% |
 | 🧪 Integration | ⬜ Not Started | All | 0% |
 
 **Legend:** 🟢 Done | 🟡 In Progress | 🔴 Blocked | ⬜ Not Started
