@@ -4,6 +4,7 @@ from werkzeug.utils import secure_filename
 import os
 import uuid
 import re
+from resume_parser import parse_resume
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -137,12 +138,32 @@ def upload_resume():
             "message": "An unexpected error occurred while saving the file."
         }), 500
     
+    # Parse the resume to extract data
+    try:
+        # Optional: Define job description for matching (can be passed from frontend or config)
+        job_description = {
+            'skills': ['Python', 'Java', 'JavaScript', 'React', 'AWS'],  # Example JD
+            'min_experience': 2  # Example requirement
+        }
+        
+        parsed_data = parse_resume(filepath, job_description)
+    except Exception as e:
+        app.logger.exception("Error parsing resume '%s'", filepath)
+        parsed_data = {
+            "error": "Failed to parse resume",
+            "skills": [],
+            "experience": 0,
+            "education": "Not Specified",
+            "match_score": 0,
+            "shortlist_status": "Pending Review"
+        }
+    
     # Return success response
     # Use the configured upload folder name for consistency
     relative_path = os.path.join(os.path.basename(app.config['UPLOAD_FOLDER']), unique_filename)
     return jsonify({
         "status": "success",
-        "message": "Resume uploaded successfully",
+        "message": "Resume uploaded and parsed successfully",
         "data": {
             "file_path": relative_path,
             "original_filename": original_filename,
@@ -150,7 +171,8 @@ def upload_resume():
                 "name": name,
                 "email": email,
                 "phone": phone
-            }
+            },
+            "parsed_data": parsed_data
         }
     }), 201
 
