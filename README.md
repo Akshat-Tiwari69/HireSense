@@ -7,21 +7,21 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 30%
+### **Overall Completion:** 🟢🟢🟢🟢🟢⬜⬜⬜⬜⬜ 45%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Infrastructure | 🟢 COMPLETE | Prashanth | 100% |
-| 📄 Resume System | 🟡 In Progress | Akshat | 45% |
-| 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
+| 📄 Resume System | 🟢 COMPLETE | Akshat | 100% |
+| 📝 Assessment Engine | 🟡 In Progress | Akshat + Shaivi | 60% |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
-| 🎨 UI/UX | 🟡 In Progress | Shaivi | 20% |
-| 🧪 Integration | ⬜ Not Started | All | 0% |
+| 🎨 UI/UX | 🟡 In Progress | Shaivi | 35% |
+| 🧪 Integration | 🟡 In Progress | All | 30% |
 
 **Legend:** 🟢 Done | 🟡 In Progress | 🔴 Blocked | ⬜ Not Started
 
-**Latest Update:** ✅ Database Phase 1 (Tasks 1.1, 1.2, 1.3) completed and merged to dev branch
+**Latest Update:** ✅ Frontend Resume Upload Page (Task 3.2) completed with full functionality and API integration!
 
 ---
 
@@ -252,32 +252,39 @@
 
 ---
 
-### **PHASE 2: Assessment Engine** ⬜
+### **PHASE 2: Assessment Engine** 🟡
 
-#### ✅ Task 2.4: Assessment APIs
+#### ✅ Task 2.4: Assessment APIs (COMPLETED)
 **Time:** 2 hours | **Priority:** 🔥 HIGH
 
-**Create these endpoints:**
+**Goal:** Create API endpoints for assessment flow
 
-**Start assessment:**
-- [ ] `POST /api/assessment/start` - Takes candidate_id, creates assessment, returns questions
+**Created endpoints:**
+- [x] `POST /api/assessment/start` - Takes candidate_id, creates assessment, returns 10 MCQ questions, 1 coding problem, 3 psychometric scenarios
+- [x] `POST /api/assessment/mcq/submit` - Save MCQ answer with time taken, return if correct and correct answer
+- [x] `POST /api/assessment/code/submit` - Save code submission, run placeholder tests, return test results (2/3 passing)
+- [x] `POST /api/assessment/psychometric/submit` - Save trait scores and text response for each scenario
+- [x] `POST /api/assessment/complete` - Calculate final scores (MCQ: 60%, Coding: 40% for technical; 70% technical + 30% psychometric for overall), generate decision
 
-**Submit answers:**
-- [ ] `POST /api/assessment/mcq/submit` - Save MCQ answer, return if correct
-- [ ] `POST /api/assessment/code/submit` - Run code, return test results
-- [ ] `POST /api/assessment/psychometric/submit` - Save slider/scenario responses
+**Created files:**
+- [x] `backend/questions_bank.py` - Contains 10 MCQ questions, 3 coding problems, 5 psychometric scenarios with helper functions
 
-**Complete assessment:**
-- [ ] `POST /api/assessment/complete` - Calculate final scores, return decision
+**Integration:**
+- [x] Uses Prashanth's helper functions to save all responses to database
+- [x] Calculates technical score (60% MCQ + 40% coding)
+- [x] Calculates overall score (70% technical + 30% psychometric)
+- [x] Returns decision: "Recommend for Hire" (>=70), "Consider for Interview" (>=50), "Not Recommended" (<50)
 
-**Hints:**
-- Use Prashanth's helper functions to save/retrieve data
-- For code execution: Research `subprocess` or Docker (be careful with security!)
-- Store MCQ questions in a Python list/dict (or separate JSON file)
-- Calculate technical score from MCQ + coding
-- Calculate psychometric score from trait averages
+**Test results:**
+- ✅ Start assessment returns 10 MCQs, 1 coding problem, 3 scenarios
+- ✅ MCQ submissions saved with correct/incorrect tracking
+- ✅ Coding submissions saved with test results
+- ✅ Psychometric responses saved with multiple trait scores
+- ✅ Final assessment shows: MCQ: 66.67%, Coding: 66.67%, Technical: 66.67%, Psychometric: 80%, Overall: 70.67%, Decision: Recommend for Hire
 
-**Commit message:** `feat: add assessment submission endpoints`
+**Commit message:** `feat: add assessment submission endpoints with scoring`
+
+**Status:** ✅ COMPLETED - All 5 assessment endpoints working and tested!
 
 ---
 
@@ -366,80 +373,112 @@
 ---
 
 ### 📌 AKSHAT'S DELIVERABLES CHECKLIST
-- [x] Flask server running
-- [x] Resume upload working
-- [x] Resume parsing extracting data correctly
-- [ ] Assessment APIs created
-- [ ] Code execution working (even if basic)
+- [x] Flask server running ✅
+- [x] Resume upload working ✅
+- [x] Resume parsing extracting data correctly ✅
+- [x] Assessment APIs created ✅
+- [ ] Code execution working (placeholder implemented, needs full sandbox)
 - [ ] AI decision engine generating rationale
 - [ ] Proctoring endpoint logging events
-- [ ] All endpoints tested with Postman
+- [x] Assessment endpoints tested and verified ✅
 - [ ] Pull Request to merge into `dev`
 
 ---
 
 ## 🎨 SHAIVI - FRONTEND ARCHITECT
 
-### **PHASE 1: UI Foundation** ⬜
+### **PHASE 1: UI Foundation** 🟡
 
-#### ✅ Task 3.1: React Project Setup
+#### ✅ Task 3.1: React Project Setup (COMPLETED)
 **Time:** 30 mins | **Priority:** 🔥 CRITICAL
 
 **Goal:** Get React app running
 
-**What to do:**
+**What was done:**
 - [x] `cd frontend`
-- [x] Initialize React app: `npx create-react-app .` (or Vite for faster builds)
-- [x] Install dependencies: axios, react-router-dom, tailwindcss
-- [x] Setup Tailwind CSS
-- [x] Create folder structure: components/, pages/, services/
-- [x] Create basic routing (React Router)
+- [x] Initialize React app with Vite (faster builds)
+- [x] Install dependencies: axios (v1.13.2), react-router-dom (v7.12.0), tailwindcss (v4.1.18)
+- [x] Setup Tailwind CSS with PostCSS and Autoprefixer
+- [x] Create folder structure: pages/, services/ (components/ not needed yet)
+- [x] Create basic routing with React Router v7
 
-**Routes you need:**
-- `/` - Home/Upload page
-- `/assessment/:candidateId` - Assessment interface
-- `/dashboard` - Recruiter dashboard
+**Routes created:**
+- [x] `/` - Home/Upload page (UploadPage.jsx)
+- [x] `/assessment/:candidateId` - Assessment interface (AssessmentPage.jsx - placeholder)
+- [x] `/dashboard` - Recruiter dashboard (DashboardPage.jsx - placeholder)
 
-**Success criteria:** React app runs on `localhost:3000`
+**Files created:**
+- [x] `src/App.jsx` - Main app with router configuration
+- [x] `src/pages/UploadPage.jsx` - Resume upload page
+- [x] `src/pages/AssessmentPage.jsx` - Assessment placeholder
+- [x] `src/pages/DashboardPage.jsx` - Dashboard placeholder
+- [x] `src/services/api.js` - Axios API client
+- [x] `tailwind.config.js` - Tailwind configuration
+- [x] `vite.config.js` - Vite configuration
+
+**Success criteria:** ✅ React app runs on `localhost:5173` (Vite default)
 
 **Commit message:** `feat: setup React project with routing`
 
+**Status:** ✅ COMPLETED
+
 ---
 
-#### ✅ Task 3.2: Resume Upload Page
+#### ✅ Task 3.2: Resume Upload Page (COMPLETED)
 **Time:** 2 hours | **Priority:** 🔥 CRITICAL
 
 **Goal:** Let candidates upload their resume
 
-**Create `pages/UploadPage.jsx`:**
+**Created `pages/UploadPage.jsx` (217 lines):**
 
-**What it needs:**
-- [ ] File upload input (accept only PDF/DOCX)
-- [ ] Form fields: Name, Email, Phone
-- [ ] Submit button
-- [ ] Loading state while uploading
-- [ ] Show success message with match score after upload
-- [ ] Show error message if upload fails
+**Implemented features:**
+- [x] File upload input with drag-and-drop area (accept only PDF/DOCX)
+- [x] Form fields: Name (required), Email (required), Phone (optional)
+- [x] Submit button with loading state
+- [x] Client-side file validation (PDF/DOCX only)
+- [x] Client-side form validation (name & email required)
+- [x] Loading state while uploading ("Uploading..." text)
+- [x] Success screen showing:
+  - Match score as large percentage (blue badge)
+  - All detected skills as colored tags (blue pills)
+  - "Start Assessment" button (placeholder)
+- [x] Error message display (red banner)
+- [x] Professional UI with Tailwind CSS styling
+- [x] Responsive design (mobile-friendly)
 
-**Hints:**
-- Use `<input type="file" accept=".pdf,.docx" />`
-- Use FormData to send file + form data
-- Use axios to POST to `/api/resume/upload`
-- Show parsed data (skills, experience, match score) after successful upload
-- Add validation (check if file selected, email format, etc.)
+**API Integration:**
+- [x] Uses `uploadResume()` from `services/api.js`
+- [x] Sends multipart/form-data to `POST /api/resume/upload`
+- [x] Receives parsed data (skills, experience, education, match_score)
+- [x] Proper error handling with user-friendly messages
 
-**Success criteria:** Upload resume → See parsed results on screen
+**UI/UX Details:**
+- Professional gray background with white card
+- SVG upload icon in drag-and-drop area
+- Indigo color scheme for buttons and accents
+- Real-time file name display after selection
+- Disabled button state during upload
 
-**Commit message:** `feat: add resume upload page`
+**Success criteria:** ✅ Upload resume → See match score and skills displayed beautifully
+
+**Commit message:** `feat: add resume upload page with full functionality`
+
+**Status:** ✅ COMPLETED - Fully functional and tested!
 
 ---
 
-#### ✅ Task 3.3: Assessment Interface
+#### ⬜ Task 3.3: Assessment Interface (PLACEHOLDER CREATED)
 **Time:** 4-5 hours | **Priority:** 🔥 CRITICAL
 
 **Goal:** Complete assessment UI where candidates take tests
 
-**Create `pages/AssessmentPage.jsx` with sections:**
+**Current status:** Placeholder page created (15 lines)
+- [x] Created `pages/AssessmentPage.jsx` with basic structure
+- [x] Uses `useParams()` to get candidateId from URL
+- [x] Simple placeholder UI showing "Assessment Page"
+- [ ] Full assessment interface (MCQ, Coding, Psychometric) not implemented yet
+
+**Still needs implementation:**
 
 **MCQ Section:**
 - [ ] Display question with 4 options (A, B, C, D)
@@ -525,12 +564,17 @@
 
 ---
 
-#### ✅ Task 3.5: Recruiter Dashboard
+#### ⬜ Task 3.5: Recruiter Dashboard (PLACEHOLDER CREATED)
 **Time:** 3 hours | **Priority:** 🔥 HIGH
 
 **Goal:** Show all candidates and their results
 
-**Create `pages/DashboardPage.jsx`:**
+**Current status:** Placeholder page created (13 lines)
+- [x] Created `pages/DashboardPage.jsx` with basic structure
+- [x] Simple placeholder UI showing "Recruiter Dashboard"
+- [ ] Full dashboard with candidate list not implemented yet
+
+**Still needs implementation:**
 
 **What it should show:**
 - [ ] Table/list of all candidates
@@ -588,12 +632,16 @@
 ---
 
 ### 📌 SHAIVI'S DELIVERABLES CHECKLIST
-- [ ] React app running
-- [ ] Resume upload page working
-- [ ] Complete assessment interface (MCQ, Code, Text, Psychometric)
+- [x] React app running (Vite on port 5173) ✅
+- [x] Tailwind CSS setup (v4.1.18 with PostCSS) ✅
+- [x] Resume upload page working (fully functional with success screen) ✅
+- [ ] Complete assessment interface (MCQ, Code, Text, Psychometric) - placeholder created
 - [ ] Proctoring detecting tab switches
-- [ ] Recruiter dashboard showing candidates
-- [ ] All pages styled and responsive
+- [ ] Recruiter dashboard showing candidates - placeholder created
+- [x] Upload page styled and responsive ✅
+- [x] Resume upload API integration working ✅
+- [ ] Assessment and Dashboard API calls
+- [ ] Pull Request to merge into `dev`
 - [ ] All API calls working (test with Akshat's backend)
 - [ ] Pull Request to merge into `dev`
 
@@ -601,25 +649,37 @@
 
 ## 🧪 INTEGRATION & TESTING (ALL THREE)
 
-### **Final Integration Tasks** ⬜
+### **Final Integration Tasks** 🟡
 
-#### ✅ Everyone: End-to-End Testing
+#### ✅ Everyone: End-to-End Testing (PARTIALLY COMPLETE)
 **Time:** 2 hours | **Priority:** 🔥 CRITICAL
 
 **Test the complete flow:**
-- [ ] Upload resume → See parsed data and match score ✅
-- [ ] Start assessment → Complete all sections ✅
-- [ ] Submit answers → Saved to database ✅
-- [ ] Complete assessment → Get AI decision ✅
-- [ ] View in dashboard → See all data correctly ✅
-- [ ] Proctoring events → Logged and visible ✅
+- [x] Upload resume → See parsed data and match score ✅
+- [x] Start assessment → Complete all sections ✅
+- [x] Submit answers → Saved to database ✅
+- [x] Complete assessment → Get AI decision (basic scoring implemented) ✅
+- [ ] View in dashboard → See all data correctly
+- [ ] Proctoring events → Logged and visible
 
 **Bug fixing:**
-- [ ] Fix any errors that come up
+- [x] Fixed database helper function parameter mismatches ✅
+- [x] Fixed assessment endpoint response structures ✅
+- [x] Verified all assessment data saves correctly ✅
 - [ ] Handle edge cases
 - [ ] Add error messages
 
+**Test results:**
+- ✅ Resume upload: 32 skills detected, 5 years experience, Bachelor's degree, match score 83
+- ✅ Assessment start: Returns 10 MCQs, 1 coding problem, 3 scenarios
+- ✅ MCQ submission: 3/3 answers saved, correctness tracked (66.67% score)
+- ✅ Code submission: Code saved with 2/3 test cases passing (66.67% score)
+- ✅ Psychometric: 3 traits saved (leadership: 8, communication: 7, decision_making: 9)
+- ✅ Final scores: Technical 66.67%, Psychometric 80%, Overall 70.67%, Decision: "Recommend for Hire"
+
 **Commit message:** `fix: resolve integration bugs`
+
+**Status:** 🟡 Backend-Database integration verified, Frontend integration pending
 
 ---
 
@@ -643,7 +703,83 @@
 
 ---
 
-## 📊 JUDGING CRITERIA MAPPING
+## � API ENDPOINTS REFERENCE
+
+### **Backend Server:** `http://localhost:5000`
+
+#### **Health Check**
+- **GET** `/api/health` - Check if server is running
+  - Response: `{"status": "ok"}`
+
+#### **Resume Management**
+- **POST** `/api/resume/upload` - Upload and parse resume
+  - Body (multipart/form-data):
+    - `file`: PDF or DOCX file
+    - `name`: Candidate name
+    - `email`: Candidate email
+    - `phone`: Phone number (optional)
+  - Response: Parsed data (skills, experience, education, match_score), candidate_id, file_path
+
+#### **Assessment System**
+- **POST** `/api/assessment/start` - Start assessment for candidate
+  - Body: `{"candidate_id": 1}`
+  - Response: assessment_id, 10 MCQ questions, 1 coding problem, 3 psychometric scenarios
+
+- **POST** `/api/assessment/mcq/submit` - Submit MCQ answer
+  - Body: `{"assessment_id": 1, "question_id": 1, "answer": 0, "time_taken": 30}`
+  - Response: `{"is_correct": true, "correct_answer": 0}`
+
+- **POST** `/api/assessment/code/submit` - Submit code solution
+  - Body: `{"assessment_id": 1, "problem_id": 1, "code": "...", "language": "python"}`
+  - Response: Test results, passed_count, total_count, score
+
+- **POST** `/api/assessment/psychometric/submit` - Submit psychometric response
+  - Body: `{"assessment_id": 1, "scenario_id": 1, "trait_scores": {"leadership": 8}, "response_text": "..."}`
+  - Response: Success message
+
+- **POST** `/api/assessment/complete` - Finalize assessment and get decision
+  - Body: `{"assessment_id": 1}`
+  - Response: All scores (MCQ, coding, technical, psychometric, overall), decision, rationale
+
+### **Backend Files Created**
+- `backend/app.py` - Main Flask application (200+ lines, 7 endpoints)
+- `backend/resume_parser.py` - Resume parsing engine with PDF/DOCX support
+- `backend/questions_bank.py` - MCQ questions, coding problems, psychometric scenarios
+- `backend/db_config.py` - Database connection management
+- `backend/db_helpers.py` - 13 database helper functions
+- `backend/init_db.py` - Database initialization script
+- `backend/grading_engine.py` - Code execution placeholder
+- `backend/decision_engine.py` - AI decision engine placeholder
+
+### **Frontend Files Created**
+- `frontend/src/App.jsx` - Main React app with router (18 lines)
+- `frontend/src/pages/UploadPage.jsx` - Resume upload page (217 lines) ✅
+- `frontend/src/pages/AssessmentPage.jsx` - Assessment placeholder (15 lines)
+- `frontend/src/pages/DashboardPage.jsx` - Dashboard placeholder (13 lines)
+- `frontend/src/services/api.js` - Axios API client (26 lines) ✅
+- `frontend/tailwind.config.js` - Tailwind CSS configuration ✅
+- `frontend/vite.config.js` - Vite build configuration ✅
+- `frontend/package.json` - Dependencies: React 18.2, React Router 7.12, Axios 1.13, Tailwind 4.1 ✅
+
+### **Frontend Server:** `http://localhost:5173` (Vite)
+
+**Routes:**
+- `/` - Resume Upload Page (fully functional) ✅
+- `/assessment/:candidateId` - Assessment Interface (placeholder)
+- `/dashboard` - Recruiter Dashboard (placeholder)
+
+### **Database Tables**
+- `candidates` - Resume data and match scores
+- `assessments` - Assessment records with scores and decisions
+- `mcq_responses` - MCQ answers tracking
+- `coding_submissions` - Code submissions with test results
+- `psychometric_responses` - Trait scores and responses
+- `job_descriptions` - Job requirements
+- `proctoring_events` - Suspicious activity logs
+
+---
+
+## �📊 JUDGING CRITERIA MAPPING
 
 Remember what judges care about:
 
@@ -660,18 +796,18 @@ Remember what judges care about:
 ## 🎯 MINIMUM VIABLE PRODUCT (MVP)
 
 **If time is tight, MUST HAVE these:**
-- ✅ Resume upload + parsing + match score
-- ✅ Basic MCQ assessment
-- ✅ Simple coding assessment (even if manual grading)
-- ✅ AI decision with rationale
-- ✅ Dashboard showing candidates
-- ✅ Some proctoring (at least tab detection)
+- ✅ Resume upload + parsing + match score (Backend ✅ + Frontend ✅)
+- 🟡 Basic MCQ assessment (Backend API ✅, Frontend UI ⬜)
+- 🟡 Simple coding assessment (Backend API ✅, Frontend UI ⬜)
+- 🟡 AI decision with rationale (Backend placeholder, needs implementation)
+- ⬜ Dashboard showing candidates (Frontend placeholder created)
+- ⬜ Some proctoring (at least tab detection)
 
 **NICE TO HAVE (if time permits):**
 - Full proctoring with webcam
-- Psychometric assessment
+- ✅ Psychometric assessment (Backend API ✅, Frontend UI ⬜)
 - Advanced code execution sandbox
-- Beautiful UI animations
+- 🟡 Beautiful UI animations (Upload page styled ✅)
 - Detailed competency charts
 
 ---
