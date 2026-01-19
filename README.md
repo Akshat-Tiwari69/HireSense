@@ -384,12 +384,12 @@
 **Goal:** Get React app running
 
 **What to do:**
-- [ ] `cd frontend`
-- [ ] Initialize React app: `npx create-react-app .` (or Vite for faster builds)
-- [ ] Install dependencies: axios, react-router-dom, tailwindcss
-- [ ] Setup Tailwind CSS
-- [ ] Create folder structure: components/, pages/, services/
-- [ ] Create basic routing (React Router)
+- [x] `cd frontend`
+- [x] Initialize React app: `npx create-react-app .` (or Vite for faster builds)
+- [x] Install dependencies: axios, react-router-dom, tailwindcss
+- [x] Setup Tailwind CSS
+- [x] Create folder structure: components/, pages/, services/
+- [x] Create basic routing (React Router)
 
 **Routes you need:**
 - `/` - Home/Upload page
