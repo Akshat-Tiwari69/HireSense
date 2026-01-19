@@ -93,7 +93,7 @@
 
 ---
 
-#### ✅ Task 1.3: Database Helper Functions
+#### ✅ Task 1.3: Database Helper Functions (COMPLETED)
 **Time:** 2-3 hours | **Priority:** 🔥 CRITICAL
 
 **Goal:** Create reusable functions for database operations
@@ -101,26 +101,26 @@
 **Create `backend/db_helpers.py` with these functions:**
 
 **Candidate functions:**
-- [ ] `insert_candidate(name, email, phone, resume_path, parsed_data)` → returns candidate_id
-- [ ] `get_candidate_by_id(id)` → returns candidate dict
-- [ ] `get_all_candidates()` → returns list of all candidates
-- [ ] `update_candidate_shortlist(id, status, score)` → updates match score
+- [x] `insert_candidate(name, email, phone, resume_path, parsed_data)` → returns candidate_id
+- [x] `get_candidate_by_id(id)` → returns candidate dict
+- [x] `get_all_candidates()` → returns list of all candidates
+- [x] `update_candidate_shortlist(id, status, score)` → updates match score
 
 **Assessment functions:**
-- [ ] `create_assessment(candidate_id)` → returns assessment_id
-- [ ] `update_assessment_scores(assessment_id, scores, decision, rationale)`
-- [ ] `get_assessment_by_id(id)` → returns assessment details
+- [x] `create_assessment(candidate_id)` → returns assessment_id
+- [x] `update_assessment_scores(assessment_id, scores, decision, rationale)`
+- [x] `get_assessment_by_id(id)` → returns assessment details
 
 **Response tracking:**
-- [ ] `save_mcq_response(assessment_id, question_id, answer, is_correct, time)`
-- [ ] `save_coding_submission(assessment_id, problem_id, code, passed, total)`
-- [ ] `log_proctoring_event(assessment_id, event_type, severity, details)`
-- [ ] `save_psychometric_response(assessment_id, trait, score)`
+- [x] `save_mcq_response(assessment_id, question_id, answer, is_correct, time)`
+- [x] `save_coding_submission(assessment_id, problem_id, code, passed, total)`
+- [x] `log_proctoring_event(assessment_id, event_type, severity, details)`
+- [x] `save_psychometric_response(assessment_id, trait, score)`
 
 **Score calculation:**
-- [ ] `get_mcq_score(assessment_id)` → returns percentage
-- [ ] `get_coding_score(assessment_id)` → returns percentage  
-- [ ] `get_psychometric_scores(assessment_id)` → returns trait scores
+- [x] `get_mcq_score(assessment_id)` → returns percentage
+- [x] `get_coding_score(assessment_id)` → returns percentage  
+- [x] `get_psychometric_scores(assessment_id)` → returns trait scores
 
 **Hints:**
 - Use `cursor.execute()` for SQL queries
@@ -130,19 +130,21 @@
 - Store lists/dicts as JSON strings: `json.dumps()` and `json.loads()`
 - Add try-except blocks for error handling
 
-**Success criteria:** Create a test file that inserts a candidate, creates an assessment, and retrieves it
+**Success criteria:** Create a test file that inserts a candidate, creates an assessment, and retrieves it ✅
 
 **Commit message:** `db: add database helper functions`
+
+**Status:** ✅ COMPLETED - All 13 helper functions created and tested successfully!
 
 ---
 
 ### 📌 PRASHANTH'S DELIVERABLES CHECKLIST
 - [x] Database connection working ✅
 - [x] All 7 tables created ✅
-- [ ] Helper functions written and tested
-- [ ] Can insert and retrieve data successfully
+- [x] Helper functions written and tested ✅
+- [x] Can insert and retrieve data successfully ✅
 - [ ] Pull Request created to merge into `dev`
-- [ ] Akshat confirms he can use your functions
+- [ ] Backend team confirms integration with helper functions
 
 ---
 

@@ -66,4 +66,4 @@ if __name__ == "__main__":
     if success:
         print("\n✨ Database is ready to use!")
     else:
-        print("\n⚠️  Database initialization failed. Check errors above.")
+        print("\n⚠️  Database initialization failed.")
