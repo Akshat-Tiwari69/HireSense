@@ -5,31 +5,121 @@
 
 ---
 
+## 🎯 NEW ARCHITECTURE: Two-Sided Platform
+
+### **Interviewee (Candidate) Flow:**
+1. Select "I'm an Interviewee" on login page
+2. Fill basic details: Name, Email, Phone
+3. Upload resume (PDF/DOCX)
+4. Submit → Wait for response
+5. If rejected: Receive rejection email
+6. If accepted: Receive assessment invitation email with scheduled time
+7. Take assessment at scheduled time
+8. Wait for final decision
+
+### **Interviewer (Recruiter) Flow:**
+1. Select "I'm an Interviewer" on login page
+2. See dashboard with all candidate submissions
+3. For each candidate, see:
+   - Resume details
+   - **AI Match Score** (auto-calculated)
+   - **AI-Generated Pros & Cons**
+4. Options:
+   - **Reject** → Candidate gets rejection email
+   - **Accept & Schedule** → Schedule assessment, candidate gets invitation email
+5. After candidate completes assessment:
+   - View assessment results
+   - See **AI Hiring Recommendation** (with rationale)
+6. Final Decision: Hire or No-Hire
+
+---
+
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟢🟢🟢⬜⬜⬜⬜⬜ 45%
+### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 25% (Architecture Redesigned)
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Infrastructure | 🟢 COMPLETE | Prashanth | 100% |
-| 📄 Resume System | 🟢 COMPLETE | Akshat | 100% |
-| 📝 Assessment Engine | 🟡 In Progress | Akshat + Shaivi | 60% |
+| 🔐 Authentication | ⬜ Not Started | Shaivi + Akshat | 0% |
+| 📄 Resume System | 🟡 In Progress | Akshat | 70% (needs email) |
+| 📝 Assessment Engine | 🟡 In Progress | Akshat + Shaivi | 60% (needs scheduling) |
 | 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
-| 🎨 UI/UX | 🟡 In Progress | Shaivi | 35% |
-| 🧪 Integration | 🟡 In Progress | All | 30% |
+| 📧 Email System | ⬜ Not Started | Akshat | 0% |
+| 🎨 UI/UX | 🟡 In Progress | Shaivi | 30% (needs redesign) |
+| 🧪 Integration | 🟡 In Progress | All | 25% |
 
 **Legend:** 🟢 Done | 🟡 In Progress | 🔴 Blocked | ⬜ Not Started
 
-**Latest Update:** ✅ Frontend Resume Upload Page (Task 3.2) completed with full functionality and API integration!
+**Latest Update:** 🔄 MAJOR ARCHITECTURE CHANGE - Two-sided platform with separate Interviewer/Interviewee flows!
 
 ---
 
-## 🗓️ 3-Day Battle Plan
+## 🏗️ SYSTEM ARCHITECTURE
 
-### **Day 1:** Foundation (Database + Resume + Basic UI)
-### **Day 2:** Core Features (Assessment + Proctoring + AI)
-### **Day 3:** Polish (Integration + Testing + Demo Prep)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        LANDING PAGE                              │
+│                  "Are you an Interviewer or                      │
+│                       Interviewee?"                              │
+└────────────────┬────────────────────────────────┬────────────────┘
+                 │                                 │
+                 │                                 │
+        ┌────────▼────────┐              ┌────────▼────────┐
+        │   INTERVIEWEE    │              │   INTERVIEWER   │
+        │      FLOW        │              │      FLOW       │
+        └────────┬────────┘              └────────┬────────┘
+                 │                                 │
+                 │                                 │
+        1. Fill Form                      1. Login (JWT)
+        2. Upload Resume                  2. Dashboard
+        3. Wait                               ↓
+                 │                         View Candidates
+                 │                         - Match Score
+                 │                         - AI Pros/Cons
+                 │                             ↓
+                 │                         [Reject] → Email
+                 │                             OR
+                 │                         [Schedule] → Email
+                 │                             ↓
+                 ├─────────────────────────────┘
+                 │
+        4. Receive Email                  3. Monitor Assessments
+        5. Take Assessment                4. View Results
+           (at scheduled time)            5. See AI Recommendation
+                 │                             ↓
+                 │                         [Hire/No-Hire] → Email
+                 │                             │
+        6. Receive Final Email        ────────┘
+                 │
+            [END]
+```
+
+---
+
+## 🗓️ REVISED 3-Day Battle Plan
+
+### **Day 1 (Today):** Core Foundation
+- ✅ Database setup (DONE)
+- 🔄 Authentication & Login System (NEW - CRITICAL)
+- 🔄 Resume upload (refactor for new flow)
+- 🔄 AI Match Score & Pros/Cons generation (NEW - CRITICAL)
+- 🔄 Email notification system setup (NEW - CRITICAL)
+
+### **Day 2:** Interviewer Dashboard & Assessment
+- Interviewer dashboard (view candidates, scores, pros/cons)
+- Accept/Reject functionality with emails
+- Assessment scheduling system
+- Assessment interface for candidates
+- AI hiring decision engine
+
+### **Day 3:** Polish & Integration
+- Proctoring (basic tab detection)
+- End-to-end testing both flows
+- Email templates and deliverability
+- UI/UX polish
+- Demo preparation
 
 ---
 
@@ -142,17 +232,51 @@
 
 ### 📌 PRASHANTH'S DELIVERABLES CHECKLIST
 - [x] Database connection working ✅
-- [x] All 7 tables created ✅
+- [x] All 8 tables created ✅
 - [x] Helper functions written and tested ✅
 - [x] Can insert and retrieve data successfully ✅
+- [ ] **NEW:** Add `users` table (interviewer/interviewee, email, password_hash, role)
+- [ ] **NEW:** Add `scheduled_assessments` table (candidate_id, interviewer_id, scheduled_time, status)
+- [ ] **NEW:** Update `assessments` table to link to scheduled_assessments
+- [ ] **NEW:** Add email_logs table (to track sent emails)
 - [ ] Pull Request created to merge into `dev`
-- [ ] Backend team confirms integration with helper functions
 
 ---
 
 ## 🔧 AKSHAT - BACKEND ARCHITECT
 
-### **PHASE 1: API Foundation** 🟡
+### **PHASE 0: Authentication System** ⬜ NEW - CRITICAL
+
+#### Task 2.0.1: User Authentication APIs
+**Time:** 2-3 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** Enable login/signup for interviewers and interviewees
+
+**Create these endpoints:**
+
+**Authentication:**
+- [ ] `POST /api/auth/register` - Register new user (email, password, role: "interviewer" or "interviewee")
+- [ ] `POST /api/auth/login` - Login user, return JWT token
+- [ ] `POST /api/auth/logout` - Logout user (optional, mainly frontend)
+- [ ] `GET /api/auth/me` - Get current user info from token
+
+**What you need:**
+- Use `flask-jwt-extended` for JWT tokens
+- Hash passwords with `bcrypt` or `werkzeug.security`
+- Store users in Prashanth's new `users` table
+- Return role in JWT token so frontend knows interviewer vs interviewee
+
+**Hints:**
+- Install: `pip install flask-jwt-extended`
+- Use `@jwt_required()` decorator to protect routes
+- Store JWT in localStorage on frontend
+- Include role in JWT claims: `additional_claims={"role": user_role}`
+
+**Success criteria:** Can register, login, and get protected user info
+
+**Commit message:** `feat: add user authentication with JWT`
+
+---
 
 #### ✅ Task 2.1: Flask API Setup
 **Time:** 30 mins | **Priority:** 🔥 CRITICAL
@@ -250,9 +374,154 @@
 
 **Commit message:** `feat: add resume parsing and matching logic`
 
+**Status:** ✅ COMPLETED - Needs minor updates for new flow
+
 ---
 
-### **PHASE 2: Assessment Engine** 🟡
+### **PHASE 1B: AI Resume Analysis** ⬜ NEW - CRITICAL
+
+#### Task 2.3B: AI Pros & Cons Generator
+**Time:** 2 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** Generate AI-powered pros and cons for each resume
+
+**Update `resume_parser.py` or create `resume_analyzer.py`:**
+
+**New function:**
+- [ ] `generate_pros_cons(resume_text, job_requirements, skills, experience)` → returns {"pros": [...], "cons": [...]}
+
+**What it should do:**
+- [ ] Take parsed resume data as input
+- [ ] Call Claude API or OpenAI API
+- [ ] Prompt: "Analyze this candidate's resume. List 3-5 pros and 3-5 cons for hiring them."
+- [ ] Parse AI response into structured format
+- [ ] Return pros and cons lists
+
+**Integration:**
+- [ ] Update `/api/resume/upload` endpoint to call this function
+- [ ] Store pros/cons in database (add columns to candidates table or create new table)
+- [ ] Return pros/cons in API response along with match score
+
+**Hints:**
+- Use same AI API as decision engine (Claude/OpenAI)
+- Keep prompt concise but include relevant details
+- Parse JSON response or use structured output
+- Cache results to avoid re-calling AI for same resume
+
+**Success criteria:** Upload resume → See match score + AI pros/cons in interviewer dashboard
+
+**Commit message:** `feat: add AI-powered resume pros/cons analysis`
+
+---
+
+### **PHASE 2: Email Notification System** ⬜ NEW - CRITICAL
+
+#### Task 2.8: Email Service Setup
+**Time:** 2 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** Send automated emails to candidates
+
+**Create `backend/email_service.py`:**
+
+**Email templates needed:**
+1. **Rejection Email** - "Thank you for applying, unfortunately..."
+2. **Assessment Invitation** - "Congratulations! You've been shortlisted. Please take assessment at [scheduled_time]"
+3. **Final Decision Email** - Hire or No-Hire result
+
+**Functions to create:**
+- [ ] `send_rejection_email(candidate_email, candidate_name)` 
+- [ ] `send_assessment_invitation(candidate_email, candidate_name, assessment_link, scheduled_time)`
+- [ ] `send_final_decision_email(candidate_email, candidate_name, decision, rationale)`
+
+**What you need:**
+- Use `flask-mail` or `smtplib` for sending emails
+- Use Gmail SMTP or SendGrid API
+- Create HTML email templates (simple, professional)
+- Log all sent emails to database (Prashanth's email_logs table)
+
+**API Endpoints:**
+- [ ] Email sending is triggered by other endpoints (reject, schedule, complete assessment)
+- [ ] No direct email endpoint needed, it's a service function
+
+**Hints:**
+- Gmail SMTP: `smtp.gmail.com:587` with app password
+- SendGrid: Easy API, 100 free emails/day
+- Use Jinja2 templates for HTML emails
+- Test with your own email first!
+
+**Success criteria:** Candidate receives email when interviewer clicks Reject or Schedule
+
+**Commit message:** `feat: add email notification service`
+
+---
+
+### **PHASE 3: Interviewer Dashboard APIs** ⬜ NEW
+
+#### Task 2.9: Interviewer Review Endpoints
+**Time:** 2 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** APIs for interviewer to review and manage candidates
+
+**Create these endpoints:**
+
+**Candidate Management:**
+- [ ] `GET /api/interviewer/candidates` - Get all candidates with resume data, match score, pros/cons (requires JWT, role=interviewer)
+- [ ] `GET /api/interviewer/candidates/:id` - Get detailed candidate info
+- [ ] `POST /api/interviewer/candidates/:id/reject` - Reject candidate, trigger rejection email
+- [ ] `POST /api/interviewer/candidates/:id/schedule` - Accept & schedule assessment
+  - Body: `{"scheduled_time": "2026-01-20T10:00:00"}`
+  - Trigger: Send assessment invitation email
+  - Create scheduled_assessment record
+
+**Assessment Results:**
+- [ ] `GET /api/interviewer/assessments/:candidate_id` - Get assessment results with AI hiring recommendation
+- [ ] `POST /api/interviewer/assessments/:id/final-decision` - Make final hire/no-hire decision
+  - Body: `{"decision": "hire" or "no-hire", "notes": "..."}`
+  - Trigger: Send final decision email
+
+**Hints:**
+- All endpoints need `@jwt_required()` and check role == "interviewer"
+- Use Prashanth's helper functions for database operations
+- Call email_service functions to send emails
+- Return proper status codes: 200 (success), 403 (forbidden), 404 (not found)
+
+**Success criteria:** Interviewer can see candidates, reject/accept, and make final decisions via API
+
+**Commit message:** `feat: add interviewer management endpoints`
+
+---
+
+### **PHASE 4: Assessment Scheduling** ⬜ NEW
+
+#### Task 2.10: Scheduled Assessment Flow
+**Time:** 1-2 hours | **Priority:** 🟡 MEDIUM
+
+**Goal:** Only allow candidates to take assessment at scheduled time
+
+**Update assessment endpoints:**
+
+**Modify `/api/assessment/start`:**
+- [ ] Check if candidate has a scheduled assessment
+- [ ] Check if current time is within allowed window (e.g., scheduled_time ± 30 mins)
+- [ ] If not scheduled or wrong time: Return 403 Forbidden
+- [ ] If valid: Proceed with assessment
+
+**Add endpoint:**
+- [ ] `GET /api/interviewee/my-assessment` - Get scheduled assessment details (requires JWT, role=interviewee)
+  - Returns: scheduled_time, status ("pending", "completed", "scheduled")
+  - If completed: Return assessment results link
+
+**Hints:**
+- Use Python datetime to compare times
+- Store timezone info or use UTC
+- Update scheduled_assessment status to "in_progress" when they start
+- Mark as "completed" when they finish
+
+**Success criteria:** Candidate can only start assessment at scheduled time, gets error otherwise
+
+**Commit message:** `feat: add assessment scheduling and time validation`
+
+---
 
 #### ✅ Task 2.4: Assessment APIs (COMPLETED)
 **Time:** 2 hours | **Priority:** 🔥 HIGH
@@ -377,17 +646,195 @@
 - [x] Resume upload working ✅
 - [x] Resume parsing extracting data correctly ✅
 - [x] Assessment APIs created ✅
-- [ ] Code execution working (placeholder implemented, needs full sandbox)
-- [ ] AI decision engine generating rationale
+- [ ] **NEW:** User authentication with JWT (login/register)
+- [ ] **NEW:** AI pros/cons generator for resumes
+- [ ] **NEW:** Email notification service (rejection, invitation, decision)
+- [ ] **NEW:** Interviewer dashboard APIs (accept/reject/schedule)
+- [ ] **NEW:** Assessment scheduling and time validation
+- [ ] AI decision engine for final hiring recommendation
+- [ ] Code execution sandbox (placeholder OK)
 - [ ] Proctoring endpoint logging events
-- [x] Assessment endpoints tested and verified ✅
 - [ ] Pull Request to merge into `dev`
 
 ---
 
 ## 🎨 SHAIVI - FRONTEND ARCHITECT
 
-### **PHASE 1: UI Foundation** 🟡
+### **PHASE 0: Authentication UI** ⬜ NEW - CRITICAL
+
+#### Task 3.0.1: Login/Landing Page
+**Time:** 2-3 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** Create landing page where users select their role
+
+**Create `pages/LandingPage.jsx`:**
+
+**What it needs:**
+- [ ] Hero section: "Welcome to CYGNUSA Elite-Hire"
+- [ ] Two large buttons/cards:
+  - **"I'm an Interviewee"** → Navigate to interviewee flow
+  - **"I'm an Interviewer"** → Navigate to interviewer login
+- [ ] Beautiful design (use Tailwind)
+- [ ] Company branding/logo
+
+**Create `pages/LoginPage.jsx` (for interviewers):**
+- [ ] Email and password fields
+- [ ] Login button
+- [ ] Link to register (if needed)
+- [ ] Error message display
+- [ ] Call `POST /api/auth/login`
+- [ ] Store JWT token in localStorage
+- [ ] Redirect to interviewer dashboard on success
+
+**Update routing in `App.jsx`:**
+- [ ] `/` - LandingPage (new home)
+- [ ] `/interviewer/login` - LoginPage
+- [ ] `/interviewer/dashboard` - Interviewer dashboard (protected route)
+- [ ] `/interviewee/apply` - Interviewee application form
+- [ ] `/interviewee/assessment/:id` - Assessment (protected, time-validated)
+
+**Hints:**
+- Use React Context or state management for auth
+- Create ProtectedRoute component to check JWT
+- Decode JWT to get user role
+- Redirect based on role
+
+**Success criteria:** Can select role, login as interviewer, proceed as interviewee
+
+**Commit message:** `feat: add authentication UI and role selection`
+
+---
+
+### **PHASE 1: Interviewee Flow** 🟡
+
+#### Task 3.1.1: Interviewee Application Page
+**Time:** 1-2 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** Simple form for candidates to submit resume
+
+**Refactor `pages/UploadPage.jsx` → `pages/IntervieweeApplicationPage.jsx`:**
+
+**Keep existing:**
+- [x] Name, Email, Phone fields
+- [x] Resume upload (PDF/DOCX)
+- [x] File validation
+- [x] Submit button
+
+**REMOVE from success screen:**
+- [x] ~~Match score display~~ (interviewee shouldn't see this)
+- [x] ~~Skills display~~
+- [x] ~~Start Assessment button~~
+
+**NEW success message:**
+- [ ] "Thank you for applying!"
+- [ ] "Your resume has been submitted successfully."
+- [ ] "You will receive an email if you're selected for the next round."
+- [ ] Simple, clean confirmation page
+
+**API Integration:**
+- [ ] Same endpoint: `POST /api/resume/upload`
+- [ ] Backend processes resume, calculates score, generates pros/cons
+- [ ] Frontend just shows confirmation
+
+**Success criteria:** Interviewee submits resume → Sees confirmation → That's it!
+
+**Commit message:** `feat: refactor upload page for interviewee flow`
+
+---
+
+### **PHASE 2: Interviewer Dashboard** ⬜ NEW - CRITICAL
+
+#### Task 3.2.1: Interviewer Dashboard - Candidate List
+**Time:** 3-4 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** Show all candidates with AI insights to interviewer
+
+**Create `pages/InterviewerDashboardPage.jsx`:**
+
+**What it should display:**
+
+**Candidate List (Table/Cards):**
+- [ ] Each candidate card/row shows:
+  - Name, Email, Phone
+  - **Match Score** (large, colored badge: 80%+ green, 50-79% yellow, <50% red)
+  - Resume uploaded date
+  - Status: "Pending Review", "Rejected", "Assessment Scheduled", "Assessment Complete", "Hired", "Not Hired"
+  
+**AI Insights Panel (expandable for each candidate):**
+- [ ] **Pros** (bulleted list, green icons)
+  - e.g., "5 years Python experience", "Strong ML background"
+- [ ] **Cons** (bulleted list, red icons)
+  - e.g., "No cloud experience", "Limited leadership roles"
+
+**Action Buttons:**
+- [ ] **Reject** (red button) → Trigger confirmation modal → Call API → Send rejection email
+- [ ] **Accept & Schedule** (green button) → Open scheduling modal
+  
+**Scheduling Modal:**
+- [ ] Date/time picker
+- [ ] Submit → Call API → Send invitation email
+- [ ] Show success message
+
+**Filters/Sorting:**
+- [ ] Filter by status (All, Pending, Scheduled, Completed)
+- [ ] Sort by match score (high to low, low to high)
+- [ ] Search by name/email
+
+**API Integration:**
+- [ ] Call `GET /api/interviewer/candidates` on page load
+- [ ] Call `POST /api/interviewer/candidates/:id/reject` on reject
+- [ ] Call `POST /api/interviewer/candidates/:id/schedule` on schedule
+
+**Hints:**
+- Use protected route (check JWT role == "interviewer")
+- Use React state for modal visibility
+- Use a date picker library (react-datepicker)
+- Show loading spinner while fetching
+- Update list after actions (refetch or update state)
+
+**Success criteria:** Interviewer sees candidates, match scores, pros/cons, can accept/reject
+
+**Commit message:** `feat: add interviewer dashboard with candidate review`
+
+---
+
+#### Task 3.2.2: Assessment Results View
+**Time:** 2 hours | **Priority:** 🔥 HIGH
+
+**Goal:** Show completed assessment results to interviewer
+
+**Add to InterviewerDashboardPage or create separate page:**
+
+**When candidate completes assessment, show:**
+- [ ] All assessment scores (MCQ, Coding, Psychometric, Overall)
+- [ ] **AI Hiring Recommendation:**
+  - Decision: "Recommend for Hire" / "Consider" / "Not Recommended"
+  - Rationale (AI-generated paragraph)
+- [ ] Detailed breakdown:
+  - MCQ: X/10 correct
+  - Coding: Test cases passed
+  - Psychometric: Trait scores
+- [ ] View submitted code (optional)
+- [ ] Proctoring events log (if any violations)
+
+**Final Decision:**
+- [ ] Two buttons: **Hire** (green) | **No-Hire** (red)
+- [ ] Optional text area for notes
+- [ ] Call `POST /api/interviewer/assessments/:id/final-decision`
+- [ ] Send final decision email to candidate
+- [ ] Show confirmation
+
+**Hints:**
+- Call `GET /api/interviewer/assessments/:candidate_id`
+- Use charts for score visualization (optional but nice)
+- Make AI rationale prominent
+- Require confirmation before final decision
+
+**Success criteria:** Interviewer sees assessment results, AI recommendation, makes final hire/no-hire decision
+
+**Commit message:** `feat: add assessment results and final decision UI`
+
+---
 
 #### ✅ Task 3.1: React Project Setup (COMPLETED)
 **Time:** 30 mins | **Priority:** 🔥 CRITICAL
@@ -627,22 +1074,60 @@
 
 **Success criteria:** UI looks polished and professional
 
-**Commit message:** `ui: polish design and user experience`
+**Commit message:** `feat: add assessment results and final decision UI`
+
+---
+
+### **PHASE 3: Interviewee Assessment** 🟡
+
+#### Task 3.3.1: Assessment Page (Keep Existing, Add Time Validation)
+**Time:** 3-4 hours | **Priority:** 🔥 CRITICAL
+
+**Goal:** Candidate takes assessment at scheduled time
+
+**Update `pages/AssessmentPage.jsx`:**
+
+**Time Validation:**
+- [ ] On page load, call `GET /api/interviewee/my-assessment`
+- [ ] Check if assessment is scheduled
+- [ ] Check if current time is within allowed window
+- [ ] If not allowed: Show message "Assessment not available yet. Scheduled for: [date/time]"
+- [ ] If allowed: Show assessment interface
+
+**Assessment Interface (implement from previous plan):**
+- [ ] MCQ Section (10 questions, radio buttons, timer)
+- [ ] Coding Section (code editor, problem description, submit)
+- [ ] Psychometric Section (scenarios, sliders, text responses)
+- [ ] Progress indicator
+- [ ] Submit final assessment
+
+**Keep existing backend integration:**
+- [x] Call assessment APIs (start, mcq/submit, code/submit, psychometric/submit, complete)
+
+**After completion:**
+- [ ] Show "Thank you for completing the assessment!"
+- [ ] "You will receive an email with the results."
+- [ ] Disable re-submission
+
+**Success criteria:** Candidate can only take assessment at scheduled time, completes all sections
+
+**Commit message:** `feat: add time-validated assessment interface`
 
 ---
 
 ### 📌 SHAIVI'S DELIVERABLES CHECKLIST
 - [x] React app running (Vite on port 5173) ✅
-- [x] Tailwind CSS setup (v4.1.18 with PostCSS) ✅
-- [x] Resume upload page working (fully functional with success screen) ✅
-- [ ] Complete assessment interface (MCQ, Code, Text, Psychometric) - placeholder created
-- [ ] Proctoring detecting tab switches
-- [ ] Recruiter dashboard showing candidates - placeholder created
-- [x] Upload page styled and responsive ✅
-- [x] Resume upload API integration working ✅
-- [ ] Assessment and Dashboard API calls
-- [ ] Pull Request to merge into `dev`
-- [ ] All API calls working (test with Akshat's backend)
+- [x] Tailwind CSS setup ✅
+- [ ] **NEW:** Landing page with role selection (Interviewer/Interviewee)
+- [ ] **NEW:** Login page for interviewers
+- [ ] **NEW:** Protected routes based on JWT role
+- [x] Interviewee application page (refactored from UploadPage) - partially done
+- [ ] **NEW:** Interviewer dashboard (candidate list, match scores, pros/cons)
+- [ ] **NEW:** Accept/Reject/Schedule functionality
+- [ ] **NEW:** Assessment results view with AI recommendation
+- [ ] **NEW:** Final hire/no-hire decision UI
+- [ ] Assessment interface with time validation (needs full implementation)
+- [ ] UI/UX polish (consistent design across all pages)
 - [ ] Pull Request to merge into `dev`
 
 ---
@@ -741,20 +1226,45 @@
   - Body: `{"assessment_id": 1}`
   - Response: All scores (MCQ, coding, technical, psychometric, overall), decision, rationale
 
-### **Backend Files Created**
-- `backend/app.py` - Main Flask application (200+ lines, 7 endpoints)
-- `backend/resume_parser.py` - Resume parsing engine with PDF/DOCX support
-- `backend/questions_bank.py` - MCQ questions, coding problems, psychometric scenarios
-- `backend/db_config.py` - Database connection management
-- `backend/db_helpers.py` - 13 database helper functions
-- `backend/init_db.py` - Database initialization script
-- `backend/grading_engine.py` - Code execution placeholder
-- `backend/decision_engine.py` - AI decision engine placeholder
+### **Backend Files Created/To Create**
+**Existing (Keep & Modify):**
+- `backend/app.py` - Main Flask application (needs auth, interviewer APIs, email integration)
+- `backend/resume_parser.py` - Resume parsing (needs AI pros/cons function)
+- `backend/questions_bank.py` - Assessment questions ✅
+- `backend/db_config.py` - Database connection ✅
+- `backend/db_helpers.py` - Database functions (needs new functions for users, scheduling)
+- `backend/init_db.py` - Database initialization (needs new tables)
 
-### **Frontend Files Created**
-- `frontend/src/App.jsx` - Main React app with router (18 lines)
-- `frontend/src/pages/UploadPage.jsx` - Resume upload page (217 lines) ✅
-- `frontend/src/pages/AssessmentPage.jsx` - Assessment placeholder (15 lines)
+**New Files to Create:**
+- `backend/auth.py` - JWT authentication functions
+- `backend/email_service.py` - Email sending (rejection, invitation, decision)
+- `backend/resume_analyzer.py` - AI pros/cons generator
+
+### **Frontend Files - Need Major Refactoring**
+**New Files to Create:**
+- `frontend/src/pages/LandingPage.jsx` - Role selection page
+- `frontend/src/pages/LoginPage.jsx` - Interviewer login
+- `frontend/src/pages/IntervieweeApplicationPage.jsx` - Simplified upload (refactor existing)
+- `frontend/src/pages/InterviewerDashboardPage.jsx` - Main interviewer dashboard
+- `frontend/src/pages/AssessmentResultsPage.jsx` - View candidate assessment results
+- `frontend/src/components/ProtectedRoute.jsx` - JWT-based route protection
+- `frontend/src/context/AuthContext.jsx` - Auth state management
+
+**Keep & Modify:**
+- `frontend/src/pages/AssessmentPage.jsx` - Add time validation
+- `frontend/src/services/api.js` - Add new API calls
+
+### **Database Tables - Need Updates**
+**Existing Tables:** candidates, assessments, mcq_responses, coding_submissions, psychometric_responses, job_descriptions, proctoring_events
+
+**New Tables Needed (Prashanth):**
+- `users` - (id, email, password_hash, role, name, created_at)
+- `scheduled_assessments` - (id, candidate_id, interviewer_id, scheduled_time, status, created_at)
+- `email_logs` - (id, recipient_email, email_type, sent_at, status)
+
+**Table Modifications:**
+- `candidates` - Add: pros (TEXT), cons (TEXT), status (pending/rejected/scheduled/completed/hired)
+- `assessments` - Add: scheduled_assessment_id (FK), hiring_recommendation (TEXT)
 - `frontend/src/pages/DashboardPage.jsx` - Dashboard placeholder (13 lines)
 - `frontend/src/services/api.js` - Axios API client (26 lines) ✅
 - `frontend/tailwind.config.js` - Tailwind CSS configuration ✅
@@ -793,28 +1303,77 @@ Remember what judges care about:
 
 ---
 
-## 🎯 MINIMUM VIABLE PRODUCT (MVP)
+## 🎯 MINIMUM VIABLE PRODUCT (MVP) - UPDATED
 
-**If time is tight, MUST HAVE these:**
-- ✅ Resume upload + parsing + match score (Backend ✅ + Frontend ✅)
-- 🟡 Basic MCQ assessment (Backend API ✅, Frontend UI ⬜)
-- 🟡 Simple coding assessment (Backend API ✅, Frontend UI ⬜)
-- 🟡 AI decision with rationale (Backend placeholder, needs implementation)
-- ⬜ Dashboard showing candidates (Frontend placeholder created)
-- ⬜ Some proctoring (at least tab detection)
+**MUST HAVE for Demo (New Two-Sided Flow):**
+- [ ] **Landing page** - Role selection (Interviewer/Interviewee)
+- [ ] **Authentication** - Login for interviewers, simple form for interviewees
+- [x] **Resume upload** - Interviewee submits resume ✅ (needs minor UI updates)
+- [ ] **AI Analysis** - Match score + Pros/Cons generation
+- [ ] **Interviewer Dashboard** - View candidates, scores, AI insights
+- [ ] **Accept/Reject** - Interviewer can reject (sends email) or schedule assessment
+- [ ] **Email System** - Rejection & invitation emails working
+- [ ] **Scheduled Assessment** - Candidate takes test at scheduled time only
+- [x] **Assessment Flow** - MCQ + Coding + Psychometric ✅ (backend done, frontend needs completion)
+- [ ] **AI Hiring Decision** - Final recommendation for interviewer
+- [ ] **Final Decision** - Interviewer makes hire/no-hire choice, sends email
 
 **NICE TO HAVE (if time permits):**
-- Full proctoring with webcam
-- ✅ Psychometric assessment (Backend API ✅, Frontend UI ⬜)
+- Proctoring (tab detection)
 - Advanced code execution sandbox
-- 🟡 Beautiful UI animations (Upload page styled ✅)
-- Detailed competency charts
+- Beautiful UI animations
+- Detailed charts/visualizations
+- Email templates with HTML styling
+- Assessment rescheduling
 
 ---
 
-## 💬 DAILY STANDUPS
+## 🏆 PRIORITY TASK LIST FOR TEAM
 
-**Every morning (5 mins):**
+### **DAY 1 CRITICAL TASKS (Do These First!):**
+
+**Prashanth (Database - 2-3 hours):**
+1. Add `users` table with authentication fields
+2. Add `scheduled_assessments` table
+3. Add `email_logs` table
+4. Modify `candidates` table: add pros, cons, status columns
+5. Create helper functions for new tables
+6. Test all database operations
+
+**Akshat (Backend - 4-5 hours):**
+1. ✅ ~~Resume upload~~ (DONE, needs AI pros/cons integration)
+2. Implement JWT authentication (`POST /api/auth/login`, `/register`)
+3. Create AI pros/cons generator (call Claude/OpenAI API)
+4. Build email service (rejection, invitation, decision emails)
+5. Create interviewer dashboard APIs (GET candidates, POST reject, POST schedule)
+6. Add time validation to assessment start endpoint
+7. Test all new endpoints with Postman
+
+**Shaivi (Frontend - 4-5 hours):**
+1. Create Landing Page with role selection
+2. Create Login Page for interviewers
+3. Set up authentication (JWT storage, protected routes)
+4. Refactor Upload Page for interviewee (remove score display)
+5. Start Interviewer Dashboard (candidate list, match scores)
+6. Add Accept/Reject/Schedule buttons with modals
+7. Test login flow and dashboard
+
+### **DAY 2 TASKS:**
+- Complete Interviewer Dashboard (pros/cons display, assessment results)
+- Implement assessment scheduling UI
+- Complete assessment interface for candidates
+- AI hiring recommendation display
+- Final decision flow (hire/no-hire)
+- Email testing and verification
+
+### **DAY 3 TASKS:**
+- End-to-end testing (both user flows)
+- Proctoring (if time permits)
+- UI/UX polish
+- Demo preparation
+- Bug fixes
+
+---
 1. What did you finish yesterday?
 2. What are you working on today?
 3. Any blockers?
@@ -870,6 +1429,41 @@ Now go build something amazing! 💪🚀
 
 ---
 
-**Current Status:** Setup complete, ready to code!
+## 📝 ARCHITECTURE CHANGE SUMMARY
 
-**Next Step:** Each person tackles their Task 1.1 and checks it off!
+### **What Changed:**
+- ❌ **OLD:** Single flow where candidates directly see their scores and take assessments
+- ✅ **NEW:** Two-sided platform with distinct Interviewer and Interviewee experiences
+
+### **Key New Features:**
+1. **Role-Based Authentication** - Interviewers login, Interviewees just apply
+2. **AI Resume Analysis** - Auto-generates match score + pros/cons for interviewer
+3. **Interviewer Control** - Accept/Reject decisions before assessment
+4. **Email Notifications** - Automated emails at every stage
+5. **Scheduled Assessments** - Candidates can only take test at assigned time
+6. **Two-Stage AI** - Initial resume review + final hiring recommendation
+
+### **What's Reusable:**
+- ✅ Database infrastructure (with additions)
+- ✅ Resume parsing engine (needs AI pros/cons integration)
+- ✅ Assessment backend APIs (needs scheduling validation)
+- ✅ Basic frontend structure (needs major refactoring)
+
+### **What's New:**
+- Authentication system (JWT)
+- Email service
+- Interviewer dashboard
+- Scheduling system
+- AI pros/cons generator
+- Role-based routing
+
+---
+
+**Current Status:** Architecture redesigned, tasks reassigned, ready to implement!
+
+**Next Steps:** 
+1. Prashanth: Update database schema with new tables
+2. Akshat: Implement authentication + email + AI analysis
+3. Shaivi: Build landing page + login + interviewer dashboard
+
+**Let's build this! 🚀**
