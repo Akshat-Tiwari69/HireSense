@@ -7,19 +7,21 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢⬜⬜⬜⬜⬜⬜⬜⬜ 15%
+### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 25%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
-| 🏗️ Infrastructure | 🟡 In Progress | Prashanth | 33% |
-| 📄 Resume System | 🟡 In Progress | Akshat | 45% |
-| 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
-| 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
-| 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
-| 🎨 UI/UX | ⬜ Not Started | Shaivi | 0% |
+| 🏗️ Infrastructure | 🟢 COMPLETE | Database | 100% |
+| 📄 Resume System | 🟡 In Progress | Backend | 45% |
+| 📝 Assessment Engine | ⬜ Not Started | Backend + Frontend | 0% |
+| 👁️ Proctoring | ⬜ Not Started | Frontend + Backend | 0% |
+| 🤖 AI Decision Engine | ⬜ Not Started | Backend | 0% |
+| 🎨 UI/UX | ⬜ Not Started | Frontend | 0% |
 | 🧪 Integration | ⬜ Not Started | All | 0% |
 
 **Legend:** 🟢 Done | 🟡 In Progress | 🔴 Blocked | ⬜ Not Started
+
+**Latest Update:** ✅ Database Phase 1 (Tasks 1.1, 1.2, 1.3) completed and merged to dev branch
 
 ---
 
