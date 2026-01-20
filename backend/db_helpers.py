@@ -950,6 +950,94 @@ def check_assessment_time_valid(candidate_id, current_time):
         raise DatabaseError(f"Error checking assessment time validity: {str(e)}")
 
 
+# ============================================================================
+#                          EMAIL LOGGING FUNCTIONS
+# ============================================================================
+
+def log_email(recipient_email, recipient_name, email_type, subject, status='sent', error_message=None):
+    """
+    Log an email sent to a candidate.
+    
+    Args:
+        recipient_email (str): Email address of recipient
+        recipient_name (str): Name of recipient
+        email_type (str): Type of email - 'rejection', 'assessment_invitation', 'final_decision', etc.
+        subject (str): Email subject line
+        status (str, optional): Email status - 'sent', 'failed', 'bounced' (defaults to 'sent')
+        error_message (str, optional): Error message if status is 'failed'
+    
+    Returns:
+        int: Email log entry ID
+    
+    Raises:
+        DatabaseError: If logging fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO email_logs (recipient_email, recipient_name, email_type, subject, status, error_message)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (recipient_email, recipient_name, email_type, subject, status, error_message)
+        )
+        
+        conn.commit()
+        log_id = cursor.lastrowid
+        conn.close()
+        
+        return log_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error logging email: {str(e)}")
+
+
+def get_candidate_emails(candidate_email):
+    """
+    Retrieve all emails sent to a candidate.
+    
+    Args:
+        candidate_email (str): Email address of the candidate
+    
+    Returns:
+        list: List of email logs as dictionaries with keys (id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at)
+              Empty list if no emails found
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
+               FROM email_logs WHERE recipient_email = ? ORDER BY sent_at DESC""",
+            (candidate_email,)
+        )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        emails = []
+        for row in rows:
+            emails.append({
+                'id': row[0],
+                'recipient_email': row[1],
+                'recipient_name': row[2],
+                'email_type': row[3],
+                'subject': row[4],
+                'status': row[5],
+                'error_message': row[6],
+                'sent_at': row[7]
+            })
+        
+        return emails
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving candidate emails: {str(e)}")
+
+
 if __name__ == "__main__":
     print("Database Helper Functions Module")
     print("Import this module to use database functions")

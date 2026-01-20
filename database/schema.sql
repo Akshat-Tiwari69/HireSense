@@ -139,6 +139,23 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_candidate ON scheduled_assessments(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_time ON scheduled_assessments(scheduled_time);
 
+-- Email logs table: Track all emails sent to candidates
+CREATE TABLE IF NOT EXISTS email_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_email TEXT NOT NULL,
+    recipient_name TEXT NOT NULL,
+    email_type TEXT NOT NULL,  -- "rejection", "assessment_invitation", "final_decision", etc.
+    subject TEXT NOT NULL,
+    status TEXT DEFAULT 'sent',  -- "sent", "failed", "bounced"
+    error_message TEXT,  -- Error details if status is "failed"
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create indexes for email_logs table
+CREATE INDEX IF NOT EXISTS idx_email_logs_recipient ON email_logs(recipient_email);
+CREATE INDEX IF NOT EXISTS idx_email_logs_type ON email_logs(email_type);
+CREATE INDEX IF NOT EXISTS idx_email_logs_status ON email_logs(status);
+
 -- Create indices for better query performance
 CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(shortlist_status);

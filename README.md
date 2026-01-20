@@ -35,7 +35,7 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟢🟢⬜⬜⬜⬜⬜⬜ 35%
+### **Overall Completion:** 🟢🟢🟢🟢🟢⬜⬜⬜⬜⬜ 40%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
@@ -178,14 +178,12 @@
 
 ### 🟡 OPTIONAL TASKS
 
-**Task P7: Email Logging Table** 🟡  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Create `email_logs` table: id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
-- [ ] Implement helper functions:
-  - `log_email(...)` - log email attempt
-  - `get_candidate_emails(candidate_email)` - retrieve history
+**Task P7: Email Logging Table** ✅  
+- Created `email_logs` table with fields: id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
+- Added indexes on recipient_email, email_type, and status for fast lookups
+- Implemented 2 helper functions:
+  - `log_email(recipient_email, recipient_name, email_type, subject, status, error_message)` - log email attempts
+  - `get_candidate_emails(candidate_email)` - retrieve email history for a candidate
 
 ---
 
