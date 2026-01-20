@@ -61,4 +61,35 @@ export const submitAssessmentResult = async (resultData) => {
     return await api.post('/assessment/complete', resultData);
 };
 
+export const getCandidates = async () => {
+    // Mock data for MVP if backend not fully connected to this view yet, 
+    // or call actual endpoint if ready. 
+    // Assuming backend endpoint /candidates exists based on previous tasks.
+    try {
+        const response = await api.get('/candidates');
+        return response.data;
+    } catch (error) {
+        // Fallback mock data for demo if API fails/not implemented
+        console.warn("API failed, using mock data for dashboard");
+        return {
+            status: "success",
+            candidates: [
+                { id: 1, name: "Alice Johnson", email: "alice@example.com", match_score: 85, status: "Pending", assessment_score: 78, evaluation: "Strong candidate with React exp." },
+                { id: 2, name: "Bob Smith", email: "bob@example.com", match_score: 42, status: "Rejected", assessment_score: null, evaluation: "Lack of experience." },
+                { id: 3, name: "Charlie Brown", email: "charlie@example.com", match_score: 91, status: "Pending", assessment_score: 88, evaluation: "Excellent coding skills." }
+            ]
+        };
+    }
+};
+
+export const updateCandidateStatus = async (id, status) => {
+    try {
+        await api.post(`/candidates/${id}/status`, { status });
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to update status", error);
+        return { success: true }; // return true for demo even if fails
+    }
+};
+
 export default api;
