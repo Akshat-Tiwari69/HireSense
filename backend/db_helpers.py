@@ -15,6 +15,133 @@ class DatabaseError(Exception):
 
 
 # ============================================================================
+#                            USER FUNCTIONS (AUTHENTICATION)
+# ============================================================================
+
+def create_user(email, password_hash, role, name):
+    """
+    Create a new user in the database.
+    
+    Args:
+        email (str): User's email address (unique)
+        password_hash (str): Hashed password
+        role (str): User role - "interviewer" or "admin"
+        name (str): User's full name
+    
+    Returns:
+        int: User ID of the newly created user
+    
+    Raises:
+        DatabaseError: If creation fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO users (email, password_hash, role, name)
+               VALUES (?, ?, ?, ?)""",
+            (email, password_hash, role, name)
+        )
+        
+        conn.commit()
+        user_id = cursor.lastrowid
+        conn.close()
+        
+        return user_id
+    
+    except sqlite3.IntegrityError as e:
+        raise DatabaseError(f"Email already exists: {str(e)}")
+    except Exception as e:
+        raise DatabaseError(f"Error creating user: {str(e)}")
+
+
+def get_user_by_email(email):
+    """
+    Retrieve user by email address.
+    
+    Args:
+        email (str): User's email address
+    
+    Returns:
+        dict: User data with keys (id, email, password_hash, role, name, created_at, updated_at)
+              or None if user not found
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, email, password_hash, role, name, created_at, updated_at
+               FROM users WHERE email = ?""",
+            (email,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'email': row[1],
+                'password_hash': row[2],
+                'role': row[3],
+                'name': row[4],
+                'created_at': row[5],
+                'updated_at': row[6]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving user by email: {str(e)}")
+
+
+def get_user_by_id(user_id):
+    """
+    Retrieve user by user ID.
+    
+    Args:
+        user_id (int): User's ID
+    
+    Returns:
+        dict: User data with keys (id, email, role, name, created_at, updated_at)
+              or None if user not found (password_hash excluded for security)
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, email, role, name, created_at, updated_at
+               FROM users WHERE id = ?""",
+            (user_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'email': row[1],
+                'role': row[2],
+                'name': row[3],
+                'created_at': row[4],
+                'updated_at': row[5]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving user by ID: {str(e)}")
+
+
+# ============================================================================
 #                            CANDIDATE FUNCTIONS
 # ============================================================================
 

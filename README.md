@@ -35,11 +35,12 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢⬜⬜⬜⬜⬜⬜⬜⬜ 20%
+### **Overall Completion:** 🟢🟢🟡⬜⬜⬜⬜⬜⬜⬜ 25%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Database (Base) | 🟢 COMPLETE | Prashanth | 100% |
+| 🏗️ Database (Auth Tables) | 🟢 COMPLETE | Prashanth | 100% |
 | 🏗️ Database (New Tables) | ⬜ Not Started | Prashanth | 0% |
 | 🔐 Authentication | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 📄 Resume Parsing | 🟢 COMPLETE | Akshat | 100% |
@@ -142,22 +143,17 @@
 - Implemented 13 helper functions in `backend/db_helpers.py`
 - Candidate management, assessment operations, response tracking, score calculations
 
----
-
-### 🔥 URGENT TASKS (Do These Next)
-
-**Task P4: Authentication Tables** 🔥  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Create `users` table: id, email (unique), password_hash, role, name, timestamps
-- [ ] Add indexes on email and role
-- [ ] Implement helper functions:
+**Task P4: Authentication Tables** ✅  
+- Created `users` table with fields: id, email (unique), password_hash, role, name, timestamps
+- Added indexes on email and role for fast lookups
+- Implemented 3 helper functions:
   - `create_user(email, password_hash, role, name)`
   - `get_user_by_email(email)`
   - `get_user_by_id(user_id)`
 
 ---
+
+### 🔥 URGENT TASKS (Do These Next)
 
 **Task P5: Assessment Scheduling Table** 🔥  
 **Status:** ⬜ TODO
