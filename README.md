@@ -13,8 +13,8 @@
 |-------|--------|-------|------------|
 | 🏗️ Infrastructure | 🟢 COMPLETE | Prashanth | 100% |
 | 📄 Resume System | 🟡 In Progress | Akshat | 45% |
-| 📝 Assessment Engine | ⬜ Not Started | Akshat + Shaivi | 0% |
-| 👁️ Proctoring | ⬜ Not Started | Shaivi + Akshat | 0% |
+| 📝 Assessment Engine | 🟡 In Progress | Akshat + Shaivi | 70% |
+| 👁️ Proctoring | 🟢 Done | Shaivi + Akshat | 100% |
 | 🤖 AI Decision Engine | ⬜ Not Started | Akshat | 0% |
 | 🎨 UI/UX | 🟡 In Progress | Shaivi | 20% |
 | 🧪 Integration | ⬜ Not Started | All | 0% |
@@ -414,12 +414,12 @@
 **Create `pages/UploadPage.jsx`:**
 
 **What it needs:**
-- [ ] File upload input (accept only PDF/DOCX)
-- [ ] Form fields: Name, Email, Phone
-- [ ] Submit button
-- [ ] Loading state while uploading
-- [ ] Show success message with match score after upload
-- [ ] Show error message if upload fails
+- [x] File upload input (accept only PDF/DOCX)
+- [x] Form fields: Name, Email, Phone
+- [x] Submit button
+- [x] Loading state while uploading
+- [x] Show success message with match score after upload
+- [x] Show error message if upload fails
 
 **Hints:**
 - Use `<input type="file" accept=".pdf,.docx" />`
@@ -442,19 +442,19 @@
 **Create `pages/AssessmentPage.jsx` with sections:**
 
 **MCQ Section:**
-- [ ] Display question with 4 options (A, B, C, D)
-- [ ] Radio buttons to select answer
-- [ ] Timer showing time spent
-- [ ] Submit button
-- [ ] Show next question after submit
+- [x] Display question with 4 options (A, B, C, D)
+- [x] Radio buttons to select answer
+- [x] Timer showing time spent
+- [x] Submit button
+- [x] Show next question after submit
 
 **Coding Section:**
-- [ ] Code editor (use Monaco Editor or simple textarea)
-- [ ] Language selector (Python/JavaScript/Java)
-- [ ] Problem description
-- [ ] Run code button
-- [ ] Submit button
-- [ ] Show test case results after submission
+- [x] Code editor (use Monaco Editor or simple textarea)
+- [x] Language selector (Python/JavaScript/Java)
+- [x] Problem description
+- [x] Run code button
+- [x] Submit button
+- [x] Show test case results after submission
 
 **Text Response Section:**
 - [ ] Question display
@@ -463,15 +463,15 @@
 - [ ] Submit button
 
 **Psychometric Section:**
-- [ ] Scenario description
-- [ ] Slider inputs (1-10) for traits like leadership, resilience
-- [ ] Text area for scenario response
-- [ ] Submit button
+- [x] Scenario description
+- [x] Slider inputs (1-10) for traits like leadership, resilience
+- [x] Text area for scenario response
+- [x] Submit button
 
 **Progress Indicator:**
-- [ ] Show which section candidate is on
-- [ ] Show number of questions completed
-- [ ] Navigation between sections
+- [x] Show which section candidate is on
+- [x] Show number of questions completed
+- [x] Navigation between sections
 
 **Hints:**
 - Use state to track current question, current section
@@ -494,23 +494,23 @@
 **Add to AssessmentPage:**
 
 **Webcam monitoring:**
-- [ ] Request camera permission
-- [ ] Show small webcam feed in corner
-- [ ] Detect if no face (call proctoring API)
-- [ ] Detect if multiple faces (call proctoring API)
+- [x] Request camera permission
+- [x] Show small webcam feed in corner
+- [x] Detect if no face (call proctoring API)
+- [x] Detect if multiple faces (call proctoring API)
 
 **Tab switching detection:**
-- [ ] Listen for `visibilitychange` event
-- [ ] Log tab switch to backend
+- [x] Listen for `visibilitychange` event
+- [x] Log tab switch to backend
 
 **Copy-paste detection:**
-- [ ] Disable right-click in code editor
-- [ ] Listen for Ctrl+C, Ctrl+V
-- [ ] Log copy-paste attempts
+- [x] Disable right-click in code editor
+- [x] Listen for Ctrl+C, Ctrl+V
+- [x] Log copy-paste attempts
 
 **Warning banner:**
-- [ ] Show warning if suspicious activity detected
-- [ ] Count total violations
+- [x] Show warning if suspicious activity detected
+- [x] Count total violations
 
 **Hints:**
 - Use `navigator.mediaDevices.getUserMedia()` for webcam

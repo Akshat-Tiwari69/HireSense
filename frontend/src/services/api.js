@@ -21,4 +21,44 @@ export const uploadResume = async (formData) => {
     }
 };
 
+export const startAssessment = async (candidateId) => {
+    // In a real app, this would fetch questions from backend
+    // For MVP, we might return mock data if backend isn't ready, but let's assume backend for now
+    // mocking for dev speed as per request implies readiness
+    return {
+        data: {
+            id: "assess_123",
+            questions: {
+                mcq: [
+                    { id: 1, text: "Data structures: What is the time complexity of binary search?", options: ["O(n)", "O(log n)", "O(n^2)", "O(1)"] },
+                    { id: 2, text: "React: Which hook is used for side effects?", options: ["useState", "useEffect", "useContext", "useReducer"] }
+                ],
+                coding: {
+                    id: 101,
+                    title: "Reverse a String",
+                    description: "Write a function to reverse a string in Python."
+                },
+                psychometric: [
+                    { id: "p1", text: "I adapt easily to new situations." },
+                    { id: "p2", text: "I enjoy leading teams." }
+                ]
+            }
+        }
+    };
+};
+
+export const logProctoringEvent = async (eventData) => {
+    // Fire and forget, or wait for response
+    try {
+        await api.post('/proctoring/log', eventData);
+    } catch (e) {
+        console.error("Failed to log proctoring event", e);
+    }
+};
+
+export const submitAssessmentResult = async (resultData) => {
+    // Submit final scores/completion
+    return await api.post('/assessment/complete', resultData);
+};
+
 export default api;
