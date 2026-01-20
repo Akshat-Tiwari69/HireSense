@@ -4,6 +4,7 @@ import UploadPage from './pages/UploadPage';
 import AssessmentPage from './pages/AssessmentPage';
 import DashboardPage from './pages/DashboardPage';
 import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
 
 function App() {
   return (
@@ -14,7 +15,7 @@ function App() {
         <Route path="/assessment/:candidateId" element={<AssessmentPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         {/* Placeholder for Login (Task S4) */}
-        <Route path="/login" element={<div className="text-white text-center mt-20">Login Page Coming Soon</div>} />
+        <Route path="/login" element={<LoginPage />} />
       </Routes>
     </Router>
   );
