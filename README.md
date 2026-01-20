@@ -35,7 +35,7 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 30%
+### **Overall Completion:** 🟢🟢🟢🟢⬜⬜⬜⬜⬜⬜ 35%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
@@ -162,22 +162,17 @@
   - `update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id)`
   - `check_assessment_time_valid(candidate_id, current_time)` - validates ±30 min window
 
+**Task P6: Update Existing Tables** ✅  
+- Added to `candidates` table: pros, cons, status columns
+- Added to `assessments` table: scheduled_assessment_id, hiring_recommendation columns
+- Updated helper functions:
+  - Modified `insert_candidate()` to accept pros, cons, status parameters
+  - Added `update_candidate_status(candidate_id, status, pros, cons)` function
+  - Modified `update_assessment_scores()` to accept scheduled_assessment_id and hiring_recommendation
+
 ---
 
 ### 🔥 URGENT TASKS (Do These Next)
-
----
-
-**Task P6: Update Existing Tables** 🔥  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Add to `candidates` table: pros, cons, status columns
-- [ ] Add to `assessments` table: scheduled_assessment_id, hiring_recommendation
-- [ ] Update helper functions:
-  - Modify `insert_candidate()` for new parameters
-  - Add `update_candidate_status(candidate_id, status)`
-  - Modify `update_assessment_scores()` for new fields
 
 ---
 

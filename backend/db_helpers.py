@@ -145,7 +145,7 @@ def get_user_by_id(user_id):
 #                            CANDIDATE FUNCTIONS
 # ============================================================================
 
-def insert_candidate(name, email, phone, resume_path, parsed_data):
+def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending'):
     """
     Insert a new candidate into the database.
     
@@ -155,6 +155,9 @@ def insert_candidate(name, email, phone, resume_path, parsed_data):
         phone (str): Candidate's phone number
         resume_path (str): Path to the uploaded resume file
         parsed_data (dict): Parsed resume data with skills, experience, education, match_score
+        pros (list, optional): List of AI-generated pros about the candidate
+        cons (list, optional): List of AI-generated cons about the candidate
+        status (str, optional): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
     
     Returns:
         int: Candidate ID of the newly inserted candidate
@@ -173,14 +176,16 @@ def insert_candidate(name, email, phone, resume_path, parsed_data):
         match_score = parsed_data.get('match_score', 0)
         shortlist_status = parsed_data.get('shortlist_status', 'Potential')
         
-        # Converting skills list to JSON string
+        # Converting lists to JSON strings
         skills_json = json.dumps(skills)
+        pros_json = json.dumps(pros) if pros else None
+        cons_json = json.dumps(cons) if cons else None
         
         cursor.execute("""
             INSERT INTO candidates 
-            (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status))
+            (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status))
         
         conn.commit()
         candidate_id = cursor.lastrowid
@@ -321,6 +326,52 @@ def update_candidate_shortlist(candidate_id, status, score):
         raise DatabaseError(f"Error updating candidate shortlist: {str(e)}")
 
 
+def update_candidate_status(candidate_id, status, pros=None, cons=None):
+    """
+    Update candidate's status and optionally AI-generated pros/cons.
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+        status (str): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
+        pros (list, optional): List of AI-generated pros about the candidate
+        cons (list, optional): List of AI-generated cons about the candidate
+    
+    Returns:
+        bool: True if update successful, False if candidate not found
+    
+    Raises:
+        DatabaseError: If update fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        pros_json = json.dumps(pros) if pros else None
+        cons_json = json.dumps(cons) if cons else None
+        
+        if pros_json or cons_json:
+            cursor.execute("""
+                UPDATE candidates 
+                SET status = ?, pros = COALESCE(?, pros), cons = COALESCE(?, cons), updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (status, pros_json, cons_json, candidate_id))
+        else:
+            cursor.execute("""
+                UPDATE candidates 
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (status, candidate_id))
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        return success
+        
+    except Exception as e:
+        raise DatabaseError(f"Error updating candidate status: {str(e)}")
+
+
 # ============================================================================
 #                           ASSESSMENT FUNCTIONS
 # ============================================================================
@@ -358,9 +409,9 @@ def create_assessment(candidate_id, job_id=None):
         raise DatabaseError(f"Error creating assessment: {str(e)}")
 
 
-def update_assessment_scores(assessment_id, technical_score, psychometric_score, decision, rationale):
+def update_assessment_scores(assessment_id, technical_score, psychometric_score, decision, rationale, scheduled_assessment_id=None, hiring_recommendation=None):
     """
-    Update assessment scores and decision.
+    Update assessment scores, decision, and hiring recommendation.
     
     Args:
         assessment_id (int): The ID of the assessment
@@ -368,6 +419,8 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
         psychometric_score (float): Psychometric score (0-100)
         decision (str): Hiring decision ("Hire", "No-Hire", "Maybe")
         rationale (str): AI-generated explanation
+        scheduled_assessment_id (int, optional): Link to scheduled assessment
+        hiring_recommendation (str, optional): AI-generated hiring recommendation
     
     Raises:
         DatabaseError: If update fails
@@ -379,13 +432,24 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
         # Calculate overall score as weighted average
         overall_score = (technical_score * 0.6) + (psychometric_score * 0.4)
         
-        cursor.execute("""
-            UPDATE assessments 
-            SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
-                decision = ?, rationale = ?, status = 'completed', 
-                completed_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
+        if scheduled_assessment_id or hiring_recommendation:
+            cursor.execute("""
+                UPDATE assessments 
+                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
+                    decision = ?, rationale = ?, scheduled_assessment_id = COALESCE(?, scheduled_assessment_id),
+                    hiring_recommendation = COALESCE(?, hiring_recommendation), 
+                    status = 'completed', completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (technical_score, psychometric_score, overall_score, decision, rationale, 
+                  scheduled_assessment_id, hiring_recommendation, assessment_id))
+        else:
+            cursor.execute("""
+                UPDATE assessments 
+                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
+                    decision = ?, rationale = ?, status = 'completed', 
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
         
         conn.commit()
         conn.close()
