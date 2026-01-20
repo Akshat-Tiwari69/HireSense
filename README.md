@@ -35,13 +35,14 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟡⬜⬜⬜⬜⬜⬜⬜ 25%
+### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 30%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Database (Base) | 🟢 COMPLETE | Prashanth | 100% |
 | 🏗️ Database (Auth Tables) | 🟢 COMPLETE | Prashanth | 100% |
-| 🏗️ Database (New Tables) | ⬜ Not Started | Prashanth | 0% |
+| 🏗️ Database (Scheduling Tables) | 🟢 COMPLETE | Prashanth | 100% |
+| 🏗️ Database (Other Tables) | ⬜ Not Started | Prashanth | 0% |
 | 🔐 Authentication | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 📄 Resume Parsing | 🟢 COMPLETE | Akshat | 100% |
 | 🤖 AI Resume Analysis | ⬜ Not Started | Akshat | 0% |
@@ -151,22 +152,19 @@
   - `get_user_by_email(email)`
   - `get_user_by_id(user_id)`
 
----
-
-### 🔥 URGENT TASKS (Do These Next)
-
-**Task P5: Assessment Scheduling Table** 🔥  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Create `scheduled_assessments` table: id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, timestamps
-- [ ] Foreign keys to candidates, users, assessments
-- [ ] Indexes on candidate_id and scheduled_time
-- [ ] Implement helper functions:
+**Task P5: Assessment Scheduling Table** ✅  
+- Created `scheduled_assessments` table with fields: id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, timestamps
+- Added foreign keys to candidates, users, assessments tables
+- Added indexes on candidate_id and scheduled_time for fast lookups
+- Implemented 4 helper functions:
   - `create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time)`
   - `get_scheduled_assessment(candidate_id)`
   - `update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id)`
   - `check_assessment_time_valid(candidate_id, current_time)` - validates ±30 min window
+
+---
+
+### 🔥 URGENT TASKS (Do These Next)
 
 ---
 

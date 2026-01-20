@@ -114,6 +114,25 @@ CREATE TABLE IF NOT EXISTS psychometric_responses (
     FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE
 );
 
+-- Scheduled assessments table: Track scheduled assessment sessions
+CREATE TABLE IF NOT EXISTS scheduled_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL,
+    interviewer_id INTEGER NOT NULL,
+    scheduled_time TIMESTAMP NOT NULL,
+    status TEXT DEFAULT 'scheduled',  -- 'scheduled', 'in_progress', 'completed', 'cancelled'
+    assessment_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+    FOREIGN KEY (interviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE SET NULL
+);
+
+-- Create indexes for scheduled_assessments table
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_candidate ON scheduled_assessments(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_time ON scheduled_assessments(scheduled_time);
+
 -- Create indices for better query performance
 CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(shortlist_status);

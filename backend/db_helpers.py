@@ -687,6 +687,205 @@ def get_psychometric_scores(assessment_id):
         raise DatabaseError(f"Error calculating psychometric scores: {str(e)}")
 
 
+# ============================================================================
+#                    ASSESSMENT SCHEDULING FUNCTIONS
+# ============================================================================
+
+def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
+    """
+    Create a new scheduled assessment session.
+    
+    Args:
+        candidate_id (int): ID of the candidate
+        interviewer_id (int): ID of the interviewer (user)
+        scheduled_time (str): ISO format datetime string (e.g., '2026-01-25T10:30:00')
+    
+    Returns:
+        int: Scheduled assessment ID
+    
+    Raises:
+        DatabaseError: If creation fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
+               VALUES (?, ?, ?, 'scheduled')""",
+            (candidate_id, interviewer_id, scheduled_time)
+        )
+        
+        conn.commit()
+        scheduled_id = cursor.lastrowid
+        conn.close()
+        
+        return scheduled_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error creating scheduled assessment: {str(e)}")
+
+
+def get_scheduled_assessment(candidate_id):
+    """
+    Retrieve scheduled assessment for a candidate.
+    
+    Args:
+        candidate_id (int): ID of the candidate
+    
+    Returns:
+        dict: Scheduled assessment data with keys (id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, created_at, updated_at)
+              or None if not found
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, created_at, updated_at
+               FROM scheduled_assessments WHERE candidate_id = ?""",
+            (candidate_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'candidate_id': row[1],
+                'interviewer_id': row[2],
+                'scheduled_time': row[3],
+                'status': row[4],
+                'assessment_id': row[5],
+                'created_at': row[6],
+                'updated_at': row[7]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving scheduled assessment: {str(e)}")
+
+
+def update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id=None):
+    """
+    Update the status of a scheduled assessment.
+    
+    Args:
+        scheduled_assessment_id (int): ID of the scheduled assessment
+        status (str): New status - 'scheduled', 'in_progress', 'completed', 'cancelled'
+        assessment_id (int, optional): Assessment ID to link when marking as in_progress
+    
+    Returns:
+        bool: True if update successful, False if assessment not found
+    
+    Raises:
+        DatabaseError: If update fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if assessment_id:
+            cursor.execute(
+                """UPDATE scheduled_assessments 
+                   SET status = ?, assessment_id = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (status, assessment_id, scheduled_assessment_id)
+            )
+        else:
+            cursor.execute(
+                """UPDATE scheduled_assessments 
+                   SET status = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (status, scheduled_assessment_id)
+            )
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        return success
+    
+    except Exception as e:
+        raise DatabaseError(f"Error updating scheduled assessment status: {str(e)}")
+
+
+def check_assessment_time_valid(candidate_id, current_time):
+    """
+    Check if current time is within ±30 minutes of scheduled assessment time.
+    
+    Args:
+        candidate_id (int): ID of the candidate
+        current_time (str): ISO format datetime string (e.g., '2026-01-25T10:30:00')
+    
+    Returns:
+        dict: {'valid': bool, 'scheduled_assessment_id': int or None, 'message': str}
+              If valid: {'valid': True, 'scheduled_assessment_id': id, 'message': 'Assessment can proceed'}
+              If invalid: {'valid': False, 'scheduled_assessment_id': None, 'message': 'error reason'}
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        from datetime import datetime, timedelta
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, scheduled_time, status 
+               FROM scheduled_assessments WHERE candidate_id = ? AND status = 'scheduled'""",
+            (candidate_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return {
+                'valid': False,
+                'scheduled_assessment_id': None,
+                'message': 'No scheduled assessment found for this candidate'
+            }
+        
+        scheduled_id, scheduled_time_str, status = row
+        
+        # Parse times
+        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+        scheduled_dt = datetime.fromisoformat(scheduled_time_str.replace('Z', '+00:00'))
+        
+        # Check if within ±30 minutes
+        time_diff = abs((current_dt - scheduled_dt).total_seconds() / 60)
+        
+        if time_diff <= 30:
+            return {
+                'valid': True,
+                'scheduled_assessment_id': scheduled_id,
+                'message': 'Assessment can proceed'
+            }
+        else:
+            minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
+            if minutes_until > 0:
+                return {
+                    'valid': False,
+                    'scheduled_assessment_id': None,
+                    'message': f'Assessment starts in {minutes_until} minutes. Come back at scheduled time.'
+                }
+            else:
+                return {
+                    'valid': False,
+                    'scheduled_assessment_id': None,
+                    'message': f'Assessment time has passed. Please contact the interviewer.'
+                }
+    
+    except Exception as e:
+        raise DatabaseError(f"Error checking assessment time validity: {str(e)}")
+
+
 if __name__ == "__main__":
     print("Database Helper Functions Module")
     print("Import this module to use database functions")
