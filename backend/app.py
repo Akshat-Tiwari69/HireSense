@@ -7,11 +7,13 @@ import uuid
 import re
 from datetime import timedelta
 from resume_parser import parse_resume
+from resume_analyzer import analyze_resume
 from db_helpers import (
     insert_candidate, create_assessment, save_mcq_response,
     save_coding_submission, save_psychometric_response,
     update_assessment_scores, get_assessment_by_id,
-    get_mcq_score, get_coding_score, get_psychometric_scores
+    get_mcq_score, get_coding_score, get_psychometric_scores,
+    update_candidate_status
 )
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
 from auth import auth_bp
@@ -166,6 +168,47 @@ def upload_resume():
         }
         
         parsed_data = parse_resume(filepath, job_description)
+        
+        # Extract resume text for AI analysis
+        with open(filepath, 'rb') as f:
+            # Get raw text (simplified - you may want to use the same extraction as in resume_parser)
+            if filepath.endswith('.pdf'):
+                from PyPDF2 import PdfReader
+                pdf = PdfReader(f)
+                resume_text = " ".join([page.extract_text() for page in pdf.pages])
+            else:
+                from docx import Document
+                doc = Document(f)
+                resume_text = " ".join([para.text for para in doc.paragraphs])
+        
+        # Generate AI-powered pros/cons analysis
+        ai_analysis = None
+        try:
+            app.logger.info("Starting AI analysis for resume...")
+            ai_analysis = analyze_resume(
+                resume_text=resume_text,
+                parsed_data=parsed_data,
+                job_requirements=job_description,
+                enhance_score=True
+            )
+            app.logger.info(f"AI analysis completed: {ai_analysis['recommendation']}")
+            
+            # Use enhanced match score if available
+            if 'enhanced_match_score' in ai_analysis:
+                parsed_data['match_score'] = ai_analysis['enhanced_match_score']
+                parsed_data['original_match_score'] = parsed_data.get('match_score', 0)
+            
+        except Exception as ai_error:
+            app.logger.warning(f"AI analysis failed: {ai_error}. Proceeding with basic analysis.")
+            # Continue without AI - we'll still have parsed data
+            ai_analysis = {
+                "pros": ["Resume uploaded successfully"],
+                "cons": ["AI analysis unavailable - manual review recommended"],
+                "overall_assessment": "AI analysis failed. Manual review required.",
+                "recommendation": "Pending Review",
+                "confidence_score": 0
+            }
+    
     except Exception as e:
         app.logger.exception("Error parsing resume '%s'", filepath)
         parsed_data = {
@@ -176,15 +219,38 @@ def upload_resume():
             "match_score": 0,
             "shortlist_status": "Pending Review"
         }
+        ai_analysis = None
     
-    # Save candidate to database
+    # Save candidate to database with AI insights
     try:
+        # Prepare pros and cons for database
+        pros_text = None
+        cons_text = None
+        status = "pending"
+        
+        if ai_analysis:
+            # Convert lists to newline-separated strings for database storage
+            pros_text = "\n".join(ai_analysis.get('pros', []))
+            cons_text = "\n".join(ai_analysis.get('cons', []))
+            
+            # Set initial status based on recommendation
+            recommendation = ai_analysis.get('recommendation', 'Moderate Match')
+            if recommendation == "Strong Match":
+                status = "under_review"
+            elif recommendation in ["Good Match", "Moderate Match"]:
+                status = "pending"
+            else:
+                status = "pending"
+        
         candidate_id = insert_candidate(
             name=name,
             email=email,
             phone=phone,
             resume_path=filepath,
-            parsed_data=parsed_data
+            parsed_data=parsed_data,
+            pros=pros_text,
+            cons=cons_text,
+            status=status
         )
         app.logger.info(f"Candidate saved to database with ID: {candidate_id}")
     except Exception as e:
@@ -195,20 +261,38 @@ def upload_resume():
     # Return success response
     # Use the configured upload folder name for consistency
     relative_path = os.path.join(os.path.basename(app.config['UPLOAD_FOLDER']), unique_filename)
+    
+    # Prepare response data
+    response_data = {
+        "candidate_id": candidate_id,
+        "file_path": relative_path,
+        "original_filename": original_filename,
+        "candidate": {
+            "name": name,
+            "email": email,
+            "phone": phone
+        },
+        "parsed_data": parsed_data
+    }
+    
+    # Add AI analysis if available
+    if ai_analysis:
+        response_data["ai_analysis"] = {
+            "pros": ai_analysis.get('pros', []),
+            "cons": ai_analysis.get('cons', []),
+            "overall_assessment": ai_analysis.get('overall_assessment', ''),
+            "recommendation": ai_analysis.get('recommendation', 'Pending Review'),
+            "confidence_score": ai_analysis.get('confidence_score', 0),
+            "key_highlights": ai_analysis.get('key_highlights', []),
+            "areas_for_improvement": ai_analysis.get('areas_for_improvement', [])
+        }
+        if 'enhanced_match_score' in ai_analysis:
+            response_data["ai_analysis"]["enhanced_match_score"] = ai_analysis['enhanced_match_score']
+    
     return jsonify({
         "status": "success",
-        "message": "Resume uploaded and parsed successfully",
-        "data": {
-            "candidate_id": candidate_id,
-            "file_path": relative_path,
-            "original_filename": original_filename,
-            "candidate": {
-                "name": name,
-                "email": email,
-                "phone": phone
-            },
-            "parsed_data": parsed_data
-        }
+        "message": "Resume uploaded and analyzed successfully" if ai_analysis else "Resume uploaded and parsed successfully",
+        "data": response_data
     }), 201
 
 
