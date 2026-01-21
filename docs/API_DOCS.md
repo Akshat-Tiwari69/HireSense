@@ -5,49 +5,152 @@
 
 ---
 
-## Authentication
+## Authentication Endpoints
 
-### Register User
-```
-POST /api/auth/register
-```
-**Body:**
+### 1. Register User
+Create a new user account (for interviewers or admins).
+
+**Endpoint:** `POST /api/auth/register`
+
+**Request Body:**
 ```json
 {
-  "email": "user@example.com",
-  "password": "secure_password",
-  "name": "John Doe",
-  "role": "interviewer" // or "interviewee"
+  "email": "interviewer@example.com",
+  "password": "secure123456",
+  "role": "interviewer",
+  "name": "Jane Doe"
 }
 ```
-**Response:**
+
+**Validation Rules:**
+- `email`: Required, must be valid email format
+- `password`: Required, minimum 8 characters
+- `role`: Required, must be "interviewer" or "admin"
+- `name`: Required, minimum 2 characters
+
+**Success Response (201):**
 ```json
 {
+  "status": "success",
   "message": "User registered successfully",
-  "user_id": 1
+  "data": {
+    "user_id": 1,
+    "email": "interviewer@example.com",
+    "role": "interviewer",
+    "name": "Jane Doe"
+  }
 }
 ```
 
-### Login
-```
-POST /api/auth/login
-```
-**Body:**
+**Error Responses:**
+- `400`: Missing fields or validation error
+- `409`: Email already exists
+- `500`: Server error
+
+---
+
+### 2. Login
+Authenticate user and receive JWT token.
+
+**Endpoint:** `POST /api/auth/login`
+
+**Request Body:**
 ```json
 {
-  "email": "user@example.com",
-  "password": "secure_password"
+  "email": "interviewer@example.com",
+  "password": "secure123456"
 }
 ```
-**Response:**
+
+**Success Response (200):**
 ```json
 {
-  "access_token": "jwt_token_here",
-  "user": {
+  "status": "success",
+  "message": "Login successful",
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": 1,
+      "email": "interviewer@example.com",
+      "role": "interviewer",
+      "name": "Jane Doe"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Missing email or password
+- `401`: Invalid credentials
+- `500`: Server error
+
+**Note:** Store the `access_token` in localStorage or cookies. Include it in subsequent requests as:
+```
+Authorization: Bearer <access_token>
+```
+
+---
+
+### 3. Get Current User
+Get information about the currently authenticated user.
+
+**Endpoint:** `GET /api/auth/me`
+
+**Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
     "id": 1,
-    "email": "user@example.com",
-    "name": "John Doe",
-    "role": "interviewer"
+    "email": "interviewer@example.com",
+    "role": "interviewer",
+    "name": "Jane Doe",
+    "created_at": "2026-01-21 10:30:00"
+  }
+}
+```
+
+**Error Responses:**
+- `401`: Missing or invalid token
+- `404`: User not found
+- `500`: Server error
+
+---
+
+### 4. Verify Token
+Verify if JWT token is valid.
+
+**Endpoint:** `GET /api/auth/verify`
+
+**Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Token is valid",
+  "data": {
+    "user_id": 1,
+    "role": "interviewer",
+    "name": "Jane Doe"
+  }
+}
+```
+
+**Error Responses:**
+- `401`: Invalid or expired token
+
+---
+
+## Resume Upload
   }
 }
 ```

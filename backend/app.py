@@ -1,9 +1,11 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager
 from werkzeug.utils import secure_filename
 import os
 import uuid
 import re
+from datetime import timedelta
 from resume_parser import parse_resume
 from db_helpers import (
     insert_candidate, create_assessment, save_mcq_response,
@@ -12,13 +14,22 @@ from db_helpers import (
     get_mcq_score, get_coding_score, get_psychometric_scores
 )
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
+from auth import auth_bp
 import time
 
 # Initialize Flask app
 app = Flask(__name__)
 
+# Configure JWT
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
+jwt = JWTManager(app)
+
 # Enable CORS so frontend can call our APIs
 CORS(app)
+
+# Register authentication blueprint
+app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')

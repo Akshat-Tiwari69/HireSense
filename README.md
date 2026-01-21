@@ -35,7 +35,7 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟢🟢🟢⬜⬜⬜⬜⬜ 40%
+### **Overall Completion:** 🟢🟢🟢🟢🟢⬜⬜⬜⬜⬜ 45%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
@@ -44,7 +44,7 @@
 | 🏗️ Database (Scheduling Tables) | 🟢 COMPLETE | Prashanth | 100% |
 | 🏗️ Database (Table Updates) | 🟢 COMPLETE | Prashanth | 100% |
 | 🏗️ Database (Email Logging) | 🟢 COMPLETE | Prashanth | 100% |
-| 🔐 Authentication | ⬜ Not Started | Akshat + Shaivi | 0% |
+| 🔐 Authentication | 🟢 COMPLETE | Akshat | 100% |
 | 📄 Resume Parsing | 🟢 COMPLETE | Akshat | 100% |
 | 🤖 AI Resume Analysis | ⬜ Not Started | Akshat | 0% |
 | 📝 Assessment Backend | 🟢 COMPLETE | Akshat | 100% |
@@ -210,23 +210,24 @@
 - Score calculation and decision generation
 - Test: Overall 70.67%, Decision: Recommend for Hire
 
+**Task A5: JWT Authentication** ✅  
+- Installed flask-jwt-extended and bcrypt
+- Created `backend/auth.py` with authentication module
+- Implemented 4 endpoints:
+  - `POST /api/auth/register` - email, password, role, name validation
+  - `POST /api/auth/login` - validates credentials, returns JWT with role
+  - `GET /api/auth/me` - protected route, returns user info
+  - `GET /api/auth/verify` - token validation endpoint
+- Password hashing with bcrypt (salt rounds)
+- JWT tokens with 24-hour expiration
+- Role-based claims in JWT (interviewer/admin)
+- Integrated with Prashanth's user helper functions
+- Created `backend/test_auth.py` for testing
+- Updated API documentation
+
 ---
 
 ### 🔥 URGENT TASKS (Do These Next)
-
-**Task A5: JWT Authentication** 🔥  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Install flask-jwt-extended
-- [ ] Create endpoints:
-  - `POST /api/auth/register` - email, password, role, name
-  - `POST /api/auth/login` - validates, returns JWT with role
-  - `GET /api/auth/me` - protected, returns user info
-- [ ] Use Prashanth's user helper functions
-- [ ] Hash passwords before storage
-
----
 
 **Task A6: AI Pros/Cons Generator** 🔥  
 **Status:** ⬜ TODO
@@ -463,14 +464,20 @@ npm run dev
 ### Environment Variables
 Create `.env` file in backend directory:
 ```
-SECRET_KEY=your_secret_key
-JWT_SECRET_KEY=your_jwt_secret
+# JWT Configuration (Required for Authentication)
+JWT_SECRET_KEY=your_jwt_secret_key_here_change_in_production
+
+# AI API Keys (Required for AI features)
 AI_API_KEY=your_ai_api_key
+
+# Email Configuration (Required for notifications)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=your_email
-SMTP_PASS=your_password
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_specific_password
 ```
+
+**Note:** For development, JWT_SECRET_KEY defaults to 'dev-secret-key-change-in-production'. Always change this in production!
 
 ---
 
@@ -487,15 +494,16 @@ For detailed API endpoint documentation, see [API_DOCS.md](docs/API_DOCS.md)
 ### System Architecture Files
 
 **Backend Files:**
-- `backend/app.py` - Main Flask application
+- `backend/app.py` - Main Flask application with JWT integration
+- `backend/auth.py` - JWT authentication module ✅
 - `backend/resume_parser.py` - Resume parsing engine
 - `backend/questions_bank.py` - Assessment questions
 - `backend/db_config.py` - Database connection
 - `backend/db_helpers.py` - Database operations
 - `backend/init_db.py` - Database initialization
+- `backend/test_auth.py` - Authentication testing script ✅
 
 **To be Created:**
-- `backend/auth.py` - JWT authentication
 - `backend/email_service.py` - Email notifications
 - `backend/resume_analyzer.py` - AI analysis
 

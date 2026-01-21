@@ -1,5 +1,7 @@
 flask
 flask-cors
+flask-jwt-extended
+bcrypt
 PyPDF2
 python-docx
 reportlab
