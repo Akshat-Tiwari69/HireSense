@@ -151,53 +151,86 @@ Authorization: Bearer <access_token>
 ---
 
 ## Resume Upload
+
+### 5. Upload Resume (With AI Analysis)
+Upload and analyze a candidate's resume with AI-powered insights.
+
+**Endpoint:** `POST /api/resume/upload`
+
+**Content-Type:** `multipart/form-data`
+
+**Form Data:**
+- `file`: PDF or DOCX resume file (required)
+- `name`: Candidate's full name (required)
+- `email`: Candidate's email address (required)
+- `phone`: Phone number (optional)
+
+**Success Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Resume uploaded and analyzed successfully",
+  "data": {
+    "candidate_id": 1,
+    "file_path": "uploads/abc123_resume.pdf",
+    "original_filename": "resume.pdf",
+    "candidate": {
+      "name": "John Doe",
+      "email": "john@example.com",
+      "phone": "1234567890"
+    },
+    "parsed_data": {
+      "skills": ["Python", "JavaScript", "React", "AWS", "Docker"],
+      "experience": 5,
+      "education": "Bachelor of Science in Computer Science",
+      "match_score": 82
+    },
+    "ai_analysis": {
+      "pros": [
+        "Strong full-stack expertise with 5 years proven experience",
+        "Solid alignment with core tech stack (Python, React, AWS)",
+        "Leadership experience managing team of 4 developers"
+      ],
+      "cons": [
+        "Limited experience with containerization tools",
+        "No cloud certifications mentioned"
+      ],
+      "overall_assessment": "Strong candidate with excellent technical skills and relevant experience. Minor gaps in DevOps can be addressed.",
+      "recommendation": "Strong Match",
+      "confidence_score": 88,
+      "enhanced_match_score": 85,
+      "key_highlights": [
+        "5 years of full-stack development",
+        "Built scalable microservices"
+      ],
+      "areas_for_improvement": [
+        "Container orchestration skills",
+        "Cloud certifications"
+      ]
+    }
   }
 }
 ```
 
-### Get Current User
-```
-GET /api/auth/me
-```
-**Headers:** `Authorization: Bearer <jwt_token>`
+**AI Analysis Fields:**
+- `pros`: Array of 3-5 strengths
+- `cons`: Array of 2-4 areas for improvement
+- `overall_assessment`: Comprehensive summary
+- `recommendation`: "Strong Match" | "Good Match" | "Moderate Match" | "Weak Match"
+- `confidence_score`: AI's confidence in assessment (0-100)
+- `enhanced_match_score`: AI-enhanced match score (0-100)
+- `key_highlights`: Most impressive qualifications
+- `areas_for_improvement`: Specific skill gaps
 
-**Response:**
-```json
-{
-  "id": 1,
-  "email": "user@example.com",
-  "name": "John Doe",
-  "role": "interviewer"
-}
-```
+**Error Responses:**
+- `400`: Missing required fields or invalid file type
+- `413`: File too large (max 10MB)
+- `500`: Server error
 
----
-
-## Resume Management
-
-### Upload Resume
-```
-POST /api/resume/upload
-```
-**Body (multipart/form-data):**
-- `file`: PDF or DOCX file
-- `name`: Candidate name
-- `email`: Candidate email
-- `phone`: Phone number (optional)
-
-**Response:**
-```json
-{
-  "candidate_id": 1,
-  "parsed_data": {
-    "skills": ["Python", "JavaScript", "React"],
-    "experience_years": 3,
-    "education": "Bachelor's in Computer Science",
-    "match_score": 85,
-    "pros": "Strong technical skills, relevant experience",
-    "cons": "Limited leadership experience"
-  },
-  "file_path": "/uploads/resume_123.pdf"
+**Notes:**
+- AI analysis requires OpenAI API key to be configured
+- If AI fails, fallback analysis is provided
+- Pros/cons are stored in database for recruiter dashboard
 }
 ```
 
