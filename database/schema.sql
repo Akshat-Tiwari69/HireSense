@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS candidates (
     education TEXT,
     match_score INTEGER,  -- 0-100
     shortlist_status TEXT,  -- "High Match", "Potential", "Reject"
+    pros TEXT,  -- JSON format: ["pro1", "pro2", "pro3"] - AI generated
+    cons TEXT,  -- JSON format: ["con1", "con2", "con3"] - AI generated
+    status TEXT DEFAULT 'pending',  -- "pending", "shortlisted", "rejected", "assessment_scheduled", "assessment_completed"
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -57,11 +60,14 @@ CREATE TABLE IF NOT EXISTS assessments (
     rationale TEXT,  -- AI-generated explanation
     proctoring_violations INTEGER DEFAULT 0,
     status TEXT DEFAULT 'in_progress',  -- 'in_progress', 'completed'
+    scheduled_assessment_id INTEGER,  -- Link to scheduled_assessments table
+    hiring_recommendation TEXT,  -- AI-generated hiring recommendation with rationale
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
-    FOREIGN KEY (job_id) REFERENCES job_descriptions(id) ON DELETE SET NULL
+    FOREIGN KEY (job_id) REFERENCES job_descriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (scheduled_assessment_id) REFERENCES scheduled_assessments(id) ON DELETE SET NULL
 );
 
 -- MCQ responses table: Store MCQ answers
@@ -113,6 +119,42 @@ CREATE TABLE IF NOT EXISTS psychometric_responses (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE
 );
+
+-- Scheduled assessments table: Track scheduled assessment sessions
+CREATE TABLE IF NOT EXISTS scheduled_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL,
+    interviewer_id INTEGER NOT NULL,
+    scheduled_time TIMESTAMP NOT NULL,
+    status TEXT DEFAULT 'scheduled',  -- 'scheduled', 'in_progress', 'completed', 'cancelled'
+    assessment_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+    FOREIGN KEY (interviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE SET NULL
+);
+
+-- Create indexes for scheduled_assessments table
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_candidate ON scheduled_assessments(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_time ON scheduled_assessments(scheduled_time);
+
+-- Email logs table: Track all emails sent to candidates
+CREATE TABLE IF NOT EXISTS email_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_email TEXT NOT NULL,
+    recipient_name TEXT NOT NULL,
+    email_type TEXT NOT NULL,  -- "rejection", "assessment_invitation", "final_decision", etc.
+    subject TEXT NOT NULL,
+    status TEXT DEFAULT 'sent',  -- "sent", "failed", "bounced"
+    error_message TEXT,  -- Error details if status is "failed"
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create indexes for email_logs table
+CREATE INDEX IF NOT EXISTS idx_email_logs_recipient ON email_logs(recipient_email);
+CREATE INDEX IF NOT EXISTS idx_email_logs_type ON email_logs(email_type);
+CREATE INDEX IF NOT EXISTS idx_email_logs_status ON email_logs(status);
 
 -- Create indices for better query performance
 CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);

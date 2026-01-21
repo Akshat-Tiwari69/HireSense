@@ -35,13 +35,15 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟡⬜⬜⬜⬜⬜⬜⬜ 25%
+### **Overall Completion:** 🟢🟢🟢🟢🟢⬜⬜⬜⬜⬜ 40%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Database (Base) | 🟢 COMPLETE | Prashanth | 100% |
 | 🏗️ Database (Auth Tables) | 🟢 COMPLETE | Prashanth | 100% |
-| 🏗️ Database (New Tables) | ⬜ Not Started | Prashanth | 0% |
+| 🏗️ Database (Scheduling Tables) | 🟢 COMPLETE | Prashanth | 100% |
+| 🏗️ Database (Table Updates) | 🟢 COMPLETE | Prashanth | 100% |
+| 🏗️ Database (Email Logging) | 🟢 COMPLETE | Prashanth | 100% |
 | 🔐 Authentication | ⬜ Not Started | Akshat + Shaivi | 0% |
 | 📄 Resume Parsing | 🟢 COMPLETE | Akshat | 100% |
 | 🤖 AI Resume Analysis | ⬜ Not Started | Akshat | 0% |
@@ -151,48 +153,33 @@
   - `get_user_by_email(email)`
   - `get_user_by_id(user_id)`
 
----
-
-### 🔥 URGENT TASKS (Do These Next)
-
-**Task P5: Assessment Scheduling Table** 🔥  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Create `scheduled_assessments` table: id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, timestamps
-- [ ] Foreign keys to candidates, users, assessments
-- [ ] Indexes on candidate_id and scheduled_time
-- [ ] Implement helper functions:
+**Task P5: Assessment Scheduling Table** ✅  
+- Created `scheduled_assessments` table with fields: id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, timestamps
+- Added foreign keys to candidates, users, assessments tables
+- Added indexes on candidate_id and scheduled_time for fast lookups
+- Implemented 4 helper functions:
   - `create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time)`
   - `get_scheduled_assessment(candidate_id)`
   - `update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id)`
   - `check_assessment_time_valid(candidate_id, current_time)` - validates ±30 min window
 
----
-
-**Task P6: Update Existing Tables** 🔥  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Add to `candidates` table: pros, cons, status columns
-- [ ] Add to `assessments` table: scheduled_assessment_id, hiring_recommendation
-- [ ] Update helper functions:
-  - Modify `insert_candidate()` for new parameters
-  - Add `update_candidate_status(candidate_id, status)`
-  - Modify `update_assessment_scores()` for new fields
+**Task P6: Update Existing Tables** ✅  
+- Added to `candidates` table: pros, cons, status columns
+- Added to `assessments` table: scheduled_assessment_id, hiring_recommendation columns
+- Updated helper functions:
+  - Modified `insert_candidate()` to accept pros, cons, status parameters
+  - Added `update_candidate_status(candidate_id, status, pros, cons)` function
+  - Modified `update_assessment_scores()` to accept scheduled_assessment_id and hiring_recommendation
 
 ---
 
-### 🟡 OPTIONAL TASKS
 
-**Task P7: Email Logging Table** 🟡  
-**Status:** ⬜ TODO
-
-**Requirements:**
-- [ ] Create `email_logs` table: id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
-- [ ] Implement helper functions:
-  - `log_email(...)` - log email attempt
-  - `get_candidate_emails(candidate_email)` - retrieve history
+**Task P7: Email Logging Table** ✅  
+- Created `email_logs` table with fields: id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
+- Added indexes on recipient_email, email_type, and status for fast lookups
+- Implemented 2 helper functions:
+  - `log_email(recipient_email, recipient_name, email_type, subject, status, error_message)` - log email attempts
+  - `get_candidate_emails(candidate_email)` - retrieve email history for a candidate
 
 ---
 
