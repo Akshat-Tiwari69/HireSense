@@ -1038,6 +1038,195 @@ def get_candidate_emails(candidate_email):
         raise DatabaseError(f"Error retrieving candidate emails: {str(e)}")
 
 
+def get_assessment_by_candidate_id(candidate_id):
+    """
+    Retrieve the most recent assessment for a candidate.
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+    
+    Returns:
+        dict: Assessment details (most recent), or None if no assessment exists
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT a.id, a.candidate_id, a.job_id, a.technical_score, a.psychometric_score, 
+                   a.overall_score, a.decision, a.rationale, a.proctoring_violations, a.status, 
+                   a.started_at, a.completed_at,
+                   COALESCE(m.score, 0) as mcq_score,
+                   COALESCE(c.score, 0) as coding_score
+            FROM assessments a
+            LEFT JOIN (
+                SELECT assessment_id, ROUND(COUNT(CASE WHEN is_correct = 1 THEN 1 END) * 100.0 / COUNT(*), 2) as score
+                FROM mcq_responses GROUP BY assessment_id
+            ) m ON a.id = m.assessment_id
+            LEFT JOIN (
+                SELECT assessment_id, ROUND(test_cases_passed * 100.0 / test_cases_total, 2) as score
+                FROM coding_submissions GROUP BY assessment_id
+            ) c ON a.id = c.assessment_id
+            WHERE a.candidate_id = ?
+            ORDER BY a.created_at DESC
+            LIMIT 1
+        """, (candidate_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        return {
+            'id': row[0],
+            'candidate_id': row[1],
+            'job_id': row[2],
+            'technical_score': row[3] if row[3] is not None else 0,
+            'psychometric_score': row[4] if row[4] is not None else 0,
+            'overall_score': row[5] if row[5] is not None else 0,
+            'decision': row[6],
+            'rationale': row[7],
+            'proctoring_violations': row[8],
+            'status': row[9],
+            'started_at': row[10],
+            'completed_at': row[11],
+            'mcq_score': row[12],
+            'coding_score': row[13]
+        }
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving assessment for candidate {candidate_id}: {str(e)}")
+
+
+def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
+    """
+    Create a scheduled assessment for a candidate.
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+        interviewer_id (int): The ID of the interviewer scheduling
+        scheduled_time (str): ISO format scheduled time
+    
+    Returns:
+        int: ID of the created scheduled assessment
+    
+    Raises:
+        DatabaseError: If creation fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, created_at)
+            VALUES (?, ?, ?, 'scheduled', datetime('now'))
+        """, (candidate_id, interviewer_id, scheduled_time))
+        
+        scheduled_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return scheduled_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error creating scheduled assessment: {str(e)}")
+
+
+def update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id=None):
+    """
+    Update the status of a scheduled assessment.
+    
+    Args:
+        scheduled_assessment_id (int): The ID of the scheduled assessment
+        status (str): New status (e.g., 'in_progress', 'completed', 'cancelled')
+        assessment_id (int): Optional assessment ID to link
+    
+    Returns:
+        bool: True if successful
+    
+    Raises:
+        DatabaseError: If update fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if assessment_id:
+            cursor.execute("""
+                UPDATE scheduled_assessments 
+                SET status = ?, assessment_id = ?, updated_at = datetime('now')
+                WHERE id = ?
+            """, (status, assessment_id, scheduled_assessment_id))
+        else:
+            cursor.execute("""
+                UPDATE scheduled_assessments 
+                SET status = ?, updated_at = datetime('now')
+                WHERE id = ?
+            """, (status, scheduled_assessment_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return True
+    
+    except Exception as e:
+        raise DatabaseError(f"Error updating scheduled assessment: {str(e)}")
+
+
+def check_assessment_time_valid(candidate_id, current_time, window_minutes=30):
+    """
+    Check if current time is within valid assessment window (±30 minutes from scheduled time).
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+        current_time (str): Current time in ISO format
+        window_minutes (int): Allowed window in minutes (default 30)
+    
+    Returns:
+        tuple: (is_valid, scheduled_time, message)
+    
+    Raises:
+        DatabaseError: If check fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT scheduled_time FROM scheduled_assessments 
+            WHERE candidate_id = ? AND status = 'scheduled'
+            ORDER BY created_at DESC LIMIT 1
+        """, (candidate_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return (False, None, "No scheduled assessment found")
+        
+        scheduled_time = row[0]
+        
+        # Parse times and check window
+        from datetime import datetime, timedelta
+        scheduled_dt = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
+        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+        
+        time_diff = abs((current_dt - scheduled_dt).total_seconds() / 60)
+        
+        if time_diff <= window_minutes:
+            return (True, scheduled_time, f"Assessment is within {window_minutes} minute window")
+        else:
+            return (False, scheduled_time, f"Assessment is {int(time_diff)} minutes away from scheduled time")
+    
+    except Exception as e:
+        raise DatabaseError(f"Error checking assessment time: {str(e)}")
+
+
+
 if __name__ == "__main__":
     print("Database Helper Functions Module")
     print("Import this module to use database functions")

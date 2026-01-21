@@ -543,7 +543,328 @@ POST /api/email/send (Internal use only)
 
 ---
 
-## Error Responses
+## Interviewer Dashboard Endpoints
+
+Complete endpoints for managing candidates, scheduling assessments, and making hiring decisions.
+
+**Base URL:** `http://localhost:5000/api/interviewer`
+
+**Authentication:** All endpoints require JWT token with `interviewer` role.
+
+### 1. Get All Candidates
+**Endpoint:** `GET /api/interviewer/candidates`
+
+List all candidates with resume analysis, AI insights, and current status.
+
+**Query Parameters:**
+- `status`: Filter by candidate status (pending, under_review, rejected, hired)
+- `sort`: Sort by (name, date, match_score)
+- `order`: Sort direction (asc, desc)
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com",
+      "status": "pending",
+      "match_score": 85.5,
+      "pros": ["5+ years Python", "Strong system design"],
+      "cons": ["Limited AWS"],
+      "recommendation": "Good candidate for mid-level role",
+      "enhanced_match_score": 82.3,
+      "created_at": "2026-01-20T10:30:00"
+    }
+  ],
+  "total": 1
+}
+```
+
+### 2. Get Candidate Details
+**Endpoint:** `GET /api/interviewer/candidates/:candidate_id`
+
+Get detailed information for a specific candidate.
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "john@example.com",
+    "status": "pending",
+    "match_score": 85.5,
+    "pros": ["5+ years Python"],
+    "cons": ["Limited AWS"],
+    "recommendation": "Good candidate",
+    "assessment": null
+  }
+}
+```
+
+### 3. Reject Candidate
+**Endpoint:** `POST /api/interviewer/candidates/:candidate_id/reject`
+
+Reject a candidate after resume review. Sends rejection email automatically.
+
+**Request Body:**
+```json
+{
+  "reason": "Experience doesn't align with requirements"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Candidate rejected successfully",
+  "data": {
+    "candidate_id": 1,
+    "candidate_name": "John Doe",
+    "status": "rejected",
+    "email_sent": true
+  }
+}
+```
+
+### 4. Schedule Assessment
+**Endpoint:** `POST /api/interviewer/candidates/:candidate_id/schedule`
+
+Schedule an assessment for a candidate. Sends invitation email with assessment link.
+
+**Request Body:**
+```json
+{
+  "scheduled_time": "2026-02-01T14:00:00",
+  "additional_info": "Complete by February 3rd"
+}
+```
+
+**Success Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Assessment scheduled successfully",
+  "data": {
+    "candidate_id": 1,
+    "candidate_name": "John Doe",
+    "scheduled_assessment_id": 15,
+    "scheduled_time": "2026-02-01T14:00:00",
+    "assessment_link": "http://localhost:5173/assessment/15",
+    "status": "under_review",
+    "email_sent": true
+  }
+}
+```
+
+### 5. Get Assessment Results
+**Endpoint:** `GET /api/interviewer/assessments/:candidate_id`
+
+Retrieve assessment results and scores for a candidate.
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id": 15,
+    "candidate_id": 1,
+    "candidate_name": "John Doe",
+    "technical_score": 78.5,
+    "psychometric_score": 82.0,
+    "mcq_score": 76.5,
+    "coding_score": 80.5,
+    "decision": "Pending",
+    "ai_recommendation": "Strong technical fundamentals",
+    "completed_at": "2026-01-21T15:45:00"
+  }
+}
+```
+
+### 6. Make Final Decision
+**Endpoint:** `POST /api/interviewer/assessments/:assessment_id/final-decision`
+
+Record final hiring decision (hire or no-hire) after assessment completion.
+
+**Request Body:**
+```json
+{
+  "decision": "hire",
+  "rationale": "Excellent technical skills and cultural fit",
+  "next_steps": "Please confirm your availability for HR discussion"
+}
+```
+
+**Decision Options:**
+- `"hire"`, `"hired"`, or `"selected"` - Offer the position
+- `"no-hire"` - Reject after assessment
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Final decision recorded successfully",
+  "data": {
+    "assessment_id": 15,
+    "candidate_id": 1,
+    "candidate_name": "John Doe",
+    "decision": "Hire",
+    "status": "hired",
+    "scores": {
+      "technical": 78.5,
+      "psychometric": 82.0,
+      "overall": 79.55
+    },
+    "email_sent": true
+  }
+}
+```
+
+### 7. Get Dashboard Statistics
+**Endpoint:** `GET /api/interviewer/dashboard/stats`
+
+Get dashboard statistics showing candidate pipeline metrics.
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "total_candidates": 12,
+    "pending": 4,
+    "under_review": 3,
+    "hired": 2,
+    "rejected": 3,
+    "average_match_score": 78.92
+  }
+}
+```
+
+### 8. Manage Candidate Notes
+**Endpoint:** `GET /POST /api/interviewer/candidates/:candidate_id/notes`
+
+Add or retrieve notes for a candidate (future implementation).
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "candidate_id": 1,
+    "notes": []
+  }
+}
+```
+
+---
+
+## Interviewee Assessment Endpoints
+
+Candidate-side assessment endpoints with time validation.
+
+**Base URL:** `http://localhost:5000/api/interviewee`
+
+### 1. Get My Assessment Info
+**Endpoint:** `GET /api/interviewee/my-assessment/:candidate_id`
+
+Get assessment scheduling information and check if you can start.
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "candidate_id": 1,
+    "candidate_name": "John Doe",
+    "scheduled_time": "2026-02-01T14:00:00",
+    "window_minutes": 30,
+    "current_time": "2026-02-01T13:55:00Z",
+    "minutes_until_start": 5,
+    "can_start": false,
+    "message": "Assessment is 5 minutes away from scheduled time",
+    "status": "scheduled"
+  }
+}
+```
+
+### 2. Start Assessment (With Time Validation)
+**Endpoint:** `POST /api/interviewee/assessment/start/:candidate_id`
+
+Start assessment. Returns 403 if outside ±30 minute window.
+
+**Time Validation:**
+- Window opens: 30 minutes before scheduled time
+- Window closes: 30 minutes after scheduled time
+- Outside window: Returns 403 Forbidden
+
+**Success Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Assessment started successfully",
+  "data": {
+    "assessment_id": 42,
+    "candidate_id": 1,
+    "scheduled_time": "2026-02-01T14:00:00",
+    "mcq_questions": [...],
+    "coding_problem": {...},
+    "psychometric_scenarios": [...]
+  }
+}
+```
+
+**Error Response (403 - Outside Window):**
+```json
+{
+  "status": "error",
+  "message": "Assessment not available yet. Assessment is 45 minutes away from scheduled time",
+  "data": {
+    "scheduled_time": "2026-02-01T14:00:00",
+    "current_time": "2026-02-01T13:15:00Z",
+    "minutes_away": 45,
+    "allowed_window": 30
+  }
+}
+```
+
+### 3. Complete Assessment
+**Endpoint:** `POST /api/interviewee/assessment/:assessment_id/complete`
+
+Complete assessment and receive scores with AI recommendation.
+
+**Success Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Assessment completed successfully",
+  "data": {
+    "assessment_id": 42,
+    "candidate_id": 1,
+    "scores": {
+      "mcq": 75.0,
+      "coding": 80.0,
+      "technical": 76.0,
+      "psychometric": 82.0,
+      "overall": 77.2
+    },
+    "psychometric_breakdown": {
+      "leadership": 8.5,
+      "communication": 8.0,
+      "decision_making": 8.5
+    },
+    "decision": "Recommend for Hire",
+    "rationale": "Strong technical and soft skills demonstrated",
+    "ai_recommendation": "Proceed to HR discussion"
+  }
+}
+```
+
+---
 
 All endpoints may return error responses in the following format:
 
@@ -559,6 +880,4 @@ All endpoints may return error responses in the following format:
 - `201` - Created
 - `400` - Bad Request (invalid input)
 - `401` - Unauthorized (missing or invalid JWT)
-- `403` - Forbidden (insufficient permissions)
-- `404` - Not Found
-- `500` - Internal Server Error
+- `403` - Forbidden (insufficient permissions or outside assessment time window)

@@ -1,0 +1,354 @@
+"""
+Interviewee Routes Module
+Handles assessment endpoints for candidates
+Includes assessment time validation (±30 minute window)
+"""
+
+from flask import Blueprint, request, jsonify
+from datetime import datetime
+from db_helpers import (
+    get_candidate_by_id,
+    get_scheduled_assessment,
+    get_assessment_by_id,
+    check_assessment_time_valid,
+    update_scheduled_assessment_status,
+    create_assessment,
+    update_assessment_scores,
+    get_mcq_score,
+    get_coding_score,
+    get_psychometric_scores
+)
+from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
+
+
+# Create blueprint for interviewee routes
+interviewee_bp = Blueprint('interviewee', __name__)
+
+
+@interviewee_bp.route('/my-assessment/<int:candidate_id>', methods=['GET'])
+def get_my_assessment(candidate_id):
+    """
+    Get assessment information for a candidate
+    
+    Returns:
+        - Scheduled time (if assessment is scheduled)
+        - Assessment status
+        - Assessment link
+        - Window information
+    """
+    try:
+        # Get candidate
+        candidate = get_candidate_by_id(candidate_id)
+        if not candidate:
+            return jsonify({
+                'status': 'error',
+                'message': 'Candidate not found'
+            }), 404
+        
+        # Get scheduled assessment
+        scheduled = get_scheduled_assessment(candidate_id)
+        if not scheduled:
+            return jsonify({
+                'status': 'error',
+                'message': 'No assessment scheduled yet'
+            }), 404
+        
+        # Get current time
+        current_time = datetime.utcnow().isoformat() + 'Z'
+        
+        # Check if time is valid
+        is_valid, scheduled_time, message = check_assessment_time_valid(
+            candidate_id=candidate_id,
+            current_time=current_time,
+            window_minutes=30
+        )
+        
+        # Parse scheduled time to datetime for calculations
+        scheduled_dt = datetime.fromisoformat(scheduled['scheduled_time'].replace('Z', '+00:00'))
+        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+        minutes_until = int(((scheduled_dt - current_dt).total_seconds()) / 60)
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'candidate_id': candidate_id,
+                'candidate_name': candidate['name'],
+                'scheduled_time': scheduled['scheduled_time'],
+                'window_minutes': 30,
+                'current_time': current_time,
+                'minutes_until_start': minutes_until,
+                'can_start': is_valid,
+                'message': message,
+                'status': scheduled['status'],
+                'assessment_id': scheduled.get('assessment_id')
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to fetch assessment info: {str(e)}'
+        }), 500
+
+
+@interviewee_bp.route('/assessment/start/<int:candidate_id>', methods=['POST'])
+def start_assessment(candidate_id):
+    """
+    Start assessment for a candidate with time validation
+    
+    Validates:
+        - Candidate exists
+        - Assessment is scheduled
+        - Current time is within ±30 minute window of scheduled time
+    
+    Returns:
+        - assessment_id
+        - MCQ questions (without answers)
+        - Coding problem (without test cases)
+        - Psychometric scenarios
+    """
+    try:
+        # Get candidate
+        candidate = get_candidate_by_id(candidate_id)
+        if not candidate:
+            return jsonify({
+                'status': 'error',
+                'message': 'Candidate not found'
+            }), 404
+        
+        # Get scheduled assessment
+        scheduled = get_scheduled_assessment(candidate_id)
+        if not scheduled:
+            return jsonify({
+                'status': 'error',
+                'message': 'No assessment scheduled. Please contact your recruiter.'
+            }), 404
+        
+        # Get current time
+        current_time = datetime.utcnow().isoformat() + 'Z'
+        
+        # Check if assessment time is valid
+        is_valid, scheduled_time, time_message = check_assessment_time_valid(
+            candidate_id=candidate_id,
+            current_time=current_time,
+            window_minutes=30
+        )
+        
+        if not is_valid:
+            # Calculate how far off the time is
+            scheduled_dt = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
+            current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+            minutes_diff = int(abs((current_dt - scheduled_dt).total_seconds()) / 60)
+            
+            return jsonify({
+                'status': 'error',
+                'message': f'Assessment not available yet. {time_message}',
+                'data': {
+                    'scheduled_time': scheduled_time,
+                    'current_time': current_time,
+                    'minutes_away': minutes_diff,
+                    'allowed_window': 30
+                }
+            }), 403
+        
+        # If assessment already exists and is in progress, return it
+        if scheduled.get('assessment_id'):
+            existing = get_assessment_by_id(scheduled['assessment_id'])
+            if existing and existing['status'] in ['started', 'in_progress']:
+                # Assessment already started - load and return it
+                assessment_id = existing['id']
+                
+                # Get questions
+                mcq_questions = get_mcq_questions(count=10)
+                coding_problem = get_coding_problem(difficulty="easy")
+                psychometric_scenarios = get_psychometric_scenarios(count=3)
+                
+                # Remove answers from questions
+                mcq_for_frontend = []
+                for q in mcq_questions:
+                    mcq_for_frontend.append({
+                        "id": q["id"],
+                        "question": q["question"],
+                        "options": q["options"],
+                        "time_limit": q["time_limit"],
+                        "category": q["category"],
+                        "difficulty": q["difficulty"]
+                    })
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Assessment resumed',
+                    'data': {
+                        'assessment_id': assessment_id,
+                        'candidate_id': candidate_id,
+                        'mcq_questions': mcq_for_frontend,
+                        'coding_problem': {
+                            'id': coding_problem['id'],
+                            'title': coding_problem['title'],
+                            'description': coding_problem['description'],
+                            'example': coding_problem['example'],
+                            'difficulty': coding_problem['difficulty']
+                        },
+                        'psychometric_scenarios': psychometric_scenarios,
+                        'resumed': True
+                    }
+                }), 200
+        
+        # Create new assessment
+        assessment_id = create_assessment(candidate_id)
+        
+        # Update scheduled assessment status to in_progress
+        update_scheduled_assessment_status(
+            scheduled_assessment_id=scheduled['id'],
+            status='in_progress',
+            assessment_id=assessment_id
+        )
+        
+        # Get questions
+        mcq_questions = get_mcq_questions(count=10)
+        coding_problem = get_coding_problem(difficulty="easy")
+        psychometric_scenarios = get_psychometric_scenarios(count=3)
+        
+        # Remove answers from questions for frontend
+        mcq_for_frontend = []
+        for q in mcq_questions:
+            mcq_for_frontend.append({
+                "id": q["id"],
+                "question": q["question"],
+                "options": q["options"],
+                "time_limit": q["time_limit"],
+                "category": q["category"],
+                "difficulty": q["difficulty"]
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Assessment started successfully',
+            'data': {
+                'assessment_id': assessment_id,
+                'candidate_id': candidate_id,
+                'scheduled_time': scheduled_time,
+                'mcq_questions': mcq_for_frontend,
+                'coding_problem': {
+                    'id': coding_problem['id'],
+                    'title': coding_problem['title'],
+                    'description': coding_problem['description'],
+                    'example': coding_problem['example'],
+                    'difficulty': coding_problem['difficulty']
+                },
+                'psychometric_scenarios': psychometric_scenarios
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to start assessment: {str(e)}'
+        }), 500
+
+
+@interviewee_bp.route('/assessment/<int:assessment_id>/complete', methods=['POST'])
+def complete_assessment(assessment_id):
+    """
+    Complete assessment and calculate final scores
+    
+    Calculates:
+        - Technical score (60% MCQ, 40% Coding)
+        - Psychometric score (average of traits)
+        - Overall score (70% technical, 30% psychometric)
+        - Preliminary hiring decision
+    
+    Returns:
+        - All scores
+        - AI hiring recommendation
+        - Decision status
+    """
+    try:
+        # Get assessment
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({
+                'status': 'error',
+                'message': 'Assessment not found'
+            }), 404
+        
+        candidate_id = assessment['candidate_id']
+        
+        # Calculate scores
+        mcq_score = get_mcq_score(assessment_id)
+        coding_score = get_coding_score(assessment_id)
+        psychometric_scores = get_psychometric_scores(assessment_id)
+        
+        # Calculate technical score (60% MCQ, 40% Coding)
+        technical_score = (mcq_score * 0.6) + (coding_score * 0.4)
+        
+        # Calculate average psychometric score
+        if psychometric_scores:
+            avg_psychometric = sum(psychometric_scores.values()) / len(psychometric_scores)
+        else:
+            avg_psychometric = 0
+        
+        # Calculate overall score (70% technical, 30% psychometric)
+        overall_score = (technical_score * 0.7) + (avg_psychometric * 10 * 0.3)
+        
+        # Determine preliminary decision and AI recommendation
+        if overall_score >= 70:
+            decision = "Recommend for Hire"
+            rationale = "Strong technical and soft skills demonstrated. Candidate shows excellent problem-solving ability and communication."
+            recommendation = "Proceed to HR discussion"
+        elif overall_score >= 50:
+            decision = "Consider for Interview"
+            rationale = "Moderate technical performance with decent soft skills. Candidate shows potential but needs further evaluation."
+            recommendation = "Conduct follow-up technical interview"
+        else:
+            decision = "Not Recommended"
+            rationale = "Performance below acceptable threshold. Skills not aligned with role requirements."
+            recommendation = "Archive application"
+        
+        # Update assessment in database with completed status
+        update_assessment_scores(
+            assessment_id=assessment_id,
+            technical_score=technical_score,
+            psychometric_score=avg_psychometric * 10,
+            decision=decision,
+            rationale=rationale
+        )
+        
+        # Update scheduled assessment to completed
+        scheduled = get_scheduled_assessment(candidate_id)
+        if scheduled:
+            update_scheduled_assessment_status(
+                scheduled_assessment_id=scheduled['id'],
+                status='completed',
+                assessment_id=assessment_id
+            )
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Assessment completed successfully',
+            'data': {
+                'assessment_id': assessment_id,
+                'candidate_id': candidate_id,
+                'scores': {
+                    'mcq': round(mcq_score, 2),
+                    'coding': round(coding_score, 2),
+                    'technical': round(technical_score, 2),
+                    'psychometric': round(avg_psychometric * 10, 2),
+                    'overall': round(overall_score, 2)
+                },
+                'psychometric_breakdown': {k: round(v, 2) for k, v in psychometric_scores.items()} if psychometric_scores else {},
+                'decision': decision,
+                'rationale': rationale,
+                'ai_recommendation': recommendation
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to complete assessment: {str(e)}'
+        }), 500
+
+
+# Export blueprint
+__all__ = ['interviewee_bp']
