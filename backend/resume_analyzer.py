@@ -277,6 +277,80 @@ Respond ONLY with valid JSON, no additional text.
             "fallback_mode": True  # Indicate this was generated without AI
         }
     
+    def extract_resume_data(
+        self,
+        resume_text: str
+    ) -> Dict[str, any]:
+        """
+        Use AI to extract structured data from resume text including contact info,
+        skills, experience, and education.
+        
+        Args:
+            resume_text: Raw text extracted from resume
+        
+        Returns:
+            Dictionary with extracted data: name, email, phone, skills, experience, education
+        """
+        try:
+            prompt = f"""
+Analyze this resume text and extract structured information.
+
+**Resume Text:**
+{resume_text[:2000]}...
+
+**Task:**
+Extract the following information and respond ONLY with valid JSON:
+
+{{
+  "name": "Full name of the candidate",
+  "email": "Email address",
+  "phone": "Phone number in standard format",
+  "skills": ["Skill 1", "Skill 2", "Skill 3"],
+  "experience_years": 5,
+  "education": "Highest degree and field",
+  "summary": "One-sentence professional summary"
+}}
+
+**Instructions:**
+1. Extract contact information from anywhere in the resume
+2. For phone: normalize to digits with country code if present (e.g., "+12345678900" or "2345678900")
+3. For skills: identify technical and professional skills (max 20)
+4. For experience_years: calculate total years of professional experience
+5. For education: provide the highest degree mentioned
+6. If any field cannot be found, use null for strings or 0 for numbers
+7. Be accurate and specific
+
+Respond ONLY with valid JSON, no additional text.
+"""
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert resume parser. Extract information accurately and respond only in JSON format."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,  # Lower temperature for more consistent extraction
+                max_tokens=800,
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            
+            # Validate and normalize
+            return {
+                "name": result.get("name"),
+                "email": result.get("email"),
+                "phone": result.get("phone"),
+                "skills": result.get("skills", [])[:20],  # Max 20 skills
+                "experience": max(result.get("experience_years", 0), 0),
+                "education": result.get("education", "Not Specified"),
+                "summary": result.get("summary", "")
+            }
+            
+        except Exception as e:
+            print(f"AI extraction error: {e}")
+            return None
+    
     def enhance_match_score(
         self,
         resume_text: str,

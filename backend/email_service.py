@@ -5,11 +5,15 @@ Handles all email communications for the CYGNUSA Elite-Hire system
 
 import os
 import smtplib
+import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Optional, Dict
 from db_helpers import log_email
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class EmailService:
@@ -75,6 +79,13 @@ class EmailService:
             bool: True if sent successfully, False otherwise
         """
         try:
+            logger.info("="*80)
+            logger.info(f"📧 SENDING EMAIL")
+            logger.info("="*80)
+            logger.info(f"   To: {recipient_name} <{recipient_email}>")
+            logger.info(f"   Subject: {subject}")
+            logger.info(f"   Type: {email_type}")
+            
             # Create message
             message = MIMEMultipart('alternative')
             message['From'] = f"{self.sender_name} <{self.sender_email}>"
@@ -90,13 +101,22 @@ class EmailService:
             html_part = MIMEText(html_body, 'html')
             message.attach(html_part)
             
+            logger.info(f"📨 Connecting to SMTP server: {self.smtp_host}:{self.smtp_port}")
+            
             # Connect to SMTP server and send
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
                 if self.use_tls:
+                    logger.info("🔒 Starting TLS encryption...")
                     server.starttls()
                 
+                logger.info("🔐 Authenticating with SMTP server...")
                 server.login(self.smtp_user, self.smtp_pass)
+                
+                logger.info("📤 Sending email...")
                 server.send_message(message)
+            
+            logger.info("✅ Email sent successfully!")
+            logger.info("="*80)
             
             # Log success
             log_email(
@@ -108,24 +128,23 @@ class EmailService:
                 error_message=None
             )
             
-            print(f"✅ Email sent successfully to {recipient_email}")
             return True
             
         except smtplib.SMTPAuthenticationError as e:
             error_msg = f"SMTP authentication failed: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error(f"❌ {error_msg}")
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except smtplib.SMTPException as e:
             error_msg = f"SMTP error: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error(f"❌ {error_msg}")
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.exception(f"❌ {error_msg}")
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
     

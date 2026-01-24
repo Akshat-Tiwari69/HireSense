@@ -38,6 +38,10 @@ COMMON_SKILLS = [
     'leadership', 'communication', 'problem solving', 'team work', 'management'
 ]
 
+# Basic patterns for contact details
+EMAIL_REGEX = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+PHONE_REGEX = r'(?:\+?\d[\s-]*){10,15}'
+
 # Education keywords
 EDUCATION_KEYWORDS = {
     'bachelor': ['bachelor', 'b.tech', 'b.e', 'b.sc', 'bs', 'btech', 'bca'],
@@ -173,6 +177,52 @@ def extract_education(text):
     return "Not Specified"
 
 
+def extract_email(text):
+    """Pull the first email-like string from the resume text."""
+    matches = re.findall(EMAIL_REGEX, text)
+    return matches[0].strip() if matches else None
+
+
+def extract_phone(text):
+    """Find a likely phone number (10-15 digits with optional separators)."""
+    matches = re.findall(PHONE_REGEX, text)
+    if not matches:
+        return None
+    # Keep digits and leading plus
+    raw = matches[0]
+    digits = re.sub(r'[^\d+]', '', raw)
+    # Normalize simple cases like +1XXXXXXXXXX or XXXXXXXXXX
+    return digits
+
+
+def derive_name_from_email(email):
+    """Derive a readable name from the local-part of an email address."""
+    if not email or '@' not in email:
+        return None
+    local = email.split('@', 1)[0]
+    parts = re.split(r'[._-]+', local)
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    return " ".join([p.capitalize() for p in parts])
+
+
+def extract_name(text, email=None):
+    """Guess the candidate's name from the top of the resume or email."""
+    # Check first few non-empty lines
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines[:5]:
+        # Skip lines that look like contact lines
+        if '@' in line or re.search(PHONE_REGEX, line):
+            continue
+        # Require at least two words and mostly letters
+        words = line.split()
+        if len(words) >= 2 and all(re.match(r'^[A-Za-z\-\.]+$', w) for w in words):
+            return " ".join([w.strip('.').capitalize() for w in words])
+    # Fallback to email-derived name
+    return derive_name_from_email(email)
+
+
 def calculate_match_score(candidate_skills, candidate_exp, jd_skills=None, jd_min_exp=0):
     """
     Calculate match score between candidate and job description
@@ -262,6 +312,9 @@ def parse_resume(filepath, job_description=None):
         }
     
     # Extract data
+    email = extract_email(text)
+    phone = extract_phone(text)
+    name = extract_name(text, email)
     skills = extract_skills(text)
     experience = extract_experience(text)
     education = extract_education(text)
@@ -275,6 +328,9 @@ def parse_resume(filepath, job_description=None):
     
     return {
         "text": text[:500] + "..." if len(text) > 500 else text,  # First 500 chars for preview
+        "name": name,
+        "email": email,
+        "phone": phone,
         "skills": skills,
         "experience": experience,
         "education": education,

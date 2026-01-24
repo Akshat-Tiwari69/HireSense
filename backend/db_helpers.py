@@ -266,7 +266,7 @@ def get_all_candidates():
         
         cursor.execute("""
             SELECT id, name, email, phone, resume_path, parsed_skills, years_experience, 
-                   education, match_score, shortlist_status, created_at, updated_at
+                   education, match_score, shortlist_status, pros, cons, status, created_at, updated_at
             FROM candidates ORDER BY created_at DESC
         """)
         
@@ -286,8 +286,11 @@ def get_all_candidates():
                 'education': row[7],
                 'match_score': row[8],
                 'shortlist_status': row[9],
-                'created_at': row[10],
-                'updated_at': row[11]
+                'pros': json.loads(row[10]) if row[10] else [],
+                'cons': json.loads(row[11]) if row[11] else [],
+                'status': row[12],
+                'created_at': row[13],
+                'updated_at': row[14]
             }
             candidates.append(candidate)
         

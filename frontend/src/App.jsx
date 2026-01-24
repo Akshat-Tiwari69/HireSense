@@ -1,36 +1,26 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import UploadPage from './pages/UploadPage';
-import AssessmentPage from './pages/AssessmentPage';
-import DashboardPage from './pages/DashboardPage';
-import LandingPage from './pages/LandingPage';
-import LoginPage from './pages/LoginPage';
-
-import { AuthProvider } from './context/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
+import "./App.css";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import LandingPage from "./pages/LandingPage";
+import LoginPage from "./pages/LoginPage";
+import ApplyPage from "./pages/ApplyPage";
+import InterviewerDashboardPage from "./pages/InterviewerDashboardPage";
+import AssessmentPage from "./pages/AssessmentPage";
+import { Toaster } from "./components/ui/sonner";
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
+    <div className="App">
+      <BrowserRouter>
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/apply" element={<UploadPage />} />
-          <Route path="/assessment/:candidateId" element={<AssessmentPage />} />
           <Route path="/login" element={<LoginPage />} />
-
-          {/* Protected Routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <DashboardPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/apply" element={<ApplyPage />} />
+          <Route path="/dashboard" element={<InterviewerDashboardPage />} />
+          <Route path="/assessment" element={<AssessmentPage />} />
         </Routes>
-      </Router>
-    </AuthProvider>
+      </BrowserRouter>
+      <Toaster />
+    </div>
   );
 }
 

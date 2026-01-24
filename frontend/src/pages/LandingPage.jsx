@@ -31,12 +31,12 @@ const LandingPage = () => {
             <Zap className="w-3 h-3 sm:w-4 sm:h-4" />
             AI-Powered Hiring Platform
           </div>
-
+          
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-slate-900 mb-4 sm:mb-6 leading-tight animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
             Hire faster. Hire smarter.
             <span className="block text-indigo-600 mt-2">Powered by AI.</span>
           </h1>
-
+          
           <p className="text-base sm:text-lg lg:text-xl text-slate-600 mb-8 sm:mb-12 leading-relaxed px-4 sm:px-0 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
             Automated resume screening, AI-driven assessments, and data-backed hiring decisions — all in one platform.
           </p>
