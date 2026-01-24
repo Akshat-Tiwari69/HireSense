@@ -1,0 +1,8 @@
+flask
+flask-cors
+flask-jwt-extended
+bcrypt
+openai
+PyPDF2
+python-docx
+reportlab
