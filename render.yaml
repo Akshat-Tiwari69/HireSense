@@ -22,7 +22,6 @@ services:
   - type: web
     name: elite-hire-frontend
     env: static
-    region: singapore
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: ./frontend/dist
     pullRequestPreviewsEnabled: false
