@@ -1,0 +1,39 @@
+services:
+  # Backend Web Service
+  - type: web
+    name: elite-hire-backend
+    env: python
+    region: singapore
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 90
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: elite-hire-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    autoDeploy: true
+    branch: main
+
+  # Frontend Static Site
+  - type: static
+    name: elite-hire-frontend
+    env: node
+    region: singapore
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    pullRequestPreviewsEnabled: false
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://elite-hire-backend.onrender.com
+    autoDeploy: true
+    branch: main
+
+databases:
+  - name: elite-hire-db
+    databaseName: elite_hire
+    user: elite_hire_user
+    region: singapore
