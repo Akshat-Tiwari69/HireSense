@@ -1,60 +1,69 @@
 """
 Database Configuration Module
-Handles SQLite database connection setup and testing
+Supports Postgres (DATABASE_URL) for production and SQLite fallback for local dev.
 """
 
-import sqlite3
 import os
+import sqlite3
+from urllib.parse import urlparse
 
-# Database file path
+import psycopg2
+
+# SQLite fallback path
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', 'elite_hire.db')
-
-# Ensure database directory exists
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 
+def _get_postgres_connection(database_url: str):
+    """Create a Postgres connection using psycopg2."""
+    # Render/Railway often provide postgres://; psycopg2 expects postgresql://
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    return psycopg2.connect(database_url)
+
+
+def _get_sqlite_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
 def get_connection():
-    """
-    Get a connection to the SQLite database.
-    
-    Returns:
-        sqlite3.Connection: Database connection object
-    """
+    """Return a DB connection (Postgres when DATABASE_URL is set, else SQLite)."""
+    database_url = os.environ.get("DATABASE_URL")
     try:
-        conn = sqlite3.connect(DB_PATH)
-        # Enable foreign key support
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
-    except sqlite3.Error as e:
+        if database_url:
+            return _get_postgres_connection(database_url)
+        return _get_sqlite_connection()
+    except Exception as e:
         print(f"Error connecting to database: {e}")
         return None
 
 
 def test_connection():
-    """
-    Test the database connection.
-    Prints success or failure message.
-    """
+    """Test database connectivity for the active backend."""
+    conn = None
     try:
         conn = get_connection()
         if conn is None:
             print("❌ Database connection failed!")
             return False
-        
-        # Try to execute a simple query
+
         cursor = conn.cursor()
         cursor.execute("SELECT 1")
         cursor.fetchone()
-        
-        conn.close()
         print("✅ Database connected!")
         return True
-    except sqlite3.Error as e:
+    except Exception as e:
         print(f"❌ Database connection failed: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
 
 
 if __name__ == "__main__":
-    # Run test when file is executed directly
-    print(f"Database path: {DB_PATH}")
+    print(f"DATABASE_URL set: {'yes' if os.environ.get('DATABASE_URL') else 'no'}")
+    if not os.environ.get('DATABASE_URL'):
+        print(f"Using SQLite path: {DB_PATH}")
     test_connection()

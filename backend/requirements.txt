@@ -6,3 +6,5 @@ openai
 PyPDF2
 python-docx
 reportlab
+gunicorn
+psycopg2-binary
