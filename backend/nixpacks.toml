@@ -3,6 +3,7 @@
 [phases.setup]
 # Ensure Python comes with pip (use the "Full" derivation) and include PostgreSQL client libs
 nixPkgs = ["python311Full", "gcc", "postgresql"]
+nixLibs = ["postgresql"]
 
 [phases.install]
 # Install backend requirements; bootstrap pip if needed
