@@ -1,0 +1,16 @@
+# Railway Nixpacks configuration for backend (Python)
+
+[phases.setup]
+# Install Python 3.11 in the Nix environment
+nixPkgs = ["python311", "gcc"]
+
+[phases.install]
+# Upgrade pip and install backend requirements
+cmds = [
+  "python -m pip install --upgrade pip",
+  "pip install -r requirements.txt"
+]
+
+[start]
+# Use gunicorn; Railway provides $PORT
+cmd = "gunicorn app:app --bind 0.0.0.0:$PORT --timeout 90"
