@@ -35,20 +35,20 @@
 
 ## 📊 Project Progress Overview
 
-### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 25%
+### **Overall Completion:** 🟢🟢🟢⬜⬜⬜⬜⬜⬜⬜ 32%
 
 | Phase | Status | Owner | Completion |
 |-------|--------|-------|------------|
 | 🏗️ Database (Base) | 🟢 COMPLETE | Prashanth | 100% |
 | 🏗️ Database (New Tables) | ⬜ Not Started | Prashanth | 0% |
-| 🔐 Authentication | ⬜ Not Started | Akshat + Shaivi | 0% |
+| 🔐 Authentication | 🟡 In Progress | Akshat + Shaivi | 50% |
 | 📄 Resume Parsing | 🟢 COMPLETE | Akshat | 100% |
 | 🤖 AI Resume Analysis | ⬜ Not Started | Akshat | 0% |
 | 📝 Assessment Backend | 🟢 COMPLETE | Akshat | 100% |
 | 📝 Assessment Frontend | 🟡 In Progress | Shaivi | 20% |
 | 📧 Email System | ⬜ Not Started | Akshat | 0% |
 | 👔 Interviewer APIs | ⬜ Not Started | Akshat | 0% |
-| 🎨 Frontend Pages | 🟡 In Progress | Shaivi | 30% |
+| 🎨 Frontend Pages | 🟡 In Progress | Shaivi | 50% |
 | 🧪 Integration Testing | 🟡 In Progress | All | 25% |
 
 **Legend:** 🟢 Done | 🟡 In Progress | 🔴 Blocked | ⬜ Not Started
@@ -57,7 +57,7 @@
 
 ## 🏗️ SYSTEM ARCHITECTURE
 
-```
+
 ┌─────────────────────────────────────────────────────────────────┐
 │                        LANDING PAGE                              │
 │                  "Are you an Interviewer or                      │
@@ -335,25 +335,25 @@
 ---
 
 **Task S4: Login Page** 🔥  
-**Status:** ⬜ TODO
+**Status:** ✅ COMPLETE
 
 **Requirements:**
-- [ ] Create `pages/LoginPage.jsx`
-- [ ] Email/password form
-- [ ] Call `POST /api/auth/login`
-- [ ] Store JWT token in localStorage
-- [ ] Redirect to interviewer dashboard on success
+- [x] Create `pages/LoginPage.jsx`
+- [x] Email/password form
+- [x] Call `POST /api/auth/login` (Mocked until Task A5 is ready)
+- [x] Store JWT token in localStorage
+- [x] Redirect to interviewer dashboard on success
 
 ---
 
 **Task S5: Authentication Setup** 🔥  
-**Status:** ⬜ TODO
+**Status:** ✅ COMPLETE
 
 **Requirements:**
-- [ ] Create `context/AuthContext.jsx` - manage auth state
-- [ ] Create `components/ProtectedRoute.jsx` - JWT validation
-- [ ] Setup route protection based on role
-- [ ] Auto-redirect if not authenticated
+- [x] Create `context/AuthContext.jsx` - manage auth state
+- [x] Create `components/ProtectedRoute.jsx` - JWT validation
+- [x] Setup route protection based on role
+- [x] Auto-redirect if not authenticated
 
 ---
 
@@ -522,13 +522,13 @@ For detailed API endpoint documentation, see [API_DOCS.md](docs/API_DOCS.md)
 - `frontend/src/pages/AssessmentPage.jsx` - Assessment interface (in progress)
 - `frontend/src/pages/DashboardPage.jsx` - Dashboard (placeholder)
 - `frontend/src/pages/LandingPage.jsx` - Role selection & Landing Page
-- `frontend/src/services/api.js` - API client
+- `frontend/src/pages/LoginPage.jsx` - Authentication Page
+- `frontend/src/services/api.js` - API client (with mock auth)
+- `frontend/src/context/AuthContext.jsx` - Auth state
+- `frontend/src/components/ProtectedRoute.jsx` - Route protection
 
 **To be Created:**
-- `frontend/src/pages/LoginPage.jsx` - Authentication
 - `frontend/src/pages/InterviewerDashboardPage.jsx` - Interviewer view
-- `frontend/src/components/ProtectedRoute.jsx` - Route protection
-- `frontend/src/context/AuthContext.jsx` - Auth state
 
 **Database Tables:**
 - `candidates` - Resume data and match scores

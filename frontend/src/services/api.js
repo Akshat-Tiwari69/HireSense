@@ -42,16 +42,51 @@ export const login = async (email, password) => {
             }
         }, 1000); // Simulate network delay
     });
+};
 
-    /*
-    // REAL IMPLEMENTATION (Future)
+export const startAssessment = async (candidateId) => {
     try {
-        const response = await api.post('/auth/login', { email, password });
+        const response = await api.post('/assessment/start', { candidate_id: candidateId });
         return response.data;
     } catch (error) {
         throw error.response ? error.response.data : new Error('Network error');
     }
-    */
+};
+
+export const submitMCQ = async (data) => {
+    try {
+        const response = await api.post('/assessment/mcq/submit', data);
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error('Network error');
+    }
+};
+
+export const submitCode = async (data) => {
+    try {
+        const response = await api.post('/assessment/code/submit', data);
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error('Network error');
+    }
+};
+
+export const submitPsychometric = async (data) => {
+    try {
+        const response = await api.post('/assessment/psychometric/submit', data);
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error('Network error');
+    }
+};
+
+export const completeAssessment = async (assessmentId) => {
+    try {
+        const response = await api.post('/assessment/complete', { assessment_id: assessmentId });
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error('Network error');
+    }
 };
 
 export default api;

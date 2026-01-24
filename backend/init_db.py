@@ -17,7 +17,7 @@ def init_database():
         # Getting the database connection
         conn = get_connection()
         if conn is None:
-            print("❌ Failed to connect to database")
+            print("[ERROR] Failed to connect to database")
             return False
         
         cursor = conn.cursor()
@@ -26,7 +26,7 @@ def init_database():
         schema_path = os.path.join(os.path.dirname(__file__), '..', 'database', 'schema.sql')
         
         if not os.path.exists(schema_path):
-            print(f"❌ Schema file not found at {schema_path}")
+            print(f"[ERROR] Schema file not found at {schema_path}")
             return False
         
         with open(schema_path, 'r') as f:
@@ -44,18 +44,18 @@ def init_database():
         
         conn.close()
         
-        print("✅ Database initialized successfully!")
-        print(f"\n📊 Created {len(tables)} tables:")
+        print("[SUCCESS] Database initialized successfully!")
+        print(f"\n[INFO] Created {len(tables)} tables:")
         for table in tables:
-            print(f"   • {table[0]}")
+            print(f"   - {table[0]}")
         
         return True
         
     except sqlite3.Error as e:
-        print(f"❌ Database error: {e}")
+        print(f"[ERROR] Database error: {e}")
         return False
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] Error: {e}")
         return False
 
 
@@ -64,6 +64,6 @@ if __name__ == "__main__":
     success = init_database()
     
     if success:
-        print("\n✨ Database is ready to use!")
+        print("\n[SUCCESS] Database is ready to use!")
     else:
-        print("\n⚠️  Database initialization failed.")
+        print("\n[ERROR] Database initialization failed.")
