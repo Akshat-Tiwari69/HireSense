@@ -1,9 +1,8 @@
 # Railway Nixpacks configuration for backend (Python)
 
 [phases.install]
-# Upgrade pip and install backend requirements
+# Install backend requirements using the venv-provided pip
 commands = [
-  "python -m pip install --upgrade pip",
   "pip install -r requirements.txt"
 ]
 
