@@ -13,5 +13,5 @@ commands = [
 ]
 
 [start]
-# Use gunicorn; Railway provides $PORT
-cmd = "gunicorn app:app --bind 0.0.0.0:$PORT --timeout 90"
+# Use gunicorn with explicit LD_LIBRARY_PATH for PostgreSQL; Railway provides $PORT
+cmd = "LD_LIBRARY_PATH=/nix/var/nix/profiles/default/lib:$LD_LIBRARY_PATH gunicorn app:app --bind 0.0.0.0:$PORT --timeout 90"
