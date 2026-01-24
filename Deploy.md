@@ -43,9 +43,9 @@
 5) Verify health: open Render service URL `/api/health` (or root) to confirm it responds.
 
 ## Frontend Setup (Render Static Site)
-1) In Render, create **Static Site** pointing to `/frontend`.
-   - Build command: `npm install && npm run build`
-   - Publish directory: `dist`
+1) In Render, create **Static Site** pointing to root `/` (not `/frontend`).
+   - **Build command:** `cd frontend && npm install && npm run build`
+   - **Publish directory:** `frontend/dist`
    - Branch: `main`
 2) Env var (Frontend):
    - `VITE_API_BASE_URL` = `https://<your-backend>.onrender.com`
