@@ -22,26 +22,30 @@ export const uploadResume = async (formData) => {
 };
 
 export const login = async (email, password) => {
-    // MOCK LOGIN IMPLEMENTATION (Task S4)
-    // To be replaced by actual API call when Backend Task A5 is done
-    return new Promise((resolve, reject) => {
-        setTimeout(() => {
-            if (email && password) {
-                resolve({
-                    data: {
-                        token: "mock_jwt_token_12345",
-                        user: {
-                            name: "Interviewer Name",
-                            role: "interviewer",
-                            email: email
-                        }
-                    }
-                });
-            } else {
-                reject({ message: "Invalid credentials" });
-            }
-        }, 1000); // Simulate network delay
-    });
+    try {
+        const response = await api.post('/auth/login', { email, password });
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error('Network error');
+    }
+};
+
+export const getCandidates = async () => {
+    try {
+        const response = await api.get('/dashboard/candidates');
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error('Network error');
+    }
+};
+
+export const updateCandidateShortlist = async (candidateId, status, score) => {
+    try {
+        const response = await api.post(`/dashboard/candidates/${candidateId}/shortlist`, { status, score });
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error('Network error');
+    }
 };
 
 export const startAssessment = async (candidateId) => {

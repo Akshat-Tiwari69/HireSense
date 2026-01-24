@@ -8,16 +8,16 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { LogOut, Search, Filter, Calendar, CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown, Users, BarChart3 } from 'lucide-react';
-import { mockCandidates } from '../data/mock';
+import { LogOut, Search, Filter, Calendar, CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown, Users, BarChart3, Loader2 } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import Logo from '../components/Logo';
+import { getCandidates, updateCandidateShortlist } from '../services/api';
 
 const DashboardPage = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
-    const [candidates, setCandidates] = useState(mockCandidates);
-    const [filteredCandidates, setFilteredCandidates] = useState(mockCandidates);
+    const [candidates, setCandidates] = useState([]);
+    const [filteredCandidates, setFilteredCandidates] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [scoreFilter, setScoreFilter] = useState('all');
@@ -26,13 +26,37 @@ const DashboardPage = () => {
     const [scheduleDate, setScheduleDate] = useState('');
     const [scheduleTime, setScheduleTime] = useState('');
 
+    const [loading, setLoading] = useState(true);
+
     useEffect(() => {
         // Check auth
         const token = localStorage.getItem('authToken');
         if (!token) {
             navigate('/login');
+            return;
         }
-    }, [navigate]);
+
+        const fetchData = async () => {
+            try {
+                const response = await getCandidates();
+                if (response.status === 'success') {
+                    setCandidates(response.data || []);
+                    setFilteredCandidates(response.data || []);
+                }
+            } catch (error) {
+                console.error("Failed to fetch candidates:", error);
+                toast({
+                    variant: 'destructive',
+                    title: "Error",
+                    description: "Failed to load candidates."
+                });
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, [navigate, toast]);
 
     useEffect(() => {
         let filtered = candidates;
