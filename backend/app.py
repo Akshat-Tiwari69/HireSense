@@ -6,7 +6,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import uuid
 import re
-from datetime import timedelta
+import logging
+from datetime import timedelta, datetime
 from resume_parser import parse_resume
 from resume_analyzer import analyze_resume
 from db_helpers import (
@@ -26,10 +27,46 @@ import time
 # Initialize Flask app
 app = Flask(__name__)
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+logger.info("="*80)
+logger.info("🚀 CYGNUSA Elite-Hire Backend Starting...")
+logger.info("="*80)
+
 # Configure JWT
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 jwt = JWTManager(app)
+
+# JWT error handlers
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    logger.warning(f"⚠️ JWT token expired")
+    return jsonify({
+        'status': 'error',
+        'message': 'Token has expired. Please login again.'
+    }), 401
+
+@jwt.invalid_token_loader
+def invalid_token_callback(error):
+    logger.error(f"❌ Invalid JWT token: {error}")
+    return jsonify({
+        'status': 'error',
+        'message': 'Invalid token. Please login again.'
+    }), 422
+
+@jwt.unauthorized_loader
+def unauthorized_callback(error):
+    logger.error(f"❌ Missing JWT token: {error}")
+    return jsonify({
+        'status': 'error',
+        'message': 'Authorization token is missing. Please login.'
+    }), 401
 
 # Enable CORS so frontend can call our APIs
 CORS(app)
@@ -46,6 +83,7 @@ app.register_blueprint(interviewee_bp, url_prefix='/api/interviewee')
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+logger.info(f"📁 Upload folder configured: {UPLOAD_FOLDER}")
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -80,6 +118,18 @@ def is_valid_email(email):
     return re.match(EMAIL_PATTERN, email) is not None
 
 
+def name_from_email(email):
+    """Derive a human-friendly name from the email local part."""
+    if not email or '@' not in email:
+        return None
+    local = email.split('@', 1)[0]
+    parts = re.split(r'[._-]+', local)
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    return " ".join([p.capitalize() for p in parts])
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint to verify API is running"""
@@ -92,25 +142,30 @@ def upload_resume():
     Resume upload endpoint
     
     Accepts:
-        - file: PDF or DOCX resume file
-        - name: Candidate's name (required)
-        - email: Candidate's email (required)
-        - phone: Candidate's phone number (optional)
+        - file: PDF or DOCX resume file (required)
+        - name/email/phone: Optional overrides; normally extracted from resume
     
     Returns:
         JSON with status, file_path, and message
     """
+    logger.info("="*80)
+    logger.info("📤 RESUME UPLOAD REQUEST RECEIVED")
+    logger.info("="*80)
+    
     # Check if file was uploaded
     if 'file' not in request.files:
+        logger.error("❌ No file in request")
         return jsonify({
             "status": "error",
             "message": "No file uploaded"
         }), 400
     
     file = request.files['file']
+    logger.info(f"📄 File detected: {file.filename}")
     
     # Check if file has a filename (no file selected)
     if file.filename == '':
+        logger.error("❌ Empty filename")
         return jsonify({
             "status": "error",
             "message": "No file selected"
@@ -118,52 +173,41 @@ def upload_resume():
     
     # Check file type
     if not allowed_file(file.filename):
+        logger.error(f"❌ Invalid file type: {file.filename}")
         return jsonify({
             "status": "error",
             "message": "Invalid file type. Only PDF and DOCX allowed"
         }), 400
     
-    # Get form data
-    name = request.form.get('name', '').strip()
-    email = request.form.get('email', '').strip()
-    phone = request.form.get('phone', '').strip()  # Optional field
-    
-    # Validate required fields
-    if not name or not email:
-        return jsonify({
-            "status": "error",
-            "message": "Name and email are required"
-        }), 400
-    
-    # Validate email format
-    if not is_valid_email(email):
-        return jsonify({
-            "status": "error",
-            "message": "Invalid email format"
-        }), 400
+    logger.info(f"✅ File type validated: {file.filename}")
     
     # Generate unique filename to prevent conflicts
     original_filename = secure_filename(file.filename)
     # Ensure secure_filename produced a valid filename with an extension
     if not original_filename or "." not in original_filename:
+        logger.error(f"❌ Invalid filename after sanitization: {original_filename}")
         return jsonify({
             "status": "error",
             "message": "Invalid filename after sanitization"
         }), 400
     unique_filename = f"{uuid.uuid4()}_{original_filename}"
     
+    logger.info(f"🔐 Generated unique filename: {unique_filename}")
+    
     # Save file to uploads folder
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
     try:
+        logger.info(f"💾 Saving file to: {filepath}")
         file.save(filepath)
+        logger.info(f"✅ File saved successfully")
     except OSError as e:
-        app.logger.error("Failed to save uploaded file '%s': %s", filepath, e)
+        logger.error(f"❌ OSError saving file: {e}")
         return jsonify({
             "status": "error",
             "message": "Failed to save uploaded file. Please try again later."
         }), 500
     except Exception as e:
-        app.logger.exception("Unexpected error while saving uploaded file '%s'", filepath)
+        logger.exception(f"❌ Unexpected error saving file: {e}")
         return jsonify({
             "status": "error",
             "message": "An unexpected error occurred while saving the file."
@@ -171,45 +215,100 @@ def upload_resume():
     
     # Parse the resume to extract data
     try:
+        logger.info("🔍 Starting resume parsing...")
         # Optional: Define job description for matching (can be passed from frontend or config)
         job_description = {
             'skills': ['Python', 'Java', 'JavaScript', 'React', 'AWS'],  # Example JD
             'min_experience': 2  # Example requirement
         }
         
+        # First try basic parsing as fallback data
         parsed_data = parse_resume(filepath, job_description)
+        logger.info(f"✅ Basic parsing completed - Skills: {len(parsed_data.get('skills', []))}, Experience: {parsed_data.get('experience', 0)} years")
         
         # Extract resume text for AI analysis
+        logger.info("📖 Extracting resume text for AI analysis...")
         with open(filepath, 'rb') as f:
             # Get raw text (simplified - you may want to use the same extraction as in resume_parser)
             if filepath.endswith('.pdf'):
                 from PyPDF2 import PdfReader
                 pdf = PdfReader(f)
                 resume_text = " ".join([page.extract_text() for page in pdf.pages])
+                logger.info(f"✅ Extracted {len(resume_text)} characters from PDF")
             else:
                 from docx import Document
                 doc = Document(f)
                 resume_text = " ".join([para.text for para in doc.paragraphs])
+                logger.info(f"✅ Extracted {len(resume_text)} characters from DOCX")
+        
+        # Try AI extraction for better accuracy
+        ai_extracted_data = None
+        try:
+            from resume_analyzer import ResumeAnalyzer
+            logger.info("🤖 Using AI to extract contact info and resume data...")
+            analyzer = ResumeAnalyzer()
+            ai_extracted_data = analyzer.extract_resume_data(resume_text)
+            
+            if ai_extracted_data:
+                logger.info(f"✅ AI extraction successful")
+                logger.info(f"   Name: {ai_extracted_data.get('name')}")
+                logger.info(f"   Email: {ai_extracted_data.get('email')}")
+                logger.info(f"   Phone: {ai_extracted_data.get('phone')}")
+                logger.info(f"   Skills: {len(ai_extracted_data.get('skills', []))}")
+                logger.info(f"   Experience: {ai_extracted_data.get('experience', 0)} years")
+                
+                # Merge AI data with parsed data (AI takes precedence)
+                if ai_extracted_data.get('skills'):
+                    parsed_data['skills'] = ai_extracted_data['skills']
+                if ai_extracted_data.get('experience') is not None and ai_extracted_data['experience'] > 0:
+                    parsed_data['experience'] = ai_extracted_data['experience']
+                if ai_extracted_data.get('education'):
+                    parsed_data['education'] = ai_extracted_data['education']
+                if ai_extracted_data.get('name'):
+                    parsed_data['name'] = ai_extracted_data['name']
+                if ai_extracted_data.get('email'):
+                    parsed_data['email'] = ai_extracted_data['email']
+                if ai_extracted_data.get('phone'):
+                    parsed_data['phone'] = ai_extracted_data['phone']
+                
+                # Recalculate match score with AI-extracted data
+                from resume_parser import calculate_match_score
+                parsed_data['match_score'] = calculate_match_score(
+                    parsed_data.get('skills', []),
+                    parsed_data.get('experience', 0),
+                    job_description.get('skills', []),
+                    job_description.get('min_experience', 0)
+                )
+                logger.info(f"📊 Recalculated match score: {parsed_data['match_score']}%")
+        except Exception as ai_extract_error:
+            logger.warning(f"⚠️ AI extraction failed: {ai_extract_error}. Using basic parsing.")
         
         # Generate AI-powered pros/cons analysis
         ai_analysis = None
         try:
-            app.logger.info("Starting AI analysis for resume...")
+            logger.info("🤖 Sending resume to AI for pros/cons analysis...")
+            logger.info(f"📊 Resume text length: {len(resume_text)} chars, Parsed skills: {len(parsed_data.get('skills', []))}")
+            
             ai_analysis = analyze_resume(
                 resume_text=resume_text,
                 parsed_data=parsed_data,
                 job_requirements=job_description,
                 enhance_score=True
             )
-            app.logger.info(f"AI analysis completed: {ai_analysis['recommendation']}")
+            logger.info(f"✅ AI analysis completed")
+            logger.info(f"   Recommendation: {ai_analysis['recommendation']}")
+            logger.info(f"   Confidence: {ai_analysis.get('confidence_score', 0)}")
+            logger.info(f"   Pros: {len(ai_analysis.get('pros', []))} points")
+            logger.info(f"   Cons: {len(ai_analysis.get('cons', []))} points")
             
             # Use enhanced match score if available
             if 'enhanced_match_score' in ai_analysis:
                 parsed_data['match_score'] = ai_analysis['enhanced_match_score']
                 parsed_data['original_match_score'] = parsed_data.get('match_score', 0)
+                logger.info(f"📈 Match score updated: {parsed_data['match_score']}")
             
         except Exception as ai_error:
-            app.logger.warning(f"AI analysis failed: {ai_error}. Proceeding with basic analysis.")
+            logger.warning(f"⚠️ AI analysis failed: {ai_error}. Proceeding with basic analysis.")
             # Continue without AI - we'll still have parsed data
             ai_analysis = {
                 "pros": ["Resume uploaded successfully"],
@@ -220,7 +319,7 @@ def upload_resume():
             }
     
     except Exception as e:
-        app.logger.exception("Error parsing resume '%s'", filepath)
+        logger.exception(f"❌ Error parsing resume: {e}")
         parsed_data = {
             "error": "Failed to parse resume",
             "skills": [],
@@ -231,26 +330,51 @@ def upload_resume():
         }
         ai_analysis = None
     
+    # Resolve candidate identity from parsed data with optional manual overrides
+    manual_name = request.form.get('name', '').strip()
+    manual_email = request.form.get('email', '').strip()
+    manual_phone = request.form.get('phone', '').strip()
+
+    name = manual_name or parsed_data.get('name')
+    email = manual_email or parsed_data.get('email')
+    phone = manual_phone or parsed_data.get('phone') or ""
+
+    if not email or not is_valid_email(email):
+        logger.error("❌ Unable to detect a valid email from resume or overrides")
+        return jsonify({
+            "status": "error",
+            "message": "Could not detect a valid email in the resume. Please add an email override."
+        }), 400
+
+    if not name:
+        name = name_from_email(email) or "Candidate"
+
+    logger.info(f"👤 Candidate Info - Name: {name}, Email: {email}, Phone: {phone or 'N/A'}")
+
     # Save candidate to database with AI insights
     try:
+        logger.info("💾 Saving candidate to database...")
         # Prepare pros and cons for database
         pros_text = None
         cons_text = None
-        status = "pending"
+        status = "Applied"
         
         if ai_analysis:
             # Convert lists to newline-separated strings for database storage
             pros_text = "\n".join(ai_analysis.get('pros', []))
             cons_text = "\n".join(ai_analysis.get('cons', []))
+            logger.info(f"   Pros: {len(ai_analysis.get('pros', []))} items")
+            logger.info(f"   Cons: {len(ai_analysis.get('cons', []))} items")
             
             # Set initial status based on recommendation
             recommendation = ai_analysis.get('recommendation', 'Moderate Match')
             if recommendation == "Strong Match":
-                status = "under_review"
+                status = "Applied"
             elif recommendation in ["Good Match", "Moderate Match"]:
-                status = "pending"
+                status = "Applied"
             else:
-                status = "pending"
+                status = "Applied"
+            logger.info(f"   Status set to: {status}")
         
         candidate_id = insert_candidate(
             name=name,
@@ -262,9 +386,9 @@ def upload_resume():
             cons=cons_text,
             status=status
         )
-        app.logger.info(f"Candidate saved to database with ID: {candidate_id}")
+        logger.info(f"✅ Candidate saved with ID: {candidate_id}")
     except Exception as e:
-        app.logger.exception("Error saving candidate to database")
+        logger.exception(f"❌ Error saving candidate to database: {e}")
         # Continue anyway - parsing was successful
         candidate_id = None
     
@@ -272,6 +396,7 @@ def upload_resume():
     # Use the configured upload folder name for consistency
     relative_path = os.path.join(os.path.basename(app.config['UPLOAD_FOLDER']), unique_filename)
     
+    logger.info("📦 Preparing response data...")
     # Prepare response data
     response_data = {
         "candidate_id": candidate_id,
@@ -298,6 +423,20 @@ def upload_resume():
         }
         if 'enhanced_match_score' in ai_analysis:
             response_data["ai_analysis"]["enhanced_match_score"] = ai_analysis['enhanced_match_score']
+    
+    logger.info("="*80)
+    logger.info(f"✅ RESUME UPLOAD COMPLETED SUCCESSFULLY")
+    logger.info(f"   Candidate ID: {candidate_id}")
+    logger.info(f"   Name: {name}")
+    logger.info(f"   Email: {email}")
+    logger.info(f"   Match Score: {parsed_data.get('match_score', 0)}")
+    logger.info("="*80)
+    
+    return jsonify({
+        "status": "success",
+        "message": "Resume uploaded and analyzed successfully",
+        "data": response_data
+    }), 200
     
     return jsonify({
         "status": "success",

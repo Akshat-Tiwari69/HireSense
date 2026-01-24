@@ -153,7 +153,7 @@ Authorization: Bearer <access_token>
 ## Resume Upload
 
 ### 5. Upload Resume (With AI Analysis)
-Upload and analyze a candidate's resume with AI-powered insights.
+Upload a resume and let the system auto-extract contact details plus AI insights.
 
 **Endpoint:** `POST /api/resume/upload`
 
@@ -161,9 +161,7 @@ Upload and analyze a candidate's resume with AI-powered insights.
 
 **Form Data:**
 - `file`: PDF or DOCX resume file (required)
-- `name`: Candidate's full name (required)
-- `email`: Candidate's email address (required)
-- `phone`: Phone number (optional)
+- `name` / `email` / `phone`: Optional overrides; when omitted, the backend extracts these from the resume text
 
 **Success Response (201):**
 ```json
@@ -175,9 +173,9 @@ Upload and analyze a candidate's resume with AI-powered insights.
     "file_path": "uploads/abc123_resume.pdf",
     "original_filename": "resume.pdf",
     "candidate": {
-      "name": "John Doe",
-      "email": "john@example.com",
-      "phone": "1234567890"
+      "name": "John Doe",         // auto-detected or overridden
+      "email": "john@example.com",// auto-detected or overridden
+      "phone": "1234567890"       // auto-detected or overridden
     },
     "parsed_data": {
       "skills": ["Python", "JavaScript", "React", "AWS", "Docker"],

@@ -7,6 +7,7 @@ Protected routes requiring JWT authentication with 'interviewer' role
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from datetime import datetime
+import logging
 from db_helpers import (
     get_all_candidates,
     get_candidate_by_id,
@@ -25,6 +26,8 @@ from email_service import (
     send_final_decision_email
 )
 
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # Create blueprint for interviewer routes
 interviewer_bp = Blueprint('interviewer', __name__)
@@ -61,23 +64,33 @@ def get_candidates():
         List of candidates with all data
     """
     try:
+        logger.info("="*80)
+        logger.info("📊 DASHBOARD: FETCHING CANDIDATES")
+        logger.info("="*80)
+        
         # Get filter and sort parameters
         status_filter = request.args.get('status', None)
         sort_by = request.args.get('sort', 'date')
         order = request.args.get('order', 'desc').lower()
         
+        logger.info(f"   Filters - Status: {status_filter or 'All'}, Sort: {sort_by}, Order: {order}")
+        
         if order not in ['asc', 'desc']:
             order = 'desc'
         
         # Get all candidates
+        logger.info("🔍 Querying database for candidates...")
         candidates = get_all_candidates()
         
         if not candidates:
+            logger.info("ℹ️ No candidates found")
             return jsonify({
                 'status': 'success',
                 'data': [],
                 'total': 0
             }), 200
+        
+        logger.info(f"✅ Found {len(candidates)} candidates")
         
         # Filter by status if provided
         if status_filter:
@@ -103,6 +116,9 @@ def get_candidates():
         else:  # date
             candidates.sort(key=lambda x: x.get('created_at', ''), reverse=(order == 'desc'))
         
+        logger.info(f"✅ Returning {len(candidates)} candidates to dashboard")
+        logger.info("="*80)
+        
         return jsonify({
             'status': 'success',
             'data': candidates,
@@ -110,6 +126,7 @@ def get_candidates():
         }), 200
         
     except Exception as e:
+        logger.exception(f"❌ Failed to fetch candidates: {e}")
         return jsonify({
             'status': 'error',
             'message': f'Failed to fetch candidates: {str(e)}'
@@ -267,7 +284,7 @@ def schedule_assessment(candidate_id):
         )
         
         # Generate assessment link
-        assessment_link = f"http://localhost:5173/assessment/{scheduled_assessment_id}"
+        assessment_link = "http://localhost:5173/assessment"
         
         # Get interviewer name from JWT claims
         claims = get_jwt()
