@@ -1,9 +1,14 @@
 # Railway Nixpacks configuration for backend (Python)
 
+[phases.setup]
+# Ensure Python comes with pip (use the "Full" derivation) and include PostgreSQL client libs
+nixPkgs = ["python311Full", "gcc", "postgresql"]
+
 [phases.install]
-# Install backend requirements using the venv-provided pip
+# Install backend requirements; bootstrap pip if needed
 commands = [
-  "pip install -r requirements.txt"
+  "python -m ensurepip --upgrade || true",
+  "python -m pip install -r requirements.txt"
 ]
 
 [start]
