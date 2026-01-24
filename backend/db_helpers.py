@@ -15,10 +15,137 @@ class DatabaseError(Exception):
 
 
 # ============================================================================
+#                            USER FUNCTIONS (AUTHENTICATION)
+# ============================================================================
+
+def create_user(email, password_hash, role, name):
+    """
+    Create a new user in the database.
+    
+    Args:
+        email (str): User's email address (unique)
+        password_hash (str): Hashed password
+        role (str): User role - "interviewer" or "admin"
+        name (str): User's full name
+    
+    Returns:
+        int: User ID of the newly created user
+    
+    Raises:
+        DatabaseError: If creation fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO users (email, password_hash, role, name)
+               VALUES (?, ?, ?, ?)""",
+            (email, password_hash, role, name)
+        )
+        
+        conn.commit()
+        user_id = cursor.lastrowid
+        conn.close()
+        
+        return user_id
+    
+    except sqlite3.IntegrityError as e:
+        raise DatabaseError(f"Email already exists: {str(e)}")
+    except Exception as e:
+        raise DatabaseError(f"Error creating user: {str(e)}")
+
+
+def get_user_by_email(email):
+    """
+    Retrieve user by email address.
+    
+    Args:
+        email (str): User's email address
+    
+    Returns:
+        dict: User data with keys (id, email, password_hash, role, name, created_at, updated_at)
+              or None if user not found
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, email, password_hash, role, name, created_at, updated_at
+               FROM users WHERE email = ?""",
+            (email,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'email': row[1],
+                'password_hash': row[2],
+                'role': row[3],
+                'name': row[4],
+                'created_at': row[5],
+                'updated_at': row[6]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving user by email: {str(e)}")
+
+
+def get_user_by_id(user_id):
+    """
+    Retrieve user by user ID.
+    
+    Args:
+        user_id (int): User's ID
+    
+    Returns:
+        dict: User data with keys (id, email, role, name, created_at, updated_at)
+              or None if user not found (password_hash excluded for security)
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, email, role, name, created_at, updated_at
+               FROM users WHERE id = ?""",
+            (user_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'email': row[1],
+                'role': row[2],
+                'name': row[3],
+                'created_at': row[4],
+                'updated_at': row[5]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving user by ID: {str(e)}")
+
+
+# ============================================================================
 #                            CANDIDATE FUNCTIONS
 # ============================================================================
 
-def insert_candidate(name, email, phone, resume_path, parsed_data):
+def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending'):
     """
     Insert a new candidate into the database.
     
@@ -28,6 +155,9 @@ def insert_candidate(name, email, phone, resume_path, parsed_data):
         phone (str): Candidate's phone number
         resume_path (str): Path to the uploaded resume file
         parsed_data (dict): Parsed resume data with skills, experience, education, match_score
+        pros (list, optional): List of AI-generated pros about the candidate
+        cons (list, optional): List of AI-generated cons about the candidate
+        status (str, optional): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
     
     Returns:
         int: Candidate ID of the newly inserted candidate
@@ -46,14 +176,16 @@ def insert_candidate(name, email, phone, resume_path, parsed_data):
         match_score = parsed_data.get('match_score', 0)
         shortlist_status = parsed_data.get('shortlist_status', 'Potential')
         
-        # Converting skills list to JSON string
+        # Converting lists to JSON strings
         skills_json = json.dumps(skills)
+        pros_json = json.dumps(pros) if pros else None
+        cons_json = json.dumps(cons) if cons else None
         
         cursor.execute("""
             INSERT INTO candidates 
-            (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status))
+            (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status))
         
         conn.commit()
         candidate_id = cursor.lastrowid
@@ -194,6 +326,52 @@ def update_candidate_shortlist(candidate_id, status, score):
         raise DatabaseError(f"Error updating candidate shortlist: {str(e)}")
 
 
+def update_candidate_status(candidate_id, status, pros=None, cons=None):
+    """
+    Update candidate's status and optionally AI-generated pros/cons.
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+        status (str): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
+        pros (list, optional): List of AI-generated pros about the candidate
+        cons (list, optional): List of AI-generated cons about the candidate
+    
+    Returns:
+        bool: True if update successful, False if candidate not found
+    
+    Raises:
+        DatabaseError: If update fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        pros_json = json.dumps(pros) if pros else None
+        cons_json = json.dumps(cons) if cons else None
+        
+        if pros_json or cons_json:
+            cursor.execute("""
+                UPDATE candidates 
+                SET status = ?, pros = COALESCE(?, pros), cons = COALESCE(?, cons), updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (status, pros_json, cons_json, candidate_id))
+        else:
+            cursor.execute("""
+                UPDATE candidates 
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (status, candidate_id))
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        return success
+        
+    except Exception as e:
+        raise DatabaseError(f"Error updating candidate status: {str(e)}")
+
+
 # ============================================================================
 #                           ASSESSMENT FUNCTIONS
 # ============================================================================
@@ -231,9 +409,9 @@ def create_assessment(candidate_id, job_id=None):
         raise DatabaseError(f"Error creating assessment: {str(e)}")
 
 
-def update_assessment_scores(assessment_id, technical_score, psychometric_score, decision, rationale):
+def update_assessment_scores(assessment_id, technical_score, psychometric_score, decision, rationale, scheduled_assessment_id=None, hiring_recommendation=None):
     """
-    Update assessment scores and decision.
+    Update assessment scores, decision, and hiring recommendation.
     
     Args:
         assessment_id (int): The ID of the assessment
@@ -241,6 +419,8 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
         psychometric_score (float): Psychometric score (0-100)
         decision (str): Hiring decision ("Hire", "No-Hire", "Maybe")
         rationale (str): AI-generated explanation
+        scheduled_assessment_id (int, optional): Link to scheduled assessment
+        hiring_recommendation (str, optional): AI-generated hiring recommendation
     
     Raises:
         DatabaseError: If update fails
@@ -252,13 +432,24 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
         # Calculate overall score as weighted average
         overall_score = (technical_score * 0.6) + (psychometric_score * 0.4)
         
-        cursor.execute("""
-            UPDATE assessments 
-            SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
-                decision = ?, rationale = ?, status = 'completed', 
-                completed_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
+        if scheduled_assessment_id or hiring_recommendation:
+            cursor.execute("""
+                UPDATE assessments 
+                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
+                    decision = ?, rationale = ?, scheduled_assessment_id = COALESCE(?, scheduled_assessment_id),
+                    hiring_recommendation = COALESCE(?, hiring_recommendation), 
+                    status = 'completed', completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (technical_score, psychometric_score, overall_score, decision, rationale, 
+                  scheduled_assessment_id, hiring_recommendation, assessment_id))
+        else:
+            cursor.execute("""
+                UPDATE assessments 
+                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
+                    decision = ?, rationale = ?, status = 'completed', 
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
         
         conn.commit()
         conn.close()
@@ -558,6 +749,482 @@ def get_psychometric_scores(assessment_id):
         
     except Exception as e:
         raise DatabaseError(f"Error calculating psychometric scores: {str(e)}")
+
+
+# ============================================================================
+#                    ASSESSMENT SCHEDULING FUNCTIONS
+# ============================================================================
+
+def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
+    """
+    Create a new scheduled assessment session.
+    
+    Args:
+        candidate_id (int): ID of the candidate
+        interviewer_id (int): ID of the interviewer (user)
+        scheduled_time (str): ISO format datetime string (e.g., '2026-01-25T10:30:00')
+    
+    Returns:
+        int: Scheduled assessment ID
+    
+    Raises:
+        DatabaseError: If creation fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
+               VALUES (?, ?, ?, 'scheduled')""",
+            (candidate_id, interviewer_id, scheduled_time)
+        )
+        
+        conn.commit()
+        scheduled_id = cursor.lastrowid
+        conn.close()
+        
+        return scheduled_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error creating scheduled assessment: {str(e)}")
+
+
+def get_scheduled_assessment(candidate_id):
+    """
+    Retrieve scheduled assessment for a candidate.
+    
+    Args:
+        candidate_id (int): ID of the candidate
+    
+    Returns:
+        dict: Scheduled assessment data with keys (id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, created_at, updated_at)
+              or None if not found
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, created_at, updated_at
+               FROM scheduled_assessments WHERE candidate_id = ?""",
+            (candidate_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'candidate_id': row[1],
+                'interviewer_id': row[2],
+                'scheduled_time': row[3],
+                'status': row[4],
+                'assessment_id': row[5],
+                'created_at': row[6],
+                'updated_at': row[7]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving scheduled assessment: {str(e)}")
+
+
+def update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id=None):
+    """
+    Update the status of a scheduled assessment.
+    
+    Args:
+        scheduled_assessment_id (int): ID of the scheduled assessment
+        status (str): New status - 'scheduled', 'in_progress', 'completed', 'cancelled'
+        assessment_id (int, optional): Assessment ID to link when marking as in_progress
+    
+    Returns:
+        bool: True if update successful, False if assessment not found
+    
+    Raises:
+        DatabaseError: If update fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if assessment_id:
+            cursor.execute(
+                """UPDATE scheduled_assessments 
+                   SET status = ?, assessment_id = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (status, assessment_id, scheduled_assessment_id)
+            )
+        else:
+            cursor.execute(
+                """UPDATE scheduled_assessments 
+                   SET status = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (status, scheduled_assessment_id)
+            )
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        return success
+    
+    except Exception as e:
+        raise DatabaseError(f"Error updating scheduled assessment status: {str(e)}")
+
+
+def check_assessment_time_valid(candidate_id, current_time):
+    """
+    Check if current time is within ±30 minutes of scheduled assessment time.
+    
+    Args:
+        candidate_id (int): ID of the candidate
+        current_time (str): ISO format datetime string (e.g., '2026-01-25T10:30:00')
+    
+    Returns:
+        dict: {'valid': bool, 'scheduled_assessment_id': int or None, 'message': str}
+              If valid: {'valid': True, 'scheduled_assessment_id': id, 'message': 'Assessment can proceed'}
+              If invalid: {'valid': False, 'scheduled_assessment_id': None, 'message': 'error reason'}
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        from datetime import datetime, timedelta
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, scheduled_time, status 
+               FROM scheduled_assessments WHERE candidate_id = ? AND status = 'scheduled'""",
+            (candidate_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return {
+                'valid': False,
+                'scheduled_assessment_id': None,
+                'message': 'No scheduled assessment found for this candidate'
+            }
+        
+        scheduled_id, scheduled_time_str, status = row
+        
+        # Parse times
+        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+        scheduled_dt = datetime.fromisoformat(scheduled_time_str.replace('Z', '+00:00'))
+        
+        # Check if within ±30 minutes
+        time_diff = abs((current_dt - scheduled_dt).total_seconds() / 60)
+        
+        if time_diff <= 30:
+            return {
+                'valid': True,
+                'scheduled_assessment_id': scheduled_id,
+                'message': 'Assessment can proceed'
+            }
+        else:
+            minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
+            if minutes_until > 0:
+                return {
+                    'valid': False,
+                    'scheduled_assessment_id': None,
+                    'message': f'Assessment starts in {minutes_until} minutes. Come back at scheduled time.'
+                }
+            else:
+                return {
+                    'valid': False,
+                    'scheduled_assessment_id': None,
+                    'message': f'Assessment time has passed. Please contact the interviewer.'
+                }
+    
+    except Exception as e:
+        raise DatabaseError(f"Error checking assessment time validity: {str(e)}")
+
+
+# ============================================================================
+#                          EMAIL LOGGING FUNCTIONS
+# ============================================================================
+
+def log_email(recipient_email, recipient_name, email_type, subject, status='sent', error_message=None):
+    """
+    Log an email sent to a candidate.
+    
+    Args:
+        recipient_email (str): Email address of recipient
+        recipient_name (str): Name of recipient
+        email_type (str): Type of email - 'rejection', 'assessment_invitation', 'final_decision', etc.
+        subject (str): Email subject line
+        status (str, optional): Email status - 'sent', 'failed', 'bounced' (defaults to 'sent')
+        error_message (str, optional): Error message if status is 'failed'
+    
+    Returns:
+        int: Email log entry ID
+    
+    Raises:
+        DatabaseError: If logging fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO email_logs (recipient_email, recipient_name, email_type, subject, status, error_message)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (recipient_email, recipient_name, email_type, subject, status, error_message)
+        )
+        
+        conn.commit()
+        log_id = cursor.lastrowid
+        conn.close()
+        
+        return log_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error logging email: {str(e)}")
+
+
+def get_candidate_emails(candidate_email):
+    """
+    Retrieve all emails sent to a candidate.
+    
+    Args:
+        candidate_email (str): Email address of the candidate
+    
+    Returns:
+        list: List of email logs as dictionaries with keys (id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at)
+              Empty list if no emails found
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
+               FROM email_logs WHERE recipient_email = ? ORDER BY sent_at DESC""",
+            (candidate_email,)
+        )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        emails = []
+        for row in rows:
+            emails.append({
+                'id': row[0],
+                'recipient_email': row[1],
+                'recipient_name': row[2],
+                'email_type': row[3],
+                'subject': row[4],
+                'status': row[5],
+                'error_message': row[6],
+                'sent_at': row[7]
+            })
+        
+        return emails
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving candidate emails: {str(e)}")
+
+
+def get_assessment_by_candidate_id(candidate_id):
+    """
+    Retrieve the most recent assessment for a candidate.
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+    
+    Returns:
+        dict: Assessment details (most recent), or None if no assessment exists
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT a.id, a.candidate_id, a.job_id, a.technical_score, a.psychometric_score, 
+                   a.overall_score, a.decision, a.rationale, a.proctoring_violations, a.status, 
+                   a.started_at, a.completed_at,
+                   COALESCE(m.score, 0) as mcq_score,
+                   COALESCE(c.score, 0) as coding_score
+            FROM assessments a
+            LEFT JOIN (
+                SELECT assessment_id, ROUND(COUNT(CASE WHEN is_correct = 1 THEN 1 END) * 100.0 / COUNT(*), 2) as score
+                FROM mcq_responses GROUP BY assessment_id
+            ) m ON a.id = m.assessment_id
+            LEFT JOIN (
+                SELECT assessment_id, ROUND(test_cases_passed * 100.0 / test_cases_total, 2) as score
+                FROM coding_submissions GROUP BY assessment_id
+            ) c ON a.id = c.assessment_id
+            WHERE a.candidate_id = ?
+            ORDER BY a.created_at DESC
+            LIMIT 1
+        """, (candidate_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        return {
+            'id': row[0],
+            'candidate_id': row[1],
+            'job_id': row[2],
+            'technical_score': row[3] if row[3] is not None else 0,
+            'psychometric_score': row[4] if row[4] is not None else 0,
+            'overall_score': row[5] if row[5] is not None else 0,
+            'decision': row[6],
+            'rationale': row[7],
+            'proctoring_violations': row[8],
+            'status': row[9],
+            'started_at': row[10],
+            'completed_at': row[11],
+            'mcq_score': row[12],
+            'coding_score': row[13]
+        }
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving assessment for candidate {candidate_id}: {str(e)}")
+
+
+def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
+    """
+    Create a scheduled assessment for a candidate.
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+        interviewer_id (int): The ID of the interviewer scheduling
+        scheduled_time (str): ISO format scheduled time
+    
+    Returns:
+        int: ID of the created scheduled assessment
+    
+    Raises:
+        DatabaseError: If creation fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, created_at)
+            VALUES (?, ?, ?, 'scheduled', datetime('now'))
+        """, (candidate_id, interviewer_id, scheduled_time))
+        
+        scheduled_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return scheduled_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error creating scheduled assessment: {str(e)}")
+
+
+def update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id=None):
+    """
+    Update the status of a scheduled assessment.
+    
+    Args:
+        scheduled_assessment_id (int): The ID of the scheduled assessment
+        status (str): New status (e.g., 'in_progress', 'completed', 'cancelled')
+        assessment_id (int): Optional assessment ID to link
+    
+    Returns:
+        bool: True if successful
+    
+    Raises:
+        DatabaseError: If update fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if assessment_id:
+            cursor.execute("""
+                UPDATE scheduled_assessments 
+                SET status = ?, assessment_id = ?, updated_at = datetime('now')
+                WHERE id = ?
+            """, (status, assessment_id, scheduled_assessment_id))
+        else:
+            cursor.execute("""
+                UPDATE scheduled_assessments 
+                SET status = ?, updated_at = datetime('now')
+                WHERE id = ?
+            """, (status, scheduled_assessment_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return True
+    
+    except Exception as e:
+        raise DatabaseError(f"Error updating scheduled assessment: {str(e)}")
+
+
+def check_assessment_time_valid(candidate_id, current_time, window_minutes=30):
+    """
+    Check if current time is within valid assessment window (±30 minutes from scheduled time).
+    
+    Args:
+        candidate_id (int): The ID of the candidate
+        current_time (str): Current time in ISO format
+        window_minutes (int): Allowed window in minutes (default 30)
+    
+    Returns:
+        tuple: (is_valid, scheduled_time, message)
+    
+    Raises:
+        DatabaseError: If check fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT scheduled_time FROM scheduled_assessments 
+            WHERE candidate_id = ? AND status = 'scheduled'
+            ORDER BY created_at DESC LIMIT 1
+        """, (candidate_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return (False, None, "No scheduled assessment found")
+        
+        scheduled_time = row[0]
+        
+        # Parse times and check window
+        from datetime import datetime, timedelta
+        scheduled_dt = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
+        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+        
+        time_diff = abs((current_dt - scheduled_dt).total_seconds() / 60)
+        
+        if time_diff <= window_minutes:
+            return (True, scheduled_time, f"Assessment is within {window_minutes} minute window")
+        else:
+            return (False, scheduled_time, f"Assessment is {int(time_diff)} minutes away from scheduled time")
+    
+    except Exception as e:
+        raise DatabaseError(f"Error checking assessment time: {str(e)}")
+
 
 
 if __name__ == "__main__":
