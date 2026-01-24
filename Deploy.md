@@ -27,14 +27,25 @@
    - Optional storage: `STORAGE_BUCKET_URL`, `STORAGE_BUCKET_KEY`, `STORAGE_BUCKET_SECRET` (if you switch uploads to S3/R2)
    - **Use the internal Postgres URL for `DATABASE_URL`**; keep the external URL only for local psql/GUI access. Do not commit secrets.
 4) Migrate DB (one-time):
-   - From your machine (with psql): `psql "$DATABASE_URL" -f database/schema.sql`
-   - Or add a Render "Manual Deploy Command" with the same line and run once.
+    - Option A (Windows PowerShell, using external DB URL):
+       ```pwsh
+       # Replace with your EXTERNAL Postgres URL from Render
+       $env:PGURL="postgresql://<user>:<pass>@<host>.render.com/<db>"
+       psql "$env:PGURL" -f database/schema.sql
+       ```
+    - Option B (No psql installed): use the included Python script (psycopg2 is in requirements):
+       ```pwsh
+       # External URL recommended when running from your laptop
+       $env:DATABASE_URL="postgresql://<user>:<pass>@<host>.render.com/<db>"
+       python backend/migrate_postgres.py
+       ```
+    - Option C (On Render): set a one-time Manual Deploy Command to run either command using the INTERNAL URL already set as `DATABASE_URL`.
 5) Verify health: open Render service URL `/api/health` (or root) to confirm it responds.
 
 ## Frontend Setup (Render Static Site)
-1) In Render, create **Static Site** pointing to `/frontend`.
-   - Build command: `npm install && npm run build`
-   - Publish directory: `dist`
+1) In Render, create **Static Site** pointing to root `/` (not `/frontend`).
+   - **Build command:** `cd frontend && npm install && npm run build`
+   - **Publish directory:** `frontend/dist`
    - Branch: `main`
 2) Env var (Frontend):
    - `VITE_API_BASE_URL` = `https://<your-backend>.onrender.com`
