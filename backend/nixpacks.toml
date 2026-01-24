@@ -1,12 +1,8 @@
 # Railway Nixpacks configuration for backend (Python)
 
-[phases.setup]
-# Install Python 3.11 in the Nix environment
-nixPkgs = ["python311", "gcc"]
-
 [phases.install]
 # Upgrade pip and install backend requirements
-cmds = [
+commands = [
   "python -m pip install --upgrade pip",
   "pip install -r requirements.txt"
 ]

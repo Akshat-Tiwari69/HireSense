@@ -2,13 +2,13 @@
 
 [phases.install]
 # Install dependencies
-cmds = [
+commands = [
   "npm ci || npm install"
 ]
 
 [phases.build]
 # Build the production bundle
-cmds = [
+commands = [
   "npm run build"
 ]
 
