@@ -95,7 +95,10 @@ def init_database():
         else:
             schema_file = 'schema.sql'
         
-        schema_path = os.path.join(os.path.dirname(__file__), '..', 'database', schema_file)
+        # Try local backend directory first, then database directory
+        schema_path = os.path.join(os.path.dirname(__file__), schema_file)
+        if not os.path.exists(schema_path):
+            schema_path = os.path.join(os.path.dirname(__file__), '..', 'database', schema_file)
         
         if not os.path.exists(schema_path):
             print(f"[ERROR] Schema file not found at {schema_path}")
