@@ -523,7 +523,7 @@ const AssessmentPage = () => {
           <CardContent className="pt-6">
             <p className="text-lg text-white mb-6">{question.question}</p>
             <RadioGroup
-              value={mcqAnswers[question.id]?.toString()}
+              value={mcqAnswers[question.id] !== undefined ? mcqAnswers[question.id].toString() : ''}
               onValueChange={(value) => handleMCQAnswer(question.id, parseInt(value))}
             >
               <div className="space-y-3">
@@ -690,7 +690,7 @@ const AssessmentPage = () => {
               <p className="text-lg text-white">{scenario.scenario}</p>
             </div>
             <RadioGroup
-              value={psychometricAnswers[scenario.id]?.toString()}
+              value={psychometricAnswers[scenario.id] !== undefined ? psychometricAnswers[scenario.id].toString() : ''}
               onValueChange={(value) => handlePsychometricAnswer(scenario.id, parseInt(value))}
             >
               <div className="space-y-3">
