@@ -1139,13 +1139,13 @@ def update_scheduled_assessment_status(scheduled_assessment_id, status, assessme
         if assessment_id:
             cursor.execute("""
                 UPDATE scheduled_assessments 
-                SET status = ?, assessment_id = ?, updated_at = datetime('now')
+                SET status = ?, assessment_id = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (status, assessment_id, scheduled_assessment_id))
         else:
             cursor.execute("""
                 UPDATE scheduled_assessments 
-                SET status = ?, updated_at = datetime('now')
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (status, scheduled_assessment_id))
         
