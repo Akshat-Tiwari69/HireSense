@@ -8,6 +8,21 @@ import sqlite3
 from urllib.parse import urlparse
 
 import psycopg2
+from psycopg2 import extensions
+
+
+class QmarkCursor(extensions.cursor):
+    """Cursor that accepts SQLite-style '?' placeholders by mapping to '%s'."""
+
+    def execute(self, query, vars=None):  # type: ignore[override]
+        if query and "?" in query:
+            query = query.replace("?", "%s")
+        return super().execute(query, vars)
+
+    def executemany(self, query, vars_list):  # type: ignore[override]
+        if query and "?" in query:
+            query = query.replace("?", "%s")
+        return super().executemany(query, vars_list)
 
 # SQLite fallback path
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', 'elite_hire.db')
@@ -19,7 +34,7 @@ def _get_postgres_connection(database_url: str):
     # Render/Railway often provide postgres://; psycopg2 expects postgresql://
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
-    return psycopg2.connect(database_url)
+    return psycopg2.connect(database_url, cursor_factory=QmarkCursor)
 
 
 def _get_sqlite_connection():
