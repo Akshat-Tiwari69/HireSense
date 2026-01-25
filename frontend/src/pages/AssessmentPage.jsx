@@ -387,8 +387,11 @@ const AssessmentPage = () => {
     setIsSubmitting(true);
     
     try {
+      console.log('Starting assessment submission for assessment ID:', assessmentId);
+      
       // Save coding solution before submitting
       if (code && code.trim()) {
+        console.log('Saving coding solution...');
         await api.post(`/interviewee/assessment/${assessmentId}/submit-answer`, {
           type: 'coding',
           questionId: 1, // Assuming single coding problem
@@ -397,9 +400,11 @@ const AssessmentPage = () => {
           testsPassed: 0, // Would need to track this from test results
           totalTests: 0
         });
+        console.log('Coding solution saved');
       }
       
       // Stop proctoring
+      console.log('Stopping camera and proctoring...');
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
       }
@@ -408,19 +413,27 @@ const AssessmentPage = () => {
       }
       
       // Complete assessment (backend calculates scores)
-      await api.post(`/interviewee/assessment/${assessmentId}/complete`);
+      console.log('Completing assessment...');
+      const response = await api.post(`/interviewee/assessment/${assessmentId}/complete`);
+      console.log('Assessment completion response:', response.data);
       
-      setSubmitted(true);
-      toast({
-        title: 'Assessment submitted!',
-        description: 'Your responses have been recorded.',
-      });
+      if (response.data.status === 'success') {
+        console.log('Setting submitted=true');
+        setSubmitted(true);
+        toast({
+          title: 'Assessment submitted!',
+          description: 'Your responses have been recorded.',
+        });
+      } else {
+        throw new Error(response.data.message || 'Unknown error');
+      }
     } catch (err) {
       console.error('Submission error:', err);
+      console.error('Error response:', err.response?.data);
       toast({
         variant: 'destructive',
         title: 'Submission Error',
-        description: 'Failed to submit. Please try again.',
+        description: err.response?.data?.message || 'Failed to submit. Please try again.',
       });
     } finally {
       setIsSubmitting(false);
