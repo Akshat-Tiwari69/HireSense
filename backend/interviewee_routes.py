@@ -6,6 +6,7 @@ Includes assessment time validation (±30 minute window)
 
 from flask import Blueprint, request, jsonify
 from datetime import datetime
+import pytz
 from db_helpers import (
     get_candidate_by_id,
     get_scheduled_assessment,
@@ -392,9 +393,13 @@ def verify_assessment_token(token):
                 'message': 'This assessment has been cancelled. Please contact your recruiter.'
             }), 400
         
-        # Calculate time until scheduled
+        # Calculate time until scheduled (using IST)
+        ist = pytz.timezone('Asia/Kolkata')
         scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
-        current_dt = datetime.utcnow()
+        # If scheduled_dt is naive, assume it's IST
+        if scheduled_dt.tzinfo is None:
+            scheduled_dt = ist.localize(scheduled_dt)
+        current_dt = datetime.now(ist)
         minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
         
         # Check if within window (±30 minutes)
@@ -449,9 +454,13 @@ def start_assessment_with_token(token):
                 'message': 'This assessment has already been completed.'
             }), 400
         
-        # Check time window
+        # Check time window (using IST)
+        ist = pytz.timezone('Asia/Kolkata')
         scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
-        current_dt = datetime.utcnow()
+        # If scheduled_dt is naive, assume it's IST
+        if scheduled_dt.tzinfo is None:
+            scheduled_dt = ist.localize(scheduled_dt)
+        current_dt = datetime.now(ist)
         minutes_diff = int((current_dt - scheduled_dt).total_seconds() / 60)
         
         if abs(minutes_diff) > 30 and assessment['status'] != 'in_progress':
