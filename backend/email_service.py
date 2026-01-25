@@ -78,6 +78,11 @@ class EmailService:
         Returns:
             bool: True if sent successfully, False otherwise
         """
+        # Skip email if SMTP not configured
+        if not self.smtp_user or not self.smtp_pass:
+            logger.warning(f"⚠️ Email skipped (SMTP not configured): {email_type} to {recipient_email}")
+            return False
+        
         try:
             logger.info("="*80)
             logger.info(f"📧 SENDING EMAIL")
@@ -103,8 +108,8 @@ class EmailService:
             
             logger.info(f"📨 Connecting to SMTP server: {self.smtp_host}:{self.smtp_port}")
             
-            # Connect to SMTP server and send
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            # Connect to SMTP server and send (with 10 second timeout to avoid hanging)
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
                 if self.use_tls:
                     logger.info("🔒 Starting TLS encryption...")
                     server.starttls()
