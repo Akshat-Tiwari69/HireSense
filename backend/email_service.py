@@ -109,16 +109,25 @@ class EmailService:
             logger.info(f"📨 Connecting to SMTP server: {self.smtp_host}:{self.smtp_port}")
             
             # Connect to SMTP server and send (with 10 second timeout to avoid hanging)
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
-                if self.use_tls:
-                    logger.info("🔒 Starting TLS encryption...")
-                    server.starttls()
-                
-                logger.info("🔐 Authenticating with SMTP server...")
-                server.login(self.smtp_user, self.smtp_pass)
-                
-                logger.info("📤 Sending email...")
-                server.send_message(message)
+            try:
+                with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
+                    if self.use_tls:
+                        logger.info("🔒 Starting TLS encryption...")
+                        server.starttls()
+                    
+                    logger.info("🔐 Authenticating with SMTP server...")
+                    server.login(self.smtp_user, self.smtp_pass)
+                    
+                    logger.info("📤 Sending email (TLS)...")
+                    server.send_message(message)
+            except Exception as e_tls:
+                logger.warning(f"⚠️ TLS send failed ({e_tls}); retrying via SSL:465")
+                with smtplib.SMTP_SSL(self.smtp_host, 465, timeout=10) as server:
+                    logger.info("🔐 Authenticating with SMTP server (SSL)...")
+                    server.login(self.smtp_user, self.smtp_pass)
+                    
+                    logger.info("📤 Sending email (SSL)...")
+                    server.send_message(message)
             
             logger.info("✅ Email sent successfully!")
             logger.info("="*80)
