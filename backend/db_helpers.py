@@ -1113,38 +1113,8 @@ def get_assessment_by_candidate_id(candidate_id):
         raise DatabaseError(f"Error retrieving assessment for candidate {candidate_id}: {str(e)}")
 
 
-def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
-    """
-    Create a scheduled assessment for a candidate.
-    
-    Args:
-        candidate_id (int): The ID of the candidate
-        interviewer_id (int): The ID of the interviewer scheduling
-        scheduled_time (str): ISO format scheduled time
-    
-    Returns:
-        int: ID of the created scheduled assessment
-    
-    Raises:
-        DatabaseError: If creation fails
-    """
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, created_at)
-            VALUES (?, ?, ?, 'scheduled', datetime('now'))
-        """, (candidate_id, interviewer_id, scheduled_time))
-        
-        scheduled_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return scheduled_id
-    
-    except Exception as e:
-        raise DatabaseError(f"Error creating scheduled assessment: {str(e)}")
+# NOTE: create_scheduled_assessment is defined earlier in this file (line ~761)
+# Do not duplicate it here
 
 
 def update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id=None):
