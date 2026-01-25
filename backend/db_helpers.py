@@ -744,11 +744,19 @@ def get_mcq_score(assessment_id):
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        cursor.execute("""
-            SELECT COUNT(*) as total, SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
-            FROM mcq_responses WHERE assessment_id = ?
-        """, (assessment_id,))
+        if is_sqlite:
+            cursor.execute("""
+                SELECT COUNT(*) as total, SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
+                FROM mcq_responses WHERE assessment_id = ?
+            """, (assessment_id,))
+        else:
+            # Postgres: explicit cast for boolean
+            cursor.execute("""
+                SELECT COUNT(*) as total, SUM(CASE WHEN is_correct = TRUE THEN 1 ELSE 0 END) as correct
+                FROM mcq_responses WHERE assessment_id = %s
+            """, (assessment_id,))
         
         result = cursor.fetchone()
         conn.close()
@@ -779,11 +787,18 @@ def get_coding_score(assessment_id):
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        cursor.execute("""
-            SELECT SUM(test_cases_passed) as total_passed, SUM(total_test_cases) as total_tests
-            FROM coding_submissions WHERE assessment_id = ?
-        """, (assessment_id,))
+        if is_sqlite:
+            cursor.execute("""
+                SELECT SUM(test_cases_passed) as total_passed, SUM(total_test_cases) as total_tests
+                FROM coding_submissions WHERE assessment_id = ?
+            """, (assessment_id,))
+        else:
+            cursor.execute("""
+                SELECT SUM(test_cases_passed) as total_passed, SUM(total_test_cases) as total_tests
+                FROM coding_submissions WHERE assessment_id = %s
+            """, (assessment_id,))
         
         result = cursor.fetchone()
         conn.close()
@@ -814,12 +829,20 @@ def get_psychometric_scores(assessment_id):
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        cursor.execute("""
-            SELECT trait, AVG(score) as avg_score
-            FROM psychometric_responses WHERE assessment_id = ?
-            GROUP BY trait
-        """, (assessment_id,))
+        if is_sqlite:
+            cursor.execute("""
+                SELECT trait, AVG(score) as avg_score
+                FROM psychometric_responses WHERE assessment_id = ?
+                GROUP BY trait
+            """, (assessment_id,))
+        else:
+            cursor.execute("""
+                SELECT trait, AVG(score) as avg_score
+                FROM psychometric_responses WHERE assessment_id = %s
+                GROUP BY trait
+            """, (assessment_id,))
         
         rows = cursor.fetchall()
         conn.close()
