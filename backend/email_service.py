@@ -1,6 +1,7 @@
 """
 Email Notification Service
 Handles all email communications for the CYGNUSA Elite-Hire system
+Supports Resend API (recommended for cloud) and SMTP fallback
 """
 
 import os
@@ -12,6 +13,13 @@ from datetime import datetime
 from typing import Optional, Dict
 from db_helpers import log_email
 
+# Try to import resend (optional dependency)
+try:
+    import resend
+    RESEND_AVAILABLE = True
+except ImportError:
+    RESEND_AVAILABLE = False
+
 # Setup logger
 logger = logging.getLogger(__name__)
 
@@ -19,7 +27,7 @@ logger = logging.getLogger(__name__)
 class EmailService:
     """
     Email service for sending notifications to candidates and interviewers
-    Uses SMTP (Gmail, SendGrid, or custom SMTP server)
+    Uses Resend API (if configured) or falls back to SMTP
     """
     
     def __init__(
@@ -40,6 +48,11 @@ class EmailService:
             smtp_pass: SMTP password (default: from env SMTP_PASS)
             use_tls: Whether to use TLS encryption (default: True)
         """
+        # Resend API configuration (preferred for cloud deployments)
+        self.resend_api_key = os.environ.get('RESEND_API_KEY')
+        self.resend_from_email = os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+        
+        # SMTP configuration (fallback)
         self.smtp_host = smtp_host or os.environ.get('SMTP_HOST', 'smtp.gmail.com')
         self.smtp_port = smtp_port or int(os.environ.get('SMTP_PORT', 587))
         self.smtp_user = smtp_user or os.environ.get('SMTP_USER')
@@ -48,12 +61,51 @@ class EmailService:
         
         # Sender information
         self.sender_email = self.smtp_user
-        self.sender_name = os.environ.get('SMTP_SENDER_NAME', 'CYGNUSA Elite-Hire')
+        self.sender_name = os.environ.get('SMTP_SENDER_NAME', 'HireSense')
         
-        # Validate configuration
-        if not self.smtp_user or not self.smtp_pass:
-            print("WARNING: SMTP credentials not configured. Email sending will fail.")
-            print("Set SMTP_USER and SMTP_PASS environment variables.")
+        # Configure Resend if available
+        if self.resend_api_key and RESEND_AVAILABLE:
+            resend.api_key = self.resend_api_key
+            print(f"[EMAIL] ✅ Resend API configured (from: {self.resend_from_email})", flush=True)
+        elif not self.smtp_user or not self.smtp_pass:
+            print("[EMAIL] ⚠️ No email service configured (set RESEND_API_KEY or SMTP_USER/SMTP_PASS)", flush=True)
+    
+    def _send_via_resend(
+        self,
+        recipient_email: str,
+        recipient_name: str,
+        subject: str,
+        html_body: str,
+        email_type: str
+    ) -> bool:
+        """Send email via Resend API"""
+        try:
+            print(f"[EMAIL] Sending via Resend API to {recipient_email}...", flush=True)
+            
+            params = {
+                "from": f"{self.sender_name} <{self.resend_from_email}>",
+                "to": [recipient_email],
+                "subject": subject,
+                "html": html_body,
+            }
+            
+            response = resend.Emails.send(params)
+            print(f"[EMAIL] ✅ Resend success! ID: {response.get('id', 'unknown')}", flush=True)
+            
+            log_email(
+                recipient_email=recipient_email,
+                recipient_name=recipient_name,
+                email_type=email_type,
+                subject=subject,
+                status='sent',
+                error_message=None
+            )
+            return True
+            
+        except Exception as e:
+            print(f"[EMAIL] ❌ Resend failed: {e}", flush=True)
+            log_email(recipient_email, recipient_name, email_type, subject, 'failed', str(e))
+            return False
     
     def _send_email(
         self,
@@ -65,7 +117,7 @@ class EmailService:
         email_type: str = "general"
     ) -> bool:
         """
-        Internal method to send email via SMTP
+        Internal method to send email via Resend API or SMTP
         
         Args:
             recipient_email: Recipient's email address
@@ -78,13 +130,18 @@ class EmailService:
         Returns:
             bool: True if sent successfully, False otherwise
         """
-        # Skip email if SMTP not configured
+        print(f"[EMAIL] Starting send: {email_type} to {recipient_email}", flush=True)
+        
+        # Try Resend API first (works on cloud platforms like Render)
+        if self.resend_api_key and RESEND_AVAILABLE:
+            return self._send_via_resend(recipient_email, recipient_name, subject, html_body, email_type)
+        
+        # Fall back to SMTP
         if not self.smtp_user or not self.smtp_pass:
-            print(f"[EMAIL] SMTP not configured, skipping email to {recipient_email}", flush=True)
+            print(f"[EMAIL] ⚠️ No email service configured, skipping email to {recipient_email}", flush=True)
             return False
         
         try:
-            print(f"[EMAIL] Starting send: {email_type} to {recipient_email}", flush=True)
             print(f"[EMAIL] SMTP config: {self.smtp_host}:{self.smtp_port}", flush=True)
             
             # Create message
@@ -93,7 +150,7 @@ class EmailService:
             message['To'] = f"{recipient_name} <{recipient_email}>"
             message['Subject'] = subject
             
-            # Add plain text version if provided, otherwise create simple one
+            # Add plain text version if provided
             if text_body:
                 text_part = MIMEText(text_body, 'plain')
                 message.attach(text_part)
@@ -104,33 +161,24 @@ class EmailService:
             
             print(f"[EMAIL] Connecting to SMTP...", flush=True)
             
-            # Connect to SMTP server and send (with 10 second timeout to avoid hanging)
+            # Connect to SMTP server and send (with 10 second timeout)
             try:
                 print(f"[EMAIL] Trying TLS on port {self.smtp_port}...", flush=True)
                 with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
                     if self.use_tls:
-                        print("[EMAIL] Starting TLS...", flush=True)
                         server.starttls()
-                    
-                    print("[EMAIL] Logging in...", flush=True)
                     server.login(self.smtp_user, self.smtp_pass)
-                    
-                    print("[EMAIL] Sending message (TLS)...", flush=True)
                     server.send_message(message)
                     print("[EMAIL] TLS send succeeded!", flush=True)
             except Exception as e_tls:
                 print(f"[EMAIL] TLS failed: {e_tls}, trying SSL:465...", flush=True)
                 with smtplib.SMTP_SSL(self.smtp_host, 465, timeout=10) as server:
-                    print("[EMAIL] SSL connected, logging in...", flush=True)
                     server.login(self.smtp_user, self.smtp_pass)
-                    
-                    print("[EMAIL] Sending message (SSL)...", flush=True)
                     server.send_message(message)
                     print("[EMAIL] SSL send succeeded!", flush=True)
             
             print(f"[EMAIL] ✅ Email sent successfully to {recipient_email}!", flush=True)
             
-            # Log success
             log_email(
                 recipient_email=recipient_email,
                 recipient_name=recipient_name,
@@ -139,7 +187,6 @@ class EmailService:
                 status='sent',
                 error_message=None
             )
-            
             return True
             
         except smtplib.SMTPAuthenticationError as e:
