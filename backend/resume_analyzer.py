@@ -6,6 +6,7 @@ Uses OpenAI API to generate intelligent pros/cons analysis for candidate resumes
 import os
 import json
 from openai import OpenAI
+import httpx
 from typing import Dict, List, Optional, Tuple
 
 
@@ -30,7 +31,22 @@ class ResumeAnalyzer:
                 "or pass api_key parameter"
             )
         
-        self.client = OpenAI(api_key=self.api_key)
+        # Instantiate OpenAI client; handle environments where proxies cause issues
+        try:
+            self.client = OpenAI(api_key=self.api_key)
+        except TypeError as e:
+            # Older/newer client versions may not accept implicit proxies; build httpx client explicitly
+            if "proxies" in str(e):
+                proxy = (
+                    os.environ.get("HTTPS_PROXY")
+                    or os.environ.get("https_proxy")
+                    or os.environ.get("HTTP_PROXY")
+                    or os.environ.get("http_proxy")
+                )
+                http_client = httpx.Client(proxies=proxy) if proxy else httpx.Client()
+                self.client = OpenAI(api_key=self.api_key, http_client=http_client)
+            else:
+                raise
         self.model = "gpt-4o-mini"  # Using cost-effective model, can upgrade to gpt-4o for better results
     
     def generate_pros_cons(
