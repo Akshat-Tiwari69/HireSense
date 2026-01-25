@@ -5,6 +5,7 @@ import LoginPage from "./pages/LoginPage";
 import ApplyPage from "./pages/ApplyPage";
 import InterviewerDashboardPage from "./pages/InterviewerDashboardPage";
 import AssessmentPage from "./pages/AssessmentPage";
+import AdminDashboardPage from "./pages/AdminDashboardPage";
 import { Toaster } from "./components/ui/sonner";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/apply" element={<ApplyPage />} />
           <Route path="/dashboard" element={<InterviewerDashboardPage />} />
+          <Route path="/admin" element={<AdminDashboardPage />} />
           <Route path="/assessment" element={<AssessmentPage />} />
         </Routes>
       </BrowserRouter>

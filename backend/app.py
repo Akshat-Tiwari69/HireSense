@@ -22,6 +22,7 @@ from questions_bank import get_mcq_questions, get_coding_problem, get_psychometr
 from auth import auth_bp
 from interviewer_routes import interviewer_bp
 from interviewee_routes import interviewee_bp
+from admin_routes import admin_bp
 import time
 
 # Initialize Flask app
@@ -79,6 +80,9 @@ app.register_blueprint(interviewer_bp, url_prefix='/api/interviewer')
 
 # Register interviewee routes blueprint
 app.register_blueprint(interviewee_bp, url_prefix='/api/interviewee')
+
+# Register admin routes blueprint
+app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
