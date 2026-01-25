@@ -6,8 +6,8 @@ Supports both SQLite (local) and PostgreSQL (Render/production)
 
 import os
 import sqlite3
-from db_config import get_connection, DB_PATH
 from werkzeug.security import generate_password_hash
+from db_config import get_connection, DB_PATH
 
 
 def drop_all_tables():
