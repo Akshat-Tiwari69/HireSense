@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
     scheduled_time TIMESTAMP NOT NULL,
     status TEXT DEFAULT 'scheduled',
     assessment_id INTEGER,
+    access_token VARCHAR(64) UNIQUE,
+    proctoring_enabled BOOLEAN DEFAULT true,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
@@ -62,6 +66,7 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_candidate ON scheduled_assessments(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_time ON scheduled_assessments(scheduled_time);
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_token ON scheduled_assessments(access_token);
 
 -- Assessments (created without FK to scheduled_assessments to avoid circular dependency)
 CREATE TABLE IF NOT EXISTS assessments (

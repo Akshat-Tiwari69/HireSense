@@ -16,7 +16,11 @@ from db_helpers import (
     update_assessment_scores,
     get_mcq_score,
     get_coding_score,
-    get_psychometric_scores
+    get_psychometric_scores,
+    get_assessment_by_token,
+    start_assessment_by_token,
+    record_proctoring_violation,
+    count_violations_for_assessment
 )
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
 
@@ -347,6 +351,232 @@ def complete_assessment(assessment_id):
         return jsonify({
             'status': 'error',
             'message': f'Failed to complete assessment: {str(e)}'
+        }), 500
+
+
+# ============================================================================
+#                    TOKEN-BASED ASSESSMENT ACCESS
+# ============================================================================
+
+@interviewee_bp.route('/assessment/verify/<token>', methods=['GET'])
+def verify_assessment_token(token):
+    """
+    Verify an assessment token and return assessment details.
+    This is used when a candidate clicks their assessment link.
+    
+    Returns:
+        - Assessment status
+        - Candidate info
+        - Whether proctoring is enabled
+        - Time remaining until/since scheduled time
+    """
+    try:
+        # Get assessment by token
+        assessment = get_assessment_by_token(token)
+        if not assessment:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid assessment link. Please check your email for the correct link.'
+            }), 404
+        
+        # Check status
+        if assessment['status'] == 'completed':
+            return jsonify({
+                'status': 'error',
+                'message': 'This assessment has already been completed.'
+            }), 400
+        
+        if assessment['status'] == 'cancelled':
+            return jsonify({
+                'status': 'error',
+                'message': 'This assessment has been cancelled. Please contact your recruiter.'
+            }), 400
+        
+        # Calculate time until scheduled
+        scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
+        current_dt = datetime.utcnow()
+        minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
+        
+        # Check if within window (±30 minutes)
+        can_start = abs(minutes_until) <= 30
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'candidate_name': assessment['candidate_name'],
+                'candidate_email': assessment['candidate_email'],
+                'scheduled_time': str(assessment['scheduled_time']),
+                'minutes_until_start': minutes_until,
+                'can_start': can_start,
+                'proctoring_enabled': assessment['proctoring_enabled'],
+                'assessment_status': assessment['status'],
+                'already_started': assessment['status'] == 'in_progress'
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to verify assessment: {str(e)}'
+        }), 500
+
+
+@interviewee_bp.route('/assessment/start-by-token/<token>', methods=['POST'])
+def start_assessment_with_token(token):
+    """
+    Start assessment using access token.
+    This endpoint validates the token and returns assessment questions.
+    
+    Returns:
+        - MCQ questions (without answers)
+        - Coding problem
+        - Psychometric scenarios
+        - Assessment ID for tracking
+    """
+    try:
+        # Get assessment by token
+        assessment = get_assessment_by_token(token)
+        if not assessment:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid assessment link.'
+            }), 404
+        
+        # Check status
+        if assessment['status'] == 'completed':
+            return jsonify({
+                'status': 'error',
+                'message': 'This assessment has already been completed.'
+            }), 400
+        
+        # Check time window
+        scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
+        current_dt = datetime.utcnow()
+        minutes_diff = int((current_dt - scheduled_dt).total_seconds() / 60)
+        
+        if abs(minutes_diff) > 30 and assessment['status'] != 'in_progress':
+            return jsonify({
+                'status': 'error',
+                'message': f'Assessment can only be started within ±30 minutes of scheduled time. Currently {abs(minutes_diff)} minutes away.',
+                'data': {
+                    'scheduled_time': str(assessment['scheduled_time']),
+                    'minutes_away': abs(minutes_diff)
+                }
+            }), 403
+        
+        # If already in progress, resume
+        if assessment['status'] == 'in_progress' and assessment['assessment_id']:
+            assessment_id = assessment['assessment_id']
+        else:
+            # Start the assessment
+            start_assessment_by_token(token)
+            
+            # Create assessment record
+            assessment_id = create_assessment(assessment['candidate_id'])
+            
+            # Update scheduled assessment with assessment_id
+            update_scheduled_assessment_status(
+                scheduled_assessment_id=assessment['id'],
+                status='in_progress',
+                assessment_id=assessment_id
+            )
+        
+        # Get questions
+        mcq_questions = get_mcq_questions(count=10)
+        coding_problem = get_coding_problem(difficulty="easy")
+        psychometric_scenarios = get_psychometric_scenarios(count=3)
+        
+        # Remove answers from MCQ questions
+        mcq_for_frontend = []
+        for q in mcq_questions:
+            mcq_for_frontend.append({
+                "id": q["id"],
+                "question": q["question"],
+                "options": q["options"],
+                "time_limit": q.get("time_limit", 60),
+                "category": q.get("category", "general"),
+                "difficulty": q.get("difficulty", "medium")
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Assessment started successfully',
+            'data': {
+                'assessment_id': assessment_id,
+                'candidate_id': assessment['candidate_id'],
+                'candidate_name': assessment['candidate_name'],
+                'proctoring_enabled': assessment['proctoring_enabled'],
+                'mcq_questions': mcq_for_frontend,
+                'coding_problem': {
+                    'id': coding_problem['id'],
+                    'title': coding_problem['title'],
+                    'description': coding_problem['description'],
+                    'example': coding_problem.get('example', ''),
+                    'difficulty': coding_problem['difficulty']
+                },
+                'psychometric_scenarios': psychometric_scenarios,
+                'duration_minutes': 60
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to start assessment: {str(e)}'
+        }), 500
+
+
+@interviewee_bp.route('/assessment/<int:assessment_id>/violation', methods=['POST'])
+def report_violation(assessment_id):
+    """
+    Report a proctoring violation during assessment.
+    Called by frontend when face detection or other monitoring detects issues.
+    
+    Expected JSON body:
+        - violation_type: Type of violation (no_face, multiple_faces, tab_switch, etc.)
+        - description: Description of the violation
+        - severity: low, medium, high, critical (optional, defaults to medium)
+        - screenshot_url: URL to screenshot evidence (optional)
+    """
+    try:
+        data = request.get_json() or {}
+        
+        violation_type = data.get('violation_type')
+        description = data.get('description', '')
+        severity = data.get('severity', 'medium')
+        screenshot_url = data.get('screenshot_url')
+        
+        if not violation_type:
+            return jsonify({
+                'status': 'error',
+                'message': 'violation_type is required'
+            }), 400
+        
+        # Record the violation
+        violation_id = record_proctoring_violation(
+            assessment_id=assessment_id,
+            violation_type=violation_type,
+            description=description,
+            severity=severity,
+            screenshot_url=screenshot_url
+        )
+        
+        # Get current violation count
+        violation_count = count_violations_for_assessment(assessment_id)
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Violation recorded',
+            'data': {
+                'violation_id': violation_id,
+                'total_violations': violation_count
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to record violation: {str(e)}'
         }), 500
 
 

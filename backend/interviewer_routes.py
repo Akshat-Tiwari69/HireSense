@@ -19,7 +19,9 @@ from db_helpers import (
     create_scheduled_assessment,
     get_scheduled_assessment,
     update_scheduled_assessment_status,
-    check_assessment_time_valid
+    check_assessment_time_valid,
+    generate_assessment_token,
+    set_assessment_token
 )
 from email_service import (
     send_rejection_email,
@@ -303,9 +305,14 @@ def schedule_assessment(candidate_id):
         )
         print(f"[SCHEDULE] Assessment ID: {scheduled_assessment_id}", flush=True)
         
-        # Generate assessment link - use FRONTEND_URL from env or default
+        # Generate secure access token for this assessment
+        access_token = generate_assessment_token()
+        set_assessment_token(scheduled_assessment_id, access_token)
+        print(f"[SCHEDULE] Access token generated", flush=True)
+        
+        # Generate assessment link with token - use FRONTEND_URL from env or default
         frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
-        assessment_link = f"{frontend_url}/assessment"
+        assessment_link = f"{frontend_url}/assessment/{access_token}"
         print(f"[SCHEDULE] Assessment link: {assessment_link}", flush=True)
         
         # Get interviewer name from JWT claims

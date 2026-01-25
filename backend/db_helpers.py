@@ -1207,6 +1207,238 @@ def check_assessment_time_valid(candidate_id, current_time, window_minutes=30):
         raise DatabaseError(f"Error checking assessment time: {str(e)}")
 
 
+# ============================================================================
+#                    TOKEN-BASED ASSESSMENT ACCESS
+# ============================================================================
+
+def generate_assessment_token():
+    """Generate a secure random token for assessment access."""
+    import secrets
+    return secrets.token_urlsafe(32)
+
+
+def set_assessment_token(scheduled_assessment_id, token):
+    """
+    Set the access token for a scheduled assessment.
+    
+    Args:
+        scheduled_assessment_id (int): ID of the scheduled assessment
+        token (str): Access token for the assessment
+    
+    Returns:
+        bool: True if successful
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """UPDATE scheduled_assessments 
+               SET access_token = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (token, scheduled_assessment_id)
+        )
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        return success
+    
+    except Exception as e:
+        raise DatabaseError(f"Error setting assessment token: {str(e)}")
+
+
+def get_assessment_by_token(token):
+    """
+    Retrieve scheduled assessment by access token.
+    
+    Args:
+        token (str): Access token
+    
+    Returns:
+        dict: Assessment data with candidate info, or None if not found
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT sa.id, sa.candidate_id, sa.interviewer_id, sa.scheduled_time, 
+                      sa.status, sa.assessment_id, sa.proctoring_enabled, sa.started_at,
+                      c.name as candidate_name, c.email as candidate_email
+               FROM scheduled_assessments sa
+               JOIN candidates c ON sa.candidate_id = c.id
+               WHERE sa.access_token = ?""",
+            (token,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'candidate_id': row[1],
+                'interviewer_id': row[2],
+                'scheduled_time': row[3],
+                'status': row[4],
+                'assessment_id': row[5],
+                'proctoring_enabled': row[6] if row[6] is not None else True,
+                'started_at': row[7],
+                'candidate_name': row[8],
+                'candidate_email': row[9]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving assessment by token: {str(e)}")
+
+
+def start_assessment_by_token(token):
+    """
+    Mark assessment as started and record the start time.
+    
+    Args:
+        token (str): Access token
+    
+    Returns:
+        bool: True if successful
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """UPDATE scheduled_assessments 
+               SET status = 'in_progress', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+               WHERE access_token = ? AND status = 'scheduled'""",
+            (token,)
+        )
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        return success
+    
+    except Exception as e:
+        raise DatabaseError(f"Error starting assessment: {str(e)}")
+
+
+# ============================================================================
+#                    PROCTORING VIOLATIONS
+# ============================================================================
+
+def record_proctoring_violation(assessment_id, violation_type, description, severity='medium', screenshot_url=None):
+    """
+    Record a proctoring violation during an assessment.
+    
+    Args:
+        assessment_id (int): ID of the assessment
+        violation_type (str): Type of violation (no_face, multiple_faces, tab_switch, etc.)
+        description (str): Description of the violation
+        severity (str): Severity level (low, medium, high, critical)
+        screenshot_url (str, optional): URL to screenshot evidence
+    
+    Returns:
+        int: Violation ID
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO proctoring_violations 
+               (assessment_id, violation_type, description, severity, screenshot_url)
+               VALUES (?, ?, ?, ?, ?) RETURNING id""",
+            (assessment_id, violation_type, description, severity, screenshot_url)
+        )
+        
+        result = cursor.fetchone()
+        violation_id = result[0] if result else None
+        
+        conn.commit()
+        conn.close()
+        
+        return violation_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error recording proctoring violation: {str(e)}")
+
+
+def get_violations_for_assessment(assessment_id):
+    """
+    Get all proctoring violations for an assessment.
+    
+    Args:
+        assessment_id (int): ID of the assessment
+    
+    Returns:
+        list: List of violation records
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, assessment_id, violation_type, description, severity, 
+                      screenshot_url, timestamp, resolved
+               FROM proctoring_violations 
+               WHERE assessment_id = ?
+               ORDER BY timestamp DESC""",
+            (assessment_id,)
+        )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        violations = []
+        for row in rows:
+            violations.append({
+                'id': row[0],
+                'assessment_id': row[1],
+                'violation_type': row[2],
+                'description': row[3],
+                'severity': row[4],
+                'screenshot_url': row[5],
+                'timestamp': row[6],
+                'resolved': row[7]
+            })
+        
+        return violations
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving violations: {str(e)}")
+
+
+def count_violations_for_assessment(assessment_id):
+    """
+    Count proctoring violations for an assessment.
+    
+    Args:
+        assessment_id (int): ID of the assessment
+    
+    Returns:
+        int: Number of violations
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            "SELECT COUNT(*) FROM proctoring_violations WHERE assessment_id = ?",
+            (assessment_id,)
+        )
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count
+    
+    except Exception as e:
+        raise DatabaseError(f"Error counting violations: {str(e)}")
+
 
 if __name__ == "__main__":
     print("Database Helper Functions Module")

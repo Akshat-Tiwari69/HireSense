@@ -26,7 +26,7 @@ auth_bp = Blueprint('auth', __name__)
 EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
 
 # Valid roles
-VALID_ROLES = ['interviewer', 'admin']
+VALID_ROLES = ['interviewer', 'admin', 'proctor']
 
 
 def validate_email(email):

@@ -315,7 +315,7 @@ def get_table_data(table_name):
     """Get data from a specific table (limited to 100 rows)"""
     try:
         # Whitelist allowed tables for security
-        allowed_tables = ['users', 'candidates', 'assessments', 'scheduled_assessments', 'email_logs', 'questions']
+        allowed_tables = ['users', 'candidates', 'assessments', 'scheduled_assessments', 'email_logs', 'questions', 'proctoring_violations']
         if table_name not in allowed_tables:
             return jsonify({'status': 'error', 'message': 'Table not allowed'}), 403
         

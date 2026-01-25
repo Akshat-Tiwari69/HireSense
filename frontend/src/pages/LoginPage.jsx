@@ -52,6 +52,8 @@ const LoginPage = () => {
       // Redirect based on role
       if (userRole === 'admin') {
         navigate('/admin');
+      } else if (userRole === 'proctor') {
+        navigate('/proctor');
       } else {
         navigate('/dashboard');
       }

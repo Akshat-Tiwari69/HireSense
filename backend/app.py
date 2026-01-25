@@ -23,6 +23,7 @@ from auth import auth_bp
 from interviewer_routes import interviewer_bp
 from interviewee_routes import interviewee_bp
 from admin_routes import admin_bp
+from proctor_routes import proctor_bp
 import time
 
 # Initialize Flask app
@@ -83,6 +84,9 @@ app.register_blueprint(interviewee_bp, url_prefix='/api/interviewee')
 
 # Register admin routes blueprint
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
+
+# Register proctor routes blueprint
+app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
 
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
