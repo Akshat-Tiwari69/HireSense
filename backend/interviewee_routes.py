@@ -450,18 +450,19 @@ def complete_assessment(assessment_id):
         logger.info(f"Assessment {assessment_id}: Psychometric Scores = {psychometric_scores}")
         
         # Calculate technical score (60% MCQ, 40% Coding)
-        technical_score = (mcq_score * 0.6) + (coding_score * 0.4)
+        technical_score = (float(mcq_score) * 0.6) + (float(coding_score) * 0.4)
         logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (MCQ: {mcq_score}, Coding: {coding_score})")
         
-        # Calculate average psychometric score
+        # Calculate average psychometric score (convert Decimal to float for Postgres compatibility)
         if psychometric_scores:
-            avg_psychometric = sum(psychometric_scores.values()) / len(psychometric_scores)
+            psycho_values = [float(v) for v in psychometric_scores.values()]
+            avg_psychometric = sum(psycho_values) / len(psycho_values)
         else:
             avg_psychometric = 0
         logger.info(f"Assessment {assessment_id}: Avg Psychometric = {avg_psychometric}")
         
         # Calculate overall score (70% technical, 30% psychometric)
-        overall_score = (technical_score * 0.7) + (avg_psychometric * 10 * 0.3)
+        overall_score = (float(technical_score) * 0.7) + (float(avg_psychometric) * 10 * 0.3)
         logger.info(f"Assessment {assessment_id}: Overall Score = {overall_score}")
         
         # Determine preliminary decision and AI recommendation
