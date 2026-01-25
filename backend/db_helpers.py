@@ -396,14 +396,31 @@ def create_assessment(candidate_id, job_id=None):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO assessments (candidate_id, job_id, status, started_at)
-            VALUES (?, ?, 'in_progress', CURRENT_TIMESTAMP)
-        """, (candidate_id, job_id))
+
+        # Detect driver: sqlite uses "?" placeholders and lastrowid; Postgres needs %s and RETURNING id
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
+
+        if is_sqlite:
+            cursor.execute(
+                """
+                INSERT INTO assessments (candidate_id, job_id, status, started_at)
+                VALUES (?, ?, 'in_progress', CURRENT_TIMESTAMP)
+                """,
+                (candidate_id, job_id)
+            )
+            assessment_id = cursor.lastrowid
+        else:
+            cursor.execute(
+                """
+                INSERT INTO assessments (candidate_id, job_id, status, started_at)
+                VALUES (%s, %s, 'in_progress', CURRENT_TIMESTAMP)
+                RETURNING id
+                """,
+                (candidate_id, job_id)
+            )
+            assessment_id = cursor.fetchone()[0]
         
         conn.commit()
-        assessment_id = cursor.lastrowid
         conn.close()
         
         return assessment_id
@@ -431,28 +448,49 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
         # Calculate overall score as weighted average
         overall_score = (technical_score * 0.6) + (psychometric_score * 0.4)
         
-        if scheduled_assessment_id or hiring_recommendation:
-            cursor.execute("""
-                UPDATE assessments 
-                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
-                    decision = ?, rationale = ?, scheduled_assessment_id = COALESCE(?, scheduled_assessment_id),
-                    hiring_recommendation = COALESCE(?, hiring_recommendation), 
-                    status = 'completed', completed_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (technical_score, psychometric_score, overall_score, decision, rationale, 
-                  scheduled_assessment_id, hiring_recommendation, assessment_id))
+        if is_sqlite:
+            if scheduled_assessment_id or hiring_recommendation:
+                cursor.execute("""
+                    UPDATE assessments 
+                    SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
+                        decision = ?, rationale = ?, scheduled_assessment_id = COALESCE(?, scheduled_assessment_id),
+                        hiring_recommendation = COALESCE(?, hiring_recommendation), 
+                        status = 'completed', completed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (technical_score, psychometric_score, overall_score, decision, rationale, 
+                      scheduled_assessment_id, hiring_recommendation, assessment_id))
+            else:
+                cursor.execute("""
+                    UPDATE assessments 
+                    SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
+                        decision = ?, rationale = ?, status = 'completed', 
+                        completed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
         else:
-            cursor.execute("""
-                UPDATE assessments 
-                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
-                    decision = ?, rationale = ?, status = 'completed', 
-                    completed_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
+            if scheduled_assessment_id or hiring_recommendation:
+                cursor.execute("""
+                    UPDATE assessments 
+                    SET technical_score = %s, psychometric_score = %s, overall_score = %s, 
+                        decision = %s, rationale = %s, scheduled_assessment_id = COALESCE(%s, scheduled_assessment_id),
+                        hiring_recommendation = COALESCE(%s, hiring_recommendation), 
+                        status = 'completed', completed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (technical_score, psychometric_score, overall_score, decision, rationale, 
+                      scheduled_assessment_id, hiring_recommendation, assessment_id))
+            else:
+                cursor.execute("""
+                    UPDATE assessments 
+                    SET technical_score = %s, psychometric_score = %s, overall_score = %s, 
+                        decision = %s, rationale = %s, status = 'completed', 
+                        completed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
         
         conn.commit()
         conn.close()
@@ -533,12 +571,26 @@ def save_mcq_response(assessment_id, question_id, selected_answer, is_correct, t
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        cursor.execute("""
-            INSERT INTO mcq_responses 
-            (assessment_id, question_id, selected_answer, is_correct, time_spent)
-            VALUES (?, ?, ?, ?, ?)
-        """, (assessment_id, question_id, selected_answer, is_correct, time_spent))
+        if is_sqlite:
+            cursor.execute(
+                """
+                INSERT INTO mcq_responses 
+                (assessment_id, question_id, selected_answer, is_correct, time_spent)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (assessment_id, question_id, selected_answer, is_correct, time_spent)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO mcq_responses 
+                (assessment_id, question_id, selected_answer, is_correct, time_spent)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (assessment_id, question_id, selected_answer, is_correct, time_spent)
+            )
         
         conn.commit()
         conn.close()
@@ -565,12 +617,26 @@ def save_coding_submission(assessment_id, problem_id, language, code, test_cases
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        cursor.execute("""
-            INSERT INTO coding_submissions 
-            (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases))
+        if is_sqlite:
+            cursor.execute(
+                """
+                INSERT INTO coding_submissions 
+                (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO coding_submissions 
+                (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)
+            )
         
         conn.commit()
         conn.close()
@@ -633,12 +699,26 @@ def save_psychometric_response(assessment_id, question_id, trait, score, scenari
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        cursor.execute("""
-            INSERT INTO psychometric_responses 
-            (assessment_id, question_id, trait, score, scenario_response)
-            VALUES (?, ?, ?, ?, ?)
-        """, (assessment_id, question_id, trait, score, scenario_response))
+        if is_sqlite:
+            cursor.execute(
+                """
+                INSERT INTO psychometric_responses 
+                (assessment_id, question_id, trait, score, scenario_response)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (assessment_id, question_id, trait, score, scenario_response)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO psychometric_responses 
+                (assessment_id, question_id, trait, score, scenario_response)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (assessment_id, question_id, trait, score, scenario_response)
+            )
         
         conn.commit()
         conn.close()
