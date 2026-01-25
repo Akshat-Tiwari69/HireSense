@@ -290,8 +290,9 @@ def schedule_assessment(candidate_id):
         
         print(f"[SCHEDULE] Found candidate: {candidate['name']}", flush=True)
         
-        # Get interviewer ID from JWT
-        interviewer_id = get_jwt_identity()
+        # Get interviewer ID from JWT (convert to int for database)
+        interviewer_id = int(get_jwt_identity())
+        print(f"[SCHEDULE] Interviewer ID: {interviewer_id}", flush=True)
         
         # Create scheduled assessment
         print(f"[SCHEDULE] Creating scheduled assessment...", flush=True)
