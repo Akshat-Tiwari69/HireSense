@@ -4,6 +4,7 @@ Handles all interviewer dashboard endpoints for candidate management
 Protected routes requiring JWT authentication with 'interviewer' role
 """
 
+import os
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from datetime import datetime
@@ -199,28 +200,37 @@ def reject_candidate(candidate_id):
     Returns:
         Success confirmation with candidate info
     """
+    print(f"[REJECT] Starting rejection for candidate {candidate_id}", flush=True)
     try:
         data = request.get_json() or {}
         reason = data.get('reason', '')
         
         # Get candidate info
+        print(f"[REJECT] Getting candidate info...", flush=True)
         candidate = get_candidate_by_id(candidate_id)
         if not candidate:
+            print(f"[REJECT] Candidate {candidate_id} not found", flush=True)
             return jsonify({
                 'status': 'error',
                 'message': 'Candidate not found'
             }), 404
         
+        print(f"[REJECT] Found candidate: {candidate['name']}", flush=True)
+        
         # Update status to rejected
+        print(f"[REJECT] Updating status to rejected...", flush=True)
         update_candidate_status(candidate_id, 'rejected', candidate.get('pros'), candidate.get('cons'))
         
         # Send rejection email
+        print(f"[REJECT] Sending rejection email to {candidate['email']}...", flush=True)
         email_sent = send_rejection_email(
             candidate_email=candidate['email'],
             candidate_name=candidate['name'],
             reason=reason if reason else None
         )
+        print(f"[REJECT] Email result: {email_sent}", flush=True)
         
+        print(f"[REJECT] Done! Returning success.", flush=True)
         return jsonify({
             'status': 'success',
             'message': 'Candidate rejected successfully',
@@ -253,10 +263,13 @@ def schedule_assessment(candidate_id):
     Returns:
         Success with scheduled assessment info
     """
+    print(f"[SCHEDULE] Starting schedule for candidate {candidate_id}", flush=True)
     try:
         data = request.get_json()
+        print(f"[SCHEDULE] Data received: {data}", flush=True)
         
         if not data or 'scheduled_time' not in data:
+            print(f"[SCHEDULE] Missing scheduled_time", flush=True)
             return jsonify({
                 'status': 'error',
                 'message': 'scheduled_time is required'
@@ -266,31 +279,40 @@ def schedule_assessment(candidate_id):
         additional_info = data.get('additional_info', None)
         
         # Get candidate info
+        print(f"[SCHEDULE] Getting candidate info...", flush=True)
         candidate = get_candidate_by_id(candidate_id)
         if not candidate:
+            print(f"[SCHEDULE] Candidate {candidate_id} not found", flush=True)
             return jsonify({
                 'status': 'error',
                 'message': 'Candidate not found'
             }), 404
         
+        print(f"[SCHEDULE] Found candidate: {candidate['name']}", flush=True)
+        
         # Get interviewer ID from JWT
         interviewer_id = get_jwt_identity()
         
         # Create scheduled assessment
+        print(f"[SCHEDULE] Creating scheduled assessment...", flush=True)
         scheduled_assessment_id = create_scheduled_assessment(
             candidate_id=candidate_id,
             interviewer_id=interviewer_id,
             scheduled_time=scheduled_time
         )
+        print(f"[SCHEDULE] Assessment ID: {scheduled_assessment_id}", flush=True)
         
-        # Generate assessment link
-        assessment_link = "http://localhost:5173/assessment"
+        # Generate assessment link - use FRONTEND_URL from env or default
+        frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+        assessment_link = f"{frontend_url}/assessment"
+        print(f"[SCHEDULE] Assessment link: {assessment_link}", flush=True)
         
         # Get interviewer name from JWT claims
         claims = get_jwt()
         interviewer_name = claims.get('name', 'The Hiring Team')
         
         # Send invitation email
+        print(f"[SCHEDULE] Sending invitation email to {candidate['email']}...", flush=True)
         email_sent = send_assessment_invitation(
             candidate_email=candidate['email'],
             candidate_name=candidate['name'],
@@ -299,10 +321,13 @@ def schedule_assessment(candidate_id):
             interviewer_name=interviewer_name,
             additional_info=additional_info
         )
+        print(f"[SCHEDULE] Email result: {email_sent}", flush=True)
         
         # Update candidate status
+        print(f"[SCHEDULE] Updating candidate status...", flush=True)
         update_candidate_status(candidate_id, 'under_review', candidate.get('pros'), candidate.get('cons'))
         
+        print(f"[SCHEDULE] Done! Returning success.", flush=True)
         return jsonify({
             'status': 'success',
             'message': 'Assessment scheduled successfully',

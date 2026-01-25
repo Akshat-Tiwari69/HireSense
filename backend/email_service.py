@@ -80,16 +80,12 @@ class EmailService:
         """
         # Skip email if SMTP not configured
         if not self.smtp_user or not self.smtp_pass:
-            logger.warning(f"⚠️ Email skipped (SMTP not configured): {email_type} to {recipient_email}")
+            print(f"[EMAIL] SMTP not configured, skipping email to {recipient_email}", flush=True)
             return False
         
         try:
-            logger.info("="*80)
-            logger.info(f"📧 SENDING EMAIL")
-            logger.info("="*80)
-            logger.info(f"   To: {recipient_name} <{recipient_email}>")
-            logger.info(f"   Subject: {subject}")
-            logger.info(f"   Type: {email_type}")
+            print(f"[EMAIL] Starting send: {email_type} to {recipient_email}", flush=True)
+            print(f"[EMAIL] SMTP config: {self.smtp_host}:{self.smtp_port}", flush=True)
             
             # Create message
             message = MIMEMultipart('alternative')
@@ -106,31 +102,33 @@ class EmailService:
             html_part = MIMEText(html_body, 'html')
             message.attach(html_part)
             
-            logger.info(f"📨 Connecting to SMTP server: {self.smtp_host}:{self.smtp_port}")
+            print(f"[EMAIL] Connecting to SMTP...", flush=True)
             
             # Connect to SMTP server and send (with 10 second timeout to avoid hanging)
             try:
+                print(f"[EMAIL] Trying TLS on port {self.smtp_port}...", flush=True)
                 with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
                     if self.use_tls:
-                        logger.info("🔒 Starting TLS encryption...")
+                        print("[EMAIL] Starting TLS...", flush=True)
                         server.starttls()
                     
-                    logger.info("🔐 Authenticating with SMTP server...")
+                    print("[EMAIL] Logging in...", flush=True)
                     server.login(self.smtp_user, self.smtp_pass)
                     
-                    logger.info("📤 Sending email (TLS)...")
+                    print("[EMAIL] Sending message (TLS)...", flush=True)
                     server.send_message(message)
+                    print("[EMAIL] TLS send succeeded!", flush=True)
             except Exception as e_tls:
-                logger.warning(f"⚠️ TLS send failed ({e_tls}); retrying via SSL:465")
+                print(f"[EMAIL] TLS failed: {e_tls}, trying SSL:465...", flush=True)
                 with smtplib.SMTP_SSL(self.smtp_host, 465, timeout=10) as server:
-                    logger.info("🔐 Authenticating with SMTP server (SSL)...")
+                    print("[EMAIL] SSL connected, logging in...", flush=True)
                     server.login(self.smtp_user, self.smtp_pass)
                     
-                    logger.info("📤 Sending email (SSL)...")
+                    print("[EMAIL] Sending message (SSL)...", flush=True)
                     server.send_message(message)
+                    print("[EMAIL] SSL send succeeded!", flush=True)
             
-            logger.info("✅ Email sent successfully!")
-            logger.info("="*80)
+            print(f"[EMAIL] ✅ Email sent successfully to {recipient_email}!", flush=True)
             
             # Log success
             log_email(
@@ -146,18 +144,19 @@ class EmailService:
             
         except smtplib.SMTPAuthenticationError as e:
             error_msg = f"SMTP authentication failed: {str(e)}"
-            logger.error(f"❌ {error_msg}")
+            print(f"[EMAIL] ❌ {error_msg}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except smtplib.SMTPException as e:
             error_msg = f"SMTP error: {str(e)}"
-            logger.error(f"❌ {error_msg}")
+            print(f"[EMAIL] ❌ {error_msg}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
+            print(f"[EMAIL] ❌ {error_msg}", flush=True)
             logger.exception(f"❌ {error_msg}")
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
