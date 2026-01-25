@@ -773,23 +773,31 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
     Raises:
         DatabaseError: If creation fails
     """
+    print(f"[DB] create_scheduled_assessment called: candidate={candidate_id}, interviewer={interviewer_id}, time={scheduled_time}", flush=True)
     try:
         conn = get_connection()
         cursor = conn.cursor()
         
+        print(f"[DB] Executing INSERT...", flush=True)
+        # Use RETURNING for PostgreSQL to get the inserted ID
         cursor.execute(
             """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
-               VALUES (?, ?, ?, 'scheduled')""",
+               VALUES (?, ?, ?, 'scheduled') RETURNING id""",
             (candidate_id, interviewer_id, scheduled_time)
         )
         
+        result = cursor.fetchone()
+        scheduled_id = result[0] if result else None
+        print(f"[DB] INSERT done, scheduled_id={scheduled_id}", flush=True)
+        
         conn.commit()
-        scheduled_id = cursor.lastrowid
         conn.close()
         
+        print(f"[DB] Returning scheduled_id={scheduled_id}", flush=True)
         return scheduled_id
     
     except Exception as e:
+        print(f"[DB] ERROR in create_scheduled_assessment: {e}", flush=True)
         raise DatabaseError(f"Error creating scheduled assessment: {str(e)}")
 
 
