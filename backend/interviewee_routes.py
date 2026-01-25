@@ -7,6 +7,11 @@ Includes assessment time validation (±30 minute window)
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import pytz
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 from db_helpers import (
     get_candidate_by_id,
     get_scheduled_assessment,
@@ -21,7 +26,10 @@ from db_helpers import (
     get_assessment_by_token,
     start_assessment_by_token,
     record_proctoring_violation,
-    count_violations_for_assessment
+    count_violations_for_assessment,
+    save_mcq_response,
+    save_coding_submission,
+    save_psychometric_response
 )
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
 
@@ -252,6 +260,154 @@ def start_assessment(candidate_id):
         }), 500
 
 
+@interviewee_bp.route('/assessment/<int:assessment_id>/submit-answer', methods=['POST'])
+def submit_answer(assessment_id):
+    """
+    Submit an answer for MCQ, coding, or psychometric question.
+    
+    Expects:
+        {
+            "type": "mcq" | "coding" | "psychometric",
+            "questionId": int,
+            "answer": str (for MCQ: "A"/"B"/"C"/"D"),
+            "code": str (for coding),
+            "language": str (for coding: "python"/"javascript"/"java"/"cpp"),
+            "testsPassed": int (for coding),
+            "totalTests": int (for coding),
+            "trait": str (for psychometric),
+            "score": int (for psychometric: 1-10),
+            "timeSpent": int (optional, in seconds)
+        }
+    """
+    try:
+        data = request.json
+        answer_type = data.get('type')
+        
+        if answer_type == 'mcq':
+            # Get the correct answer for this question
+            question_id = data.get('questionId')
+            selected = data.get('answer')  # "A", "B", "C", or "D"
+            time_spent = data.get('timeSpent', 0)
+            
+            # Get assessment to verify it exists
+            assessment = get_assessment_by_id(assessment_id)
+            if not assessment:
+                return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
+            
+            # Get question bank (static questions)
+            questions = get_mcq_questions(count=20)
+            correct_answer = None
+            correct_option_text = None
+            
+            # Find the correct answer for this question
+            for q in questions:
+                if q['id'] == question_id:
+                    correct_option_text = q['correct_answer']
+                    # Find which option letter matches the correct answer text
+                    for idx, option in enumerate(q['options']):
+                        if option == correct_option_text:
+                            correct_answer = ['A', 'B', 'C', 'D'][idx]
+                            break
+                    break
+            
+            if not correct_answer:
+                return jsonify({'status': 'error', 'message': 'Question not found'}), 404
+            
+            is_correct = (selected == correct_answer)
+            
+            save_mcq_response(
+                assessment_id=assessment_id,
+                question_id=question_id,
+                selected_answer=selected,
+                is_correct=is_correct,
+                time_spent=time_spent
+            )
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'MCQ answer saved',
+                'is_correct': is_correct
+            }), 200
+            correct_answer = None
+            
+            # Find the correct answer for this question
+            for q in questions:
+                if q['id'] == question_id:
+                    correct_answer = q['correct_answer']
+                    break
+            
+            if not correct_answer:
+                return jsonify({'status': 'error', 'message': 'Question not found'}), 404
+            
+            is_correct = (selected == correct_answer)
+            
+            save_mcq_response(
+                assessment_id=assessment_id,
+                question_id=question_id,
+                selected_answer=selected,
+                is_correct=is_correct,
+                time_spent=time_spent
+            )
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'MCQ answer saved',
+                'is_correct': is_correct
+            }), 200
+            
+        elif answer_type == 'coding':
+            problem_id = data.get('questionId')
+            language = data.get('language')
+            code = data.get('code')
+            tests_passed = data.get('testsPassed', 0)
+            total_tests = data.get('totalTests', 0)
+            
+            save_coding_submission(
+                assessment_id=assessment_id,
+                problem_id=problem_id,
+                language=language,
+                code=code,
+                test_cases_passed=tests_passed,
+                total_test_cases=total_tests
+            )
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Coding solution saved'
+            }), 200
+            
+        elif answer_type == 'psychometric':
+            question_id = data.get('questionId')
+            trait = data.get('trait')
+            score = data.get('score')
+            scenario_response = data.get('scenarioResponse', None)
+            
+            save_psychometric_response(
+                assessment_id=assessment_id,
+                question_id=question_id,
+                trait=trait,
+                score=score,
+                scenario_response=scenario_response
+            )
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Psychometric response saved'
+            }), 200
+            
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid answer type'
+            }), 400
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to save answer: {str(e)}'
+        }), 500
+
+
 @interviewee_bp.route('/assessment/<int:assessment_id>/complete', methods=['POST'])
 def complete_assessment(assessment_id):
     """
@@ -269,32 +425,44 @@ def complete_assessment(assessment_id):
         - Decision status
     """
     try:
+        logger.info(f"Assessment {assessment_id}: Starting completion process")
+        
         # Get assessment
         assessment = get_assessment_by_id(assessment_id)
         if not assessment:
+            logger.error(f"Assessment {assessment_id}: Not found")
             return jsonify({
                 'status': 'error',
                 'message': 'Assessment not found'
             }), 404
         
         candidate_id = assessment['candidate_id']
+        logger.info(f"Assessment {assessment_id}: Candidate ID {candidate_id}")
         
         # Calculate scores
         mcq_score = get_mcq_score(assessment_id)
+        logger.info(f"Assessment {assessment_id}: MCQ Score = {mcq_score}")
+        
         coding_score = get_coding_score(assessment_id)
+        logger.info(f"Assessment {assessment_id}: Coding Score = {coding_score}")
+        
         psychometric_scores = get_psychometric_scores(assessment_id)
+        logger.info(f"Assessment {assessment_id}: Psychometric Scores = {psychometric_scores}")
         
         # Calculate technical score (60% MCQ, 40% Coding)
         technical_score = (mcq_score * 0.6) + (coding_score * 0.4)
+        logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (MCQ: {mcq_score}, Coding: {coding_score})")
         
         # Calculate average psychometric score
         if psychometric_scores:
             avg_psychometric = sum(psychometric_scores.values()) / len(psychometric_scores)
         else:
             avg_psychometric = 0
+        logger.info(f"Assessment {assessment_id}: Avg Psychometric = {avg_psychometric}")
         
         # Calculate overall score (70% technical, 30% psychometric)
         overall_score = (technical_score * 0.7) + (avg_psychometric * 10 * 0.3)
+        logger.info(f"Assessment {assessment_id}: Overall Score = {overall_score}")
         
         # Determine preliminary decision and AI recommendation
         if overall_score >= 70:
@@ -310,7 +478,10 @@ def complete_assessment(assessment_id):
             rationale = "Performance below acceptable threshold. Skills not aligned with role requirements."
             recommendation = "Archive application"
         
+        logger.info(f"Assessment {assessment_id}: Decision = {decision}")
+        
         # Update assessment in database with completed status
+        logger.info(f"Assessment {assessment_id}: Updating database with scores")
         update_assessment_scores(
             assessment_id=assessment_id,
             technical_score=technical_score,
@@ -318,15 +489,19 @@ def complete_assessment(assessment_id):
             decision=decision,
             rationale=rationale
         )
+        logger.info(f"Assessment {assessment_id}: Scores updated successfully")
         
         # Update scheduled assessment to completed
         scheduled = get_scheduled_assessment(candidate_id)
         if scheduled:
+            logger.info(f"Assessment {assessment_id}: Updating scheduled assessment {scheduled['id']} to completed")
             update_scheduled_assessment_status(
                 scheduled_assessment_id=scheduled['id'],
                 status='completed',
                 assessment_id=assessment_id
             )
+        
+        logger.info(f"Assessment {assessment_id}: COMPLETED SUCCESSFULLY - Overall: {overall_score}, Decision: {decision}")
         
         return jsonify({
             'status': 'success',
@@ -349,6 +524,7 @@ def complete_assessment(assessment_id):
         }), 200
         
     except Exception as e:
+        logger.error(f"Assessment {assessment_id}: FAILED to complete - Error: {str(e)}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': f'Failed to complete assessment: {str(e)}'
@@ -439,9 +615,12 @@ def start_assessment_with_token(token):
         - Assessment ID for tracking
     """
     try:
+        logger.info(f"Token verification requested: {token[:10]}...")
+        
         # Get assessment by token
         assessment = get_assessment_by_token(token)
         if not assessment:
+            logger.warning(f"Token not found or invalid: {token[:10]}...")
             return jsonify({
                 'status': 'error',
                 'message': 'Invalid assessment link.'

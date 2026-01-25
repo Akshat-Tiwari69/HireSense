@@ -333,12 +333,40 @@ const AssessmentPage = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleMCQAnswer = (questionId, answerIndex) => {
+  const handleMCQAnswer = async (questionId, answerIndex) => {
     setMcqAnswers(prev => ({ ...prev, [questionId]: answerIndex }));
+    
+    // Auto-save the answer to backend
+    try {
+      const answerLetter = ['A', 'B', 'C', 'D'][answerIndex];
+      await api.post(`/interviewee/assessment/${assessmentId}/submit-answer`, {
+        type: 'mcq',
+        questionId,
+        answer: answerLetter,
+        timeSpent: 0 // Could track actual time if needed
+      });
+    } catch (err) {
+      console.error('Failed to save MCQ answer:', err);
+    }
   };
 
-  const handlePsychometricAnswer = (scenarioId, answerIndex) => {
+  const handlePsychometricAnswer = async (scenarioId, answerIndex) => {
     setPsychometricAnswers(prev => ({ ...prev, [scenarioId]: answerIndex }));
+    
+    // Auto-save the answer to backend
+    try {
+      const scenario = assessmentData?.psychometric_scenarios?.find(s => s.id === scenarioId);
+      if (scenario) {
+        await api.post(`/interviewee/assessment/${assessmentId}/submit-answer`, {
+          type: 'psychometric',
+          questionId: scenarioId,
+          trait: scenario.trait,
+          score: answerIndex + 1, // Convert 0-9 index to 1-10 score
+        });
+      }
+    } catch (err) {
+      console.error('Failed to save psychometric answer:', err);
+    }
   };
 
   const handleNextSection = () => {
@@ -359,6 +387,18 @@ const AssessmentPage = () => {
     setIsSubmitting(true);
     
     try {
+      // Save coding solution before submitting
+      if (code && code.trim()) {
+        await api.post(`/interviewee/assessment/${assessmentId}/submit-answer`, {
+          type: 'coding',
+          questionId: 1, // Assuming single coding problem
+          code: code,
+          language: language,
+          testsPassed: 0, // Would need to track this from test results
+          totalTests: 0
+        });
+      }
+      
       // Stop proctoring
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -367,13 +407,8 @@ const AssessmentPage = () => {
         clearInterval(faceDetectionIntervalRef.current);
       }
       
-      // Submit to backend
-      await api.post(`/api/interviewee/assessment/${assessmentId}/complete`, {
-        mcq_answers: mcqAnswers,
-        code: code,
-        language: language,
-        psychometric_answers: psychometricAnswers
-      });
+      // Complete assessment (backend calculates scores)
+      await api.post(`/interviewee/assessment/${assessmentId}/complete`);
       
       setSubmitted(true);
       toast({
@@ -381,6 +416,7 @@ const AssessmentPage = () => {
         description: 'Your responses have been recorded.',
       });
     } catch (err) {
+      console.error('Submission error:', err);
       toast({
         variant: 'destructive',
         title: 'Submission Error',
