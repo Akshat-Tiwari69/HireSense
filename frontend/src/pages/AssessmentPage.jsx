@@ -339,7 +339,7 @@ const AssessmentPage = () => {
     // Auto-save the answer to backend
     try {
       const answerLetter = ['A', 'B', 'C', 'D'][answerIndex];
-      await api.post(`/interviewee/assessment/${assessmentId}/submit-answer`, {
+      await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
         type: 'mcq',
         questionId,
         answer: answerLetter,
@@ -357,7 +357,7 @@ const AssessmentPage = () => {
     try {
       const scenario = assessmentData?.psychometric_scenarios?.find(s => s.id === scenarioId);
       if (scenario) {
-        await api.post(`/interviewee/assessment/${assessmentId}/submit-answer`, {
+        await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
           type: 'psychometric',
           questionId: scenarioId,
           trait: scenario.trait,
@@ -392,7 +392,7 @@ const AssessmentPage = () => {
       // Save coding solution before submitting
       if (code && code.trim()) {
         console.log('Saving coding solution...');
-        await api.post(`/interviewee/assessment/${assessmentId}/submit-answer`, {
+        await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
           type: 'coding',
           questionId: 1, // Assuming single coding problem
           code: code,
@@ -414,7 +414,7 @@ const AssessmentPage = () => {
       
       // Complete assessment (backend calculates scores)
       console.log('Completing assessment...');
-      const response = await api.post(`/interviewee/assessment/${assessmentId}/complete`);
+      const response = await api.post(`/api/interviewee/assessment/${assessmentId}/complete`);
       console.log('Assessment completion response:', response.data);
       
       if (response.data.status === 'success') {
