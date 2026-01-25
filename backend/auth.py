@@ -210,9 +210,9 @@ def login():
         
         # Get user from database
         logger.info(f"🔍 Looking up user in database...")
-            user_lookup_start = time.perf_counter()
-            user = get_user_by_email(email)
-            logger.info("🔍 User lookup finished in %.3fs (found=%s)", time.perf_counter() - user_lookup_start, bool(user))
+        user_lookup_start = time.perf_counter()
+        user = get_user_by_email(email)
+        logger.info("🔍 User lookup finished in %.3fs (found=%s)", time.perf_counter() - user_lookup_start, bool(user))
         
         if not user:
             logger.warning(f"⚠️ User not found: {email}")
@@ -224,15 +224,15 @@ def login():
         logger.info(f"✅ User found - Role: {user.get('role')}")
         
         # Verify password
-            try:
-                verify_start = time.perf_counter()
-                is_valid = verify_password(password, user['password_hash'])
-                logger.info("🔒 Password verification finished in %.3fs (ok=%s)", time.perf_counter() - verify_start, is_valid)
-            except Exception as e:
-                logger.exception("❌ Password verification error")
-                return jsonify({'status': 'error', 'message': 'Authentication failed'}), 500
+        try:
+            verify_start = time.perf_counter()
+            is_valid = verify_password(password, user['password_hash'])
+            logger.info("🔒 Password verification finished in %.3fs (ok=%s)", time.perf_counter() - verify_start, is_valid)
+        except Exception:
+            logger.exception("❌ Password verification error")
+            return jsonify({'status': 'error', 'message': 'Authentication failed'}), 500
 
-            if not is_valid:
+        if not is_valid:
             logger.warning(f"⚠️ Invalid password for: {email}")
             return jsonify({
                 'status': 'error',
