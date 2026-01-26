@@ -79,6 +79,11 @@ const AssessmentPage = () => {
     verifyAndLoadAssessment();
   }, [token]);
 
+  // Log submitted state changes
+  useEffect(() => {
+    console.log('Submitted state changed to:', submitted);
+  }, [submitted]);
+
   const verifyAndLoadAssessment = async () => {
     try {
       // First verify the token
@@ -419,7 +424,9 @@ const AssessmentPage = () => {
       
       if (response.data.status === 'success') {
         console.log('Setting submitted=true');
+        console.log('Current submitted state before:', submitted);
         setSubmitted(true);
+        console.log('After setSubmitted call');
         toast({
           title: 'Assessment submitted!',
           description: 'Your responses have been recorded.',
