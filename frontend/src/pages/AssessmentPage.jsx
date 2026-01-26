@@ -82,6 +82,9 @@ const AssessmentPage = () => {
   // Log submitted state changes
   useEffect(() => {
     console.log('Submitted state changed to:', submitted);
+    if (submitted) {
+      console.log('RENDERING COMPLETION SCREEN - Assessment successfully submitted!');
+    }
   }, [submitted]);
 
   const verifyAndLoadAssessment = async () => {
@@ -420,23 +423,33 @@ const AssessmentPage = () => {
       // Complete assessment (backend calculates scores)
       console.log('Completing assessment...');
       const response = await api.post(`/api/interviewee/assessment/${assessmentId}/complete`);
-      console.log('Assessment completion response:', response.data);
+      console.log('Assessment completion response:', response);
+      console.log('Response data:', response.data);
+      console.log('Response status:', response.data.status);
       
       if (response.data.status === 'success') {
-        console.log('Setting submitted=true');
-        console.log('Current submitted state before:', submitted);
+        console.log('✓ Assessment status is success');
+        console.log('✓ Current submitted state before setSubmitted:', submitted);
+        console.log('✓ About to call setSubmitted(true)');
+        
+        // Use a callback to verify state was set
         setSubmitted(true);
-        console.log('After setSubmitted call');
+        
+        console.log('✓ Called setSubmitted(true)');
+        console.log('✓ Current submitted state in same block:', submitted); // Will still be false here (closure)
+        
         toast({
           title: 'Assessment submitted!',
           description: 'Your responses have been recorded.',
         });
       } else {
+        console.error('❌ Assessment status is not success:', response.data.status);
         throw new Error(response.data.message || 'Unknown error');
       }
     } catch (err) {
-      console.error('Submission error:', err);
-      console.error('Error response:', err.response?.data);
+      console.error('❌ Submission error:', err);
+      console.error('❌ Error response:', err.response?.data);
+      console.error('❌ Error message:', err.message);
       toast({
         variant: 'destructive',
         title: 'Submission Error',
@@ -482,6 +495,15 @@ const AssessmentPage = () => {
 
   // Submitted state
   if (submitted) {
+    // Auto-redirect after 5 seconds
+    useEffect(() => {
+      const timer = setTimeout(() => {
+        console.log('Auto-redirecting to home after assessment submission');
+        navigate('/');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }, [navigate]);
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 flex items-center justify-center p-6">
         <Card className="w-full max-w-md bg-slate-800/50 border-slate-700 text-center">
@@ -498,8 +520,11 @@ const AssessmentPage = () => {
                 <strong>What's Next:</strong> Our team will review your responses and contact you with the final decision within 3-5 business days.
               </p>
             </div>
+            <p className="text-slate-400 text-xs mb-4">
+              Redirecting to home page in 5 seconds...
+            </p>
             <Button onClick={() => navigate('/')} className="bg-indigo-600 hover:bg-indigo-700">
-              Return to Home
+              Return to Home Now
             </Button>
           </CardContent>
         </Card>
