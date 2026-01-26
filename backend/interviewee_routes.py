@@ -483,14 +483,18 @@ def complete_assessment(assessment_id):
         
         # Update assessment in database with completed status
         logger.info(f"Assessment {assessment_id}: Updating database with scores")
-        update_assessment_scores(
-            assessment_id=assessment_id,
-            technical_score=technical_score,
-            psychometric_score=avg_psychometric * 10,
-            decision=decision,
-            rationale=rationale
-        )
-        logger.info(f"Assessment {assessment_id}: Scores updated successfully")
+        try:
+            update_assessment_scores(
+                assessment_id=assessment_id,
+                technical_score=technical_score,
+                psychometric_score=avg_psychometric * 10,
+                decision=decision,
+                rationale=rationale
+            )
+            logger.info(f"Assessment {assessment_id}: Scores updated successfully")
+        except Exception as e:
+            logger.error(f"Assessment {assessment_id}: Failed to update scores - {str(e)}", exc_info=True)
+            raise
         
         # Update scheduled assessment to completed
         scheduled = get_scheduled_assessment(candidate_id)

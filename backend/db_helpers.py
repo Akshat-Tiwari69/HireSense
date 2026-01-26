@@ -454,46 +454,30 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
         overall_score = (technical_score * 0.6) + (psychometric_score * 0.4)
         
         if is_sqlite:
-            if scheduled_assessment_id or hiring_recommendation:
-                cursor.execute("""
-                    UPDATE assessments 
-                    SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
-                        decision = ?, rationale = ?, scheduled_assessment_id = COALESCE(?, scheduled_assessment_id),
-                        hiring_recommendation = COALESCE(?, hiring_recommendation), 
-                        status = 'completed', completed_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (technical_score, psychometric_score, overall_score, decision, rationale, 
-                      scheduled_assessment_id, hiring_recommendation, assessment_id))
-            else:
-                cursor.execute("""
-                    UPDATE assessments 
-                    SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
-                        decision = ?, rationale = ?, status = 'completed', 
-                        completed_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
+            cursor.execute("""
+                UPDATE assessments 
+                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
+                    decision = ?, rationale = ?, status = 'completed', 
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
         else:
-            if scheduled_assessment_id or hiring_recommendation:
-                cursor.execute("""
-                    UPDATE assessments 
-                    SET technical_score = %s, psychometric_score = %s, overall_score = %s, 
-                        decision = %s, rationale = %s, scheduled_assessment_id = COALESCE(%s, scheduled_assessment_id),
-                        hiring_recommendation = COALESCE(%s, hiring_recommendation), 
-                        status = 'completed', completed_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """, (technical_score, psychometric_score, overall_score, decision, rationale, 
-                      scheduled_assessment_id, hiring_recommendation, assessment_id))
-            else:
-                cursor.execute("""
-                    UPDATE assessments 
-                    SET technical_score = %s, psychometric_score = %s, overall_score = %s, 
-                        decision = %s, rationale = %s, status = 'completed', 
-                        completed_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
+            # Postgres: explicit CAST for numeric types
+            cursor.execute("""
+                UPDATE assessments 
+                SET technical_score = CAST(%s AS NUMERIC), psychometric_score = CAST(%s AS NUMERIC), 
+                    overall_score = CAST(%s AS NUMERIC), 
+                    decision = %s, rationale = %s, status = 'completed', 
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
         
         conn.commit()
+        rows_affected = cursor.rowcount
         conn.close()
+        
+        if rows_affected == 0:
+            raise DatabaseError(f"No assessment found with id {assessment_id}")
         
     except Exception as e:
         raise DatabaseError(f"Error updating assessment scores: {str(e)}")
