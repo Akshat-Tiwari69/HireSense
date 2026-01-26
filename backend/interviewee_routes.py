@@ -20,6 +20,7 @@ from db_helpers import (
     update_scheduled_assessment_status,
     create_assessment,
     update_assessment_scores,
+    update_candidate_status,
     get_mcq_score,
     get_coding_score,
     get_psychometric_scores,
@@ -505,6 +506,10 @@ def complete_assessment(assessment_id):
                 status='completed',
                 assessment_id=assessment_id
             )
+        
+        # Update candidate status to 'completed'
+        logger.info(f"Assessment {assessment_id}: Updating candidate {candidate_id} status to 'completed'")
+        update_candidate_status(candidate_id, 'completed')
         
         logger.info(f"Assessment {assessment_id}: COMPLETED SUCCESSFULLY - Overall: {overall_score}, Decision: {decision}")
         
