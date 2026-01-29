@@ -46,11 +46,27 @@ const InterviewerDashboardPage = () => {
       try {
         const res = await api.get('/api/interviewer/candidates');
         const list = res?.data?.data || [];
+        
+        // Normalize status to display format
+        const normalizeStatus = (status) => {
+          const statusMap = {
+            'applied': 'Applied',
+            'pending': 'Pending',
+            'scheduled': 'Scheduled',
+            'in_progress': 'In Progress',
+            'completed': 'Completed',
+            'under_review': 'Under Review',
+            'rejected': 'Rejected',
+            'hired': 'Hired'
+          };
+          return statusMap[status?.toLowerCase()] || status || 'Pending';
+        };
+        
         const mapped = list.map((c) => ({
           id: c.id,
           name: c.name,
           email: c.email,
-          status: c.status || c.shortlist_status || 'Pending',
+          status: normalizeStatus(c.status || c.shortlist_status),
           aiMatchScore: c.match_score || 0,
           assessmentScheduled: c.assessment_date || null,
           pros: Array.isArray(c.pros) ? c.pros : (c.pros ? c.pros.split('\n') : []),
@@ -181,18 +197,14 @@ const InterviewerDashboardPage = () => {
 
   const getStatusBadge = (status) => {
     const styles = {
-      'applied': 'bg-blue-100 text-blue-800 border-blue-300',
       'Applied': 'bg-blue-100 text-blue-800 border-blue-300',
-      'pending': 'bg-slate-100 text-slate-800 border-slate-300',
-      'scheduled': 'bg-purple-100 text-purple-800 border-purple-300',
+      'Pending': 'bg-slate-100 text-slate-800 border-slate-300',
       'Scheduled': 'bg-purple-100 text-purple-800 border-purple-300',
-      'in_progress': 'bg-yellow-100 text-yellow-800 border-yellow-300',
-      'completed': 'bg-emerald-100 text-emerald-800 border-emerald-300',
+      'In Progress': 'bg-yellow-100 text-yellow-800 border-yellow-300',
       'Completed': 'bg-emerald-100 text-emerald-800 border-emerald-300',
-      'under_review': 'bg-indigo-100 text-indigo-800 border-indigo-300',
-      'rejected': 'bg-red-100 text-red-800 border-red-300',
+      'Under Review': 'bg-indigo-100 text-indigo-800 border-indigo-300',
       'Rejected': 'bg-red-100 text-red-800 border-red-300',
-      'hired': 'bg-green-100 text-green-800 border-green-300'
+      'Hired': 'bg-green-100 text-green-800 border-green-300'
     };
     return styles[status] || 'bg-slate-100 text-slate-800 border-slate-300';
   };
@@ -351,8 +363,11 @@ const InterviewerDashboardPage = () => {
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="Applied">Applied</SelectItem>
                   <SelectItem value="Scheduled">Scheduled</SelectItem>
+                  <SelectItem value="In Progress">In Progress</SelectItem>
                   <SelectItem value="Completed">Completed</SelectItem>
+                  <SelectItem value="Under Review">Under Review</SelectItem>
                   <SelectItem value="Rejected">Rejected</SelectItem>
+                  <SelectItem value="Hired">Hired</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={scoreFilter} onValueChange={setScoreFilter}>
