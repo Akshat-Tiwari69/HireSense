@@ -104,7 +104,7 @@ const AssessmentPage = () => {
       
       // Start or resume assessment
       const startRes = await api.post(`/api/interviewee/assessment/start-by-token/${token}`);
-      const data = startRes.data.data;
+      const {data} = startRes.data;
       
       setAssessmentData(data);
       setAssessmentId(data.assessment_id);
@@ -130,11 +130,17 @@ const AssessmentPage = () => {
   };
 
   const getStarterCode = (problem, lang) => {
+    // Use AI-generated starter code if available
+    if (problem.starter_code && problem.starter_code[lang]) {
+      return problem.starter_code[lang];
+    }
+    
+    // Fallback templates
     const templates = {
-      javascript: `// ${problem.title}\n// ${problem.description}\n\nfunction solution(input) {\n  // Write your code here\n  \n  return result;\n}\n\n// Test your solution\nconsole.log(solution("test"));`,
-      python: `# ${problem.title}\n# ${problem.description}\n\ndef solution(input):\n    # Write your code here\n    \n    return result\n\n# Test your solution\nprint(solution("test"))`,
-      java: `// ${problem.title}\n// ${problem.description}\n\npublic class Main {\n    public static void main(String[] args) {\n        // Write your code here\n        System.out.println("Hello, World!");\n    }\n}`,
-      cpp: `// ${problem.title}\n// ${problem.description}\n\n#include <iostream>\nusing namespace std;\n\nint main() {\n    // Write your code here\n    cout << "Hello, World!" << endl;\n    return 0;\n}`,
+      javascript: `// ${problem.title}\n// ${problem.description?.slice(0, 100) || ''}\n\nfunction solution(input) {\n  // Write your code here\n  \n  return result;\n}\n\n// Test your solution\nconsole.log(solution("test"));`,
+      python: `# ${problem.title}\n# ${problem.description?.slice(0, 100) || ''}\n\ndef solution(input):\n    # Write your code here\n    \n    return result\n\n# Test your solution\nprint(solution("test"))`,
+      java: `// ${problem.title}\n// ${problem.description?.slice(0, 100) || ''}\n\npublic class Main {\n    public static void main(String[] args) {\n        // Write your code here\n        System.out.println("Hello, World!");\n    }\n}`,
+      cpp: `// ${problem.title}\n// ${problem.description?.slice(0, 100) || ''}\n\n#include <iostream>\nusing namespace std;\n\nint main() {\n    // Write your code here\n    cout << "Hello, World!" << endl;\n    return 0;\n}`,
     };
     return templates[lang] || templates.javascript;
   };
@@ -196,7 +202,7 @@ const AssessmentPage = () => {
   const analyzeForFace = (imageData) => {
     // Simple brightness analysis - real production should use ML
     // This checks if there's a significant brightness pattern (face-shaped)
-    const data = imageData.data;
+    const {data} = imageData;
     let skinTonePixels = 0;
     const totalPixels = data.length / 4;
     
@@ -333,6 +339,86 @@ const AssessmentPage = () => {
     } finally {
       setIsRunning(false);
     }
+  };
+
+  const handleRunTestCases = async (testCases) => {
+    setIsRunning(true);
+    setOutput('Running test cases...\n\n');
+    
+    const langConfig = LANGUAGE_CONFIG[language];
+    if (!langConfig) {
+      setOutput('Language not supported for execution.');
+      setIsRunning(false);
+      return;
+    }
+    
+    let results = [];
+    let passed = 0;
+    let failed = 0;
+    
+    // Filter visible test cases only
+    const visibleTests = testCases.filter(tc => !tc.is_hidden);
+    
+    for (let i = 0; i < visibleTests.length; i++) {
+      const tc = visibleTests[i];
+      
+      try {
+        // Create test wrapper code based on language
+        let testCode = code;
+        
+        // Add test execution based on language
+        if (language === 'javascript') {
+          testCode += `\n\n// Test execution\nconsole.log(JSON.stringify(${tc.input.includes(',') ? `twoSum(${tc.input})` : `solution(${tc.input})`}));`;
+        } else if (language === 'python') {
+          testCode += `\n\n# Test execution\nprint(${tc.input.includes(',') ? `two_sum(${tc.input})` : `solution(${tc.input})`})`;
+        }
+        
+        const response = await fetch(`${PISTON_API}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            language: langConfig.runtime,
+            version: langConfig.version,
+            files: [{
+              name: `main.${langConfig.extension}`,
+              content: testCode
+            }]
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.run) {
+          const stdout = (result.run.stdout || '').trim();
+          const stderr = result.run.stderr || '';
+          
+          // Simple comparison (could be improved)
+          const expectedClean = tc.expected.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false');
+          const actualClean = stdout.replace(/'/g, '"');
+          
+          const isPassed = actualClean === expectedClean || stdout === tc.expected;
+          
+          if (isPassed) {
+            passed++;
+            results.push(`✅ Test ${i + 1}: PASSED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}\n`);
+          } else {
+            failed++;
+            results.push(`❌ Test ${i + 1}: FAILED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}${stderr ? `\n   Error: ${stderr}` : ''}\n`);
+          }
+        } else {
+          failed++;
+          results.push(`❌ Test ${i + 1}: ERROR\n   ${result.message || 'Execution failed'}\n`);
+        }
+      } catch (err) {
+        failed++;
+        results.push(`❌ Test ${i + 1}: ERROR\n   ${err.message}\n`);
+      }
+    }
+    
+    const summary = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 Results: ${passed}/${visibleTests.length} tests passed\n${passed === visibleTests.length ? '🎉 All tests passed!' : `⚠️ ${failed} test(s) failed`}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    
+    setOutput(results.join('\n') + summary);
+    setIsRunning(false);
   };
 
   const formatTime = (seconds) => {
@@ -617,6 +703,9 @@ const AssessmentPage = () => {
             </CardTitle>
             <CardDescription className="text-slate-400">
               Difficulty: <Badge className="bg-amber-600 ml-1">{problem.difficulty}</Badge>
+              {assessmentData?.ai_generated && (
+                <Badge className="bg-purple-600 ml-2">AI Generated</Badge>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -628,6 +717,53 @@ const AssessmentPage = () => {
                 <p className="text-indigo-300 font-semibold mb-2">Example:</p>
                 <pre className="text-slate-300 text-sm">{problem.example}</pre>
               </div>
+            )}
+            
+            {/* Constraints */}
+            {problem.constraints && problem.constraints.length > 0 && (
+              <div className="mt-4">
+                <p className="text-slate-400 font-semibold mb-2">Constraints:</p>
+                <ul className="text-slate-300 text-sm list-disc list-inside">
+                  {problem.constraints.map((c, idx) => (
+                    <li key={idx}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
+            {/* Test Cases */}
+            {problem.test_cases && problem.test_cases.length > 0 && (
+              <div className="mt-4">
+                <p className="text-slate-400 font-semibold mb-2">Test Cases:</p>
+                <div className="space-y-2">
+                  {problem.test_cases.filter(tc => !tc.is_hidden).map((tc, idx) => (
+                    <div key={idx} className="bg-slate-900/50 p-3 rounded-lg text-sm">
+                      <div className="flex gap-4">
+                        <span className="text-slate-400">Input:</span>
+                        <code className="text-emerald-400">{tc.input}</code>
+                      </div>
+                      <div className="flex gap-4">
+                        <span className="text-slate-400">Expected:</span>
+                        <code className="text-blue-400">{tc.expected}</code>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Hints */}
+            {problem.hints && problem.hints.length > 0 && (
+              <details className="mt-4">
+                <summary className="text-amber-400 cursor-pointer hover:text-amber-300">
+                  💡 Show Hints
+                </summary>
+                <ul className="mt-2 text-slate-300 text-sm list-disc list-inside pl-4">
+                  {problem.hints.map((hint, idx) => (
+                    <li key={idx}>{hint}</li>
+                  ))}
+                </ul>
+              </details>
             )}
           </CardContent>
         </Card>
@@ -670,14 +806,26 @@ const AssessmentPage = () => {
               />
             </div>
             
-            <Button 
-              onClick={handleRunCode}
-              disabled={isRunning}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              <Play className="w-4 h-4 mr-2" />
-              {isRunning ? 'Running...' : 'Run Code'}
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                onClick={handleRunCode}
+                disabled={isRunning}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                {isRunning ? 'Running...' : 'Run Code'}
+              </Button>
+              {problem.test_cases && problem.test_cases.length > 0 && (
+                <Button 
+                  onClick={() => handleRunTestCases(problem.test_cases)}
+                  disabled={isRunning}
+                  variant="outline"
+                  className="border-indigo-500 text-indigo-400 hover:bg-indigo-900/50"
+                >
+                  {isRunning ? 'Testing...' : 'Run Test Cases'}
+                </Button>
+              )}
+            </div>
             
             {output && (
               <div className="mt-4 bg-slate-900 text-slate-100 p-4 rounded-lg font-mono text-sm overflow-auto max-h-48">

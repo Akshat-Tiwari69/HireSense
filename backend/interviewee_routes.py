@@ -33,6 +33,7 @@ from db_helpers import (
     save_psychometric_response
 )
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
+from ai_question_generator import get_ai_question_generator
 
 
 # Create blueprint for interviewee routes
@@ -218,10 +219,33 @@ def start_assessment(candidate_id):
             assessment_id=assessment_id
         )
         
-        # Get questions
-        mcq_questions = get_mcq_questions(count=10)
-        coding_problem = get_coding_problem(difficulty="easy")
-        psychometric_scenarios = get_psychometric_scenarios(count=3)
+        # Get candidate skills for AI-generated questions
+        candidate = get_candidate_by_id(candidate_id)
+        candidate_skills = []
+        if candidate and candidate.get('parsed_skills'):
+            skills_str = candidate['parsed_skills']
+            if isinstance(skills_str, str):
+                candidate_skills = [s.strip() for s in skills_str.replace('\n', ',').split(',') if s.strip()]
+        
+        logger.info(f"Generating AI questions for candidate {candidate_id} with skills: {candidate_skills[:10]}")
+        
+        # Generate AI-powered questions based on candidate's resume
+        try:
+            ai_generator = get_ai_question_generator()
+            
+            if candidate_skills:
+                mcq_questions = ai_generator.generate_mcq_questions(candidate_skills, count=10, difficulty="mixed")
+                coding_problem = ai_generator.generate_coding_problem(candidate_skills, difficulty="medium")
+            else:
+                mcq_questions = ai_generator._get_fallback_mcq_questions(10)
+                coding_problem = ai_generator._get_fallback_coding_problem("medium")
+            
+            psychometric_scenarios = ai_generator.generate_psychometric_scenarios(count=3)
+        except Exception as e:
+            logger.warning(f"AI question generation failed: {str(e)}")
+            mcq_questions = get_mcq_questions(count=10)
+            coding_problem = get_coding_problem(difficulty="easy")
+            psychometric_scenarios = get_psychometric_scenarios(count=3)
         
         # Remove answers from questions for frontend
         mcq_for_frontend = []
@@ -230,9 +254,9 @@ def start_assessment(candidate_id):
                 "id": q["id"],
                 "question": q["question"],
                 "options": q["options"],
-                "time_limit": q["time_limit"],
-                "category": q["category"],
-                "difficulty": q["difficulty"]
+                "time_limit": q.get("time_limit", 60),
+                "category": q.get("category", "general"),
+                "difficulty": q.get("difficulty", "medium")
             })
         
         return jsonify({
@@ -247,10 +271,15 @@ def start_assessment(candidate_id):
                     'id': coding_problem['id'],
                     'title': coding_problem['title'],
                     'description': coding_problem['description'],
-                    'example': coding_problem['example'],
-                    'difficulty': coding_problem['difficulty']
+                    'example': coding_problem.get('example', ''),
+                    'difficulty': coding_problem['difficulty'],
+                    'constraints': coding_problem.get('constraints', []),
+                    'hints': coding_problem.get('hints', []),
+                    'starter_code': coding_problem.get('starter_code', {}),
+                    'test_cases': [tc for tc in coding_problem.get('test_cases', []) if not tc.get('is_hidden', False)]
                 },
-                'psychometric_scenarios': psychometric_scenarios
+                'psychometric_scenarios': psychometric_scenarios,
+                'ai_generated': bool(candidate_skills)
             }
         }), 201
         
@@ -679,10 +708,39 @@ def start_assessment_with_token(token):
                 assessment_id=assessment_id
             )
         
-        # Get questions
-        mcq_questions = get_mcq_questions(count=10)
-        coding_problem = get_coding_problem(difficulty="easy")
-        psychometric_scenarios = get_psychometric_scenarios(count=3)
+        # Get candidate skills for AI-generated questions
+        candidate = get_candidate_by_id(assessment['candidate_id'])
+        candidate_skills = []
+        if candidate and candidate.get('parsed_skills'):
+            skills_str = candidate['parsed_skills']
+            if isinstance(skills_str, str):
+                # Parse skills from comma-separated or newline-separated string
+                candidate_skills = [s.strip() for s in skills_str.replace('\n', ',').split(',') if s.strip()]
+        
+        logger.info(f"Generating AI questions for candidate skills: {candidate_skills[:10]}")
+        
+        # Generate AI-powered questions based on candidate's resume
+        try:
+            ai_generator = get_ai_question_generator()
+            
+            if candidate_skills:
+                # Generate personalized questions based on skills
+                mcq_questions = ai_generator.generate_mcq_questions(candidate_skills, count=10, difficulty="mixed")
+                coding_problem = ai_generator.generate_coding_problem(candidate_skills, difficulty="medium")
+            else:
+                # Fallback to default questions
+                mcq_questions = ai_generator._get_fallback_mcq_questions(10)
+                coding_problem = ai_generator._get_fallback_coding_problem("medium")
+            
+            psychometric_scenarios = ai_generator.generate_psychometric_scenarios(count=3)
+            
+            logger.info(f"Successfully generated AI questions for assessment {assessment_id}")
+        except Exception as e:
+            logger.warning(f"AI question generation failed, using fallback: {str(e)}")
+            # Fallback to static questions
+            mcq_questions = get_mcq_questions(count=10)
+            coding_problem = get_coding_problem(difficulty="easy")
+            psychometric_scenarios = get_psychometric_scenarios(count=3)
         
         # Remove answers from MCQ questions
         mcq_for_frontend = []
@@ -710,10 +768,15 @@ def start_assessment_with_token(token):
                     'title': coding_problem['title'],
                     'description': coding_problem['description'],
                     'example': coding_problem.get('example', ''),
-                    'difficulty': coding_problem['difficulty']
+                    'difficulty': coding_problem['difficulty'],
+                    'constraints': coding_problem.get('constraints', []),
+                    'hints': coding_problem.get('hints', []),
+                    'starter_code': coding_problem.get('starter_code', {}),
+                    'test_cases': [tc for tc in coding_problem.get('test_cases', []) if not tc.get('is_hidden', False)]
                 },
                 'psychometric_scenarios': psychometric_scenarios,
-                'duration_minutes': 60
+                'duration_minutes': 60,
+                'ai_generated': bool(candidate_skills)
             }
         }), 200
         
