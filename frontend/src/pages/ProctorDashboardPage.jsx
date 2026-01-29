@@ -52,6 +52,7 @@ const ProctorDashboardPage = () => {
   const fetchAllData = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
+      console.log('[PROCTOR] Fetching all proctor data...');
       const [statsRes, scheduledRes, activeRes, completedRes] = await Promise.all([
         api.get('/api/proctor/stats'),
         api.get('/api/proctor/assessments/scheduled'),
@@ -59,11 +60,19 @@ const ProctorDashboardPage = () => {
         api.get('/api/proctor/assessments/completed')
       ]);
       
+      console.log('[PROCTOR] Stats response:', statsRes.data);
+      console.log('[PROCTOR] Scheduled response:', scheduledRes.data);
+      console.log('[PROCTOR] Active response:', activeRes.data);
+      console.log('[PROCTOR] Completed response:', completedRes.data);
+      
       setStats(statsRes.data.data || {});
       setScheduledAssessments(scheduledRes.data.data || []);
       setActiveAssessments(activeRes.data.data || []);
       setCompletedAssessments(completedRes.data.data || []);
+      
+      console.log('[PROCTOR] State updated - scheduled count:', scheduledRes.data.data?.length || 0);
     } catch (err) {
+      console.error('[PROCTOR] Error fetching data:', err);
       const message = err?.response?.data?.message || 'Failed to load proctor data';
       if (err?.response?.status === 403) {
         toast({ variant: 'destructive', title: 'Access Denied', description: 'Proctor role required' });
