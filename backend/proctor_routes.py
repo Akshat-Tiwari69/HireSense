@@ -121,11 +121,14 @@ def get_active_assessments():
 def get_completed_assessments():
     """Get all completed assessments"""
     try:
+        proctor_email = get_jwt_identity()
+        logger.info(f"[PROCTOR] {proctor_email} fetching completed assessments")
+        
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT a.id, a.candidate_id, a.started_at, a.completed_at, a.status,
-                   a.proctoring_violations, a.mcq_score, a.coding_score, a.overall_score,
+                   a.proctoring_violations, a.technical_score, a.psychometric_score, a.overall_score,
                    c.name as candidate_name, c.email as candidate_email
             FROM assessments a
             JOIN candidates c ON a.candidate_id = c.id
@@ -136,6 +139,8 @@ def get_completed_assessments():
         rows = cursor.fetchall()
         conn.close()
         
+        logger.info(f"[PROCTOR] Found {len(rows)} completed assessments")
+        
         assessments = [{
             'id': row[0],
             'candidate_id': row[1],
@@ -143,8 +148,8 @@ def get_completed_assessments():
             'completed_at': row[3],
             'status': row[4],
             'proctoring_violations': row[5],
-            'mcq_score': row[6],
-            'coding_score': row[7],
+            'technical_score': row[6],
+            'psychometric_score': row[7],
             'overall_score': row[8],
             'candidate_name': row[9],
             'candidate_email': row[10]
@@ -152,6 +157,7 @@ def get_completed_assessments():
         
         return jsonify({'status': 'success', 'data': assessments}), 200
     except Exception as e:
+        logger.error(f"[PROCTOR ERROR] Failed to fetch completed assessments: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
