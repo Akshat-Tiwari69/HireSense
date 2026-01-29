@@ -415,12 +415,12 @@ const InterviewerDashboardPage = () => {
                         <TableCell className="font-medium">{candidate.name}</TableCell>
                         <TableCell className="text-slate-600">{candidate.email}</TableCell>
                         <TableCell>
-                          <Badge className={`${getScoreBadgeColor(candidate.aiMatchScore)} border font-semibold`}>
+                          <Badge variant="outline" className={`${getScoreBadgeColor(candidate.aiMatchScore)} font-semibold`}>
                             {candidate.aiMatchScore}%
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge className={`${getStatusBadge(candidate.status)} border`}>
+                          <Badge variant="outline" className={`${getStatusBadge(candidate.status)}`}>
                             {candidate.status}
                           </Badge>
                         </TableCell>
