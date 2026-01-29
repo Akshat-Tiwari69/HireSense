@@ -864,14 +864,34 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        driver = detect_driver()
         
-        print(f"[DB] Executing INSERT...", flush=True)
-        # Use RETURNING for PostgreSQL to get the inserted ID
-        cursor.execute(
-            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
-               VALUES (?, ?, ?, 'scheduled') RETURNING id""",
-            (candidate_id, interviewer_id, scheduled_time)
-        )
+        print(f"[DB] Executing INSERT with driver={driver}...", flush=True)
+        
+        if driver == 'postgres':
+            # PostgreSQL supports proctoring_enabled column
+            cursor.execute(
+                """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, proctoring_enabled)
+                   VALUES (%s, %s, %s, 'scheduled', true) RETURNING id""",
+                (candidate_id, interviewer_id, scheduled_time)
+            )
+        else:
+            # SQLite - check if column exists, add if not
+            cursor.execute("PRAGMA table_info(scheduled_assessments)")
+            cols = {row[1] for row in cursor.fetchall()}
+            
+            if 'proctoring_enabled' in cols:
+                cursor.execute(
+                    """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, proctoring_enabled)
+                       VALUES (?, ?, ?, 'scheduled', 1) RETURNING id""",
+                    (candidate_id, interviewer_id, scheduled_time)
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
+                       VALUES (?, ?, ?, 'scheduled') RETURNING id""",
+                    (candidate_id, interviewer_id, scheduled_time)
+                )
         
         result = cursor.fetchone()
         scheduled_id = result[0] if result else None

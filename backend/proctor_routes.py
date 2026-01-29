@@ -46,6 +46,9 @@ def require_proctor_role(f):
 def get_scheduled_assessments():
     """Get all scheduled assessments"""
     try:
+        proctor_email = get_jwt_identity()
+        logger.info(f"[PROCTOR] {proctor_email} fetching scheduled assessments")
+        
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -59,6 +62,8 @@ def get_scheduled_assessments():
         rows = cursor.fetchall()
         conn.close()
         
+        logger.info(f"[PROCTOR] Found {len(rows)} scheduled assessments")
+        
         assessments = [{
             'id': row[0],
             'candidate_id': row[1],
@@ -70,6 +75,7 @@ def get_scheduled_assessments():
         
         return jsonify({'status': 'success', 'data': assessments}), 200
     except Exception as e:
+        logger.error(f"[PROCTOR ERROR] Failed to fetch scheduled assessments: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
