@@ -79,8 +79,11 @@ def create_user():
         if not all([name, email, password]):
             return jsonify({'status': 'error', 'message': 'Name, email, and password are required'}), 400
         
-        if role not in ['interviewer', 'admin']:
-            return jsonify({'status': 'error', 'message': 'Invalid role'}), 400
+        if role not in ['interviewer', 'admin', 'proctor']:
+            return jsonify({'status': 'error', 'message': 'Invalid role. Must be interviewer, proctor, or admin'}), 400
+        
+        admin_email = get_jwt_identity()
+        logger.info(f"[ADMIN ACTION] {admin_email} creating new user: {email} with role: {role}")
         
         password_hash = hash_password(password)
         
@@ -94,6 +97,8 @@ def create_user():
         user_id = result[0] if result else None
         conn.commit()
         conn.close()
+        
+        logger.info(f"[ADMIN ACTION] {admin_email} successfully created user ID: {user_id} ({email})")
         
         return jsonify({
             'status': 'success',
@@ -112,7 +117,10 @@ def create_user():
 def update_user(user_id):
     """Update a user's details"""
     try:
+        admin_email = get_jwt_identity()
         data = request.get_json()
+        
+        logger.info(f"[ADMIN ACTION] {admin_email} updating user ID: {user_id} with data: {list(data.keys())}")
         
         conn = get_connection()
         cursor = conn.cursor()
@@ -128,8 +136,8 @@ def update_user(user_id):
             updates.append("email = ?")
             values.append(data['email'])
         if 'role' in data:
-            if data['role'] not in ['interviewer', 'admin']:
-                return jsonify({'status': 'error', 'message': 'Invalid role'}), 400
+            if data['role'] not in ['interviewer', 'admin', 'proctor']:
+                return jsonify({'status': 'error', 'message': 'Invalid role. Must be interviewer, proctor, or admin'}), 400
             updates.append("role = ?")
             values.append(data['role'])
         if 'password' in data and data['password']:
@@ -145,8 +153,11 @@ def update_user(user_id):
         conn.commit()
         conn.close()
         
+        logger.info(f"[ADMIN ACTION] {admin_email} successfully updated user ID: {user_id}")
+        
         return jsonify({'status': 'success', 'message': 'User updated successfully'}), 200
     except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to update user ID {user_id}: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -157,18 +168,34 @@ def delete_user(user_id):
     """Delete a user"""
     try:
         # Prevent deleting yourself
-        current_user_id = int(get_jwt_identity())
-        if user_id == current_user_id:
-            return jsonify({'status': 'error', 'message': 'Cannot delete your own account'}), 400
+        admin_email = get_jwt_identity()
+        current_user_id = int(admin_email.split('@')[0]) if '@' in admin_email else 0
         
         conn = get_connection()
         cursor = conn.cursor()
+        
+        # Get user info before deleting
+        cursor.execute("SELECT email, role FROM users WHERE id = ?", (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'User not found'}), 404
+        
+        user_email = user[0]
+        user_role = user[1]
+        
+        logger.warning(f"[ADMIN ACTION] {admin_email} deleting user ID: {user_id} ({user_email}, role: {user_role})")
+        
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
         conn.close()
         
+        logger.info(f"[ADMIN ACTION] {admin_email} successfully deleted user ID: {user_id}")
+        
         return jsonify({'status': 'success', 'message': 'User deleted successfully'}), 200
     except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to delete user ID {user_id}: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -217,7 +244,10 @@ def get_all_candidates():
 def update_candidate(candidate_id):
     """Update a candidate's details"""
     try:
+        admin_email = get_jwt_identity()
         data = request.get_json()
+        
+        logger.info(f"[ADMIN ACTION] {admin_email} updating candidate ID: {candidate_id} with data: {list(data.keys())}")
         
         conn = get_connection()
         cursor = conn.cursor()
@@ -252,8 +282,11 @@ def update_candidate(candidate_id):
         conn.commit()
         conn.close()
         
+        logger.info(f"[ADMIN ACTION] {admin_email} successfully updated candidate ID: {candidate_id}")
+        
         return jsonify({'status': 'success', 'message': 'Candidate updated successfully'}), 200
     except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to update candidate ID {candidate_id}: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -263,8 +296,22 @@ def update_candidate(candidate_id):
 def delete_candidate(candidate_id):
     """Delete a candidate and all related data"""
     try:
+        admin_email = get_jwt_identity()
         conn = get_connection()
         cursor = conn.cursor()
+        
+        # Get candidate info before deleting
+        cursor.execute("SELECT name, email FROM candidates WHERE id = ?", (candidate_id,))
+        candidate = cursor.fetchone()
+        
+        if not candidate:
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
+        
+        candidate_name = candidate[0]
+        candidate_email = candidate[1]
+        
+        logger.warning(f"[ADMIN ACTION] {admin_email} deleting candidate ID: {candidate_id} ({candidate_name}, {candidate_email}) and all related data")
         
         # Delete related records first
         cursor.execute("DELETE FROM scheduled_assessments WHERE candidate_id = ?", (candidate_id,))
@@ -274,8 +321,11 @@ def delete_candidate(candidate_id):
         conn.commit()
         conn.close()
         
+        logger.info(f"[ADMIN ACTION] {admin_email} successfully deleted candidate ID: {candidate_id}")
+        
         return jsonify({'status': 'success', 'message': 'Candidate deleted successfully'}), 200
     except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to delete candidate ID {candidate_id}: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
@@ -432,8 +482,22 @@ def get_env_status():
 def reset_candidate_status(candidate_id):
     """Reset a candidate's status back to Applied"""
     try:
+        admin_email = get_jwt_identity()
         conn = get_connection()
         cursor = conn.cursor()
+        
+        # Get candidate info
+        cursor.execute("SELECT name, email FROM candidates WHERE id = ?", (candidate_id,))
+        candidate = cursor.fetchone()
+        
+        if not candidate:
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
+        
+        candidate_name = candidate[0]
+        candidate_email = candidate[1]
+        
+        logger.info(f"[ADMIN ACTION] {admin_email} resetting status to 'Applied' for candidate ID: {candidate_id} ({candidate_name})")
         
         cursor.execute("""
             UPDATE candidates 
@@ -447,6 +511,9 @@ def reset_candidate_status(candidate_id):
         conn.commit()
         conn.close()
         
+        logger.info(f"[ADMIN ACTION] {admin_email} successfully reset candidate ID: {candidate_id} to 'Applied'")
+        
         return jsonify({'status': 'success', 'message': 'Candidate status reset to Applied'}), 200
     except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to reset candidate ID {candidate_id}: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500

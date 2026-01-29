@@ -312,7 +312,11 @@ const AdminDashboardPage = () => {
                         <TableCell className="text-white font-medium">{user.name}</TableCell>
                         <TableCell className="text-slate-300">{user.email}</TableCell>
                         <TableCell>
-                          <Badge className={user.role === 'admin' ? 'bg-red-600' : 'bg-blue-600'}>
+                        <Badge className={
+                          user.role === 'admin' ? 'bg-red-600' : 
+                          user.role === 'proctor' ? 'bg-purple-600' : 
+                          'bg-blue-600'
+                        }>
                             {user.role}
                           </Badge>
                         </TableCell>
@@ -528,6 +532,7 @@ const AdminDashboardPage = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-slate-800 border-slate-700">
                   <SelectItem value="interviewer">Interviewer</SelectItem>
+                  <SelectItem value="proctor">Proctor</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
