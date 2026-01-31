@@ -4,10 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertCircle, Plus, Search, Wand2, BarChart3, Clock, CheckCircle, Users } from 'lucide-react';
+import { AlertCircle, Plus, Search, Wand2, BarChart3, Clock, CheckCircle, Users, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/services/api';
 
 const InterviewerDashboard = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('my-jobs');
   const [jobs, setJobs] = useState([]);
   const [activeAssessments, setActiveAssessments] = useState([]);
@@ -49,6 +51,13 @@ const InterviewerDashboard = () => {
       console.error('Error fetching assessments:', error);
     }
     setLoading(false);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('userRole');
+    navigate('/login');
   };
 
   const createJob = async () => {
@@ -93,7 +102,13 @@ const InterviewerDashboard = () => {
     <div className="space-y-6 p-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Interviewer Dashboard</h1>
-        <Badge variant="outline">Job Management & Assessment Control</Badge>
+        <div className="flex items-center gap-4">
+          <Badge variant="outline">Job Management & Assessment Control</Badge>
+          <Button variant="destructive" onClick={handleLogout} className="gap-2">
+            <LogOut className="w-4 h-4" />
+            Logout
+          </Button>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">

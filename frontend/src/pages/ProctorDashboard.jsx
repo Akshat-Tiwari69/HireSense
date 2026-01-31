@@ -3,10 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertCircle, Activity, Clock, CheckCircle, AlertTriangle, Eye, MessageSquare } from 'lucide-react';
+import { AlertCircle, Activity, Clock, CheckCircle, AlertTriangle, Eye, MessageSquare, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/services/api';
 
 const ProctorDashboard = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('live');
   const [stats, setStats] = useState({
     active_assessments: 0,
@@ -131,22 +133,35 @@ const ProctorDashboard = () => {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('userRole');
+    navigate('/login');
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Proctor Dashboard</h1>
-        <div className="flex items-center gap-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-            />
-            Auto-refresh (10s)
-          </label>
-          <Badge variant="outline" className={autoRefresh ? 'animate-pulse' : ''}>
-            {stats.active_assessments} Live
-          </Badge>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+              />
+              Auto-refresh (10s)
+            </label>
+            <Badge variant="outline" className={autoRefresh ? 'animate-pulse' : ''}>
+              {stats.active_assessments} Live
+            </Badge>
+          </div>
+          <Button variant="destructive" onClick={handleLogout} className="gap-2">
+            <LogOut className="w-4 h-4" />
+            Logout
+          </Button>
         </div>
       </div>
 
