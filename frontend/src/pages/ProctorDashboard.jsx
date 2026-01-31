@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AlertCircle, Activity, Clock, CheckCircle, AlertTriangle, Eye, MessageSquare } from 'lucide-react';
-import api from '@/services/api';
+import { api } from '@/services/api';
 
 const ProctorDashboard = () => {
   const [activeTab, setActiveTab] = useState('live');

@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AlertCircle, Plus, Search, Wand2, BarChart3, Clock, CheckCircle, Users } from 'lucide-react';
-import api from '@/services/api';
+import { api } from '@/services/api';
 
 const InterviewerDashboard = () => {
   const [activeTab, setActiveTab] = useState('my-jobs');

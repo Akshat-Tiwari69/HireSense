@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AlertCircle, Plus, Search, Edit, Trash2, Eye, FileText, Settings, BarChart3 } from 'lucide-react';
-import api from '@/services/api';
+import { api } from '@/services/api';
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
