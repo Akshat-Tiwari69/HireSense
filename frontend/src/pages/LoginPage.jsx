@@ -41,12 +41,22 @@ const LoginPage = () => {
     try {
       const res = await api.post('/api/auth/login', { email, password });
       const token = res?.data?.data?.access_token;
+      const userRole = res?.data?.data?.user?.role;
       if (!token) throw new Error('No token received');
 
       localStorage.setItem('authToken', token);
       localStorage.setItem('userEmail', email);
+      localStorage.setItem('userRole', userRole);
       toast({ title: 'Login successful', description: 'Welcome back!' });
-      navigate('/dashboard');
+      
+      // Redirect based on role
+      if (userRole === 'admin') {
+        navigate('/admin');
+      } else if (userRole === 'proctor') {
+        navigate('/proctor');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       const message = err?.response?.data?.message || 'Invalid email or password';
       toast({

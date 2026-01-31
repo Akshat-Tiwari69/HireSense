@@ -111,13 +111,35 @@ npm run dev
 
 ## 📚 DOCUMENTATION
 
-Detailed documentation is available in the `docs/` folder:
-- [API Documentation](docs/API_DOCS.md)
-- [Authentication Guide](docs/AUTH_GUIDE.md)
-- [AI Analyzer Guide](docs/AI_ANALYZER_GUIDE.md)
-- [Interviewer Dashboard Guide](docs/INTERVIEWER_DASHBOARD_GUIDE.md)
+Comprehensive documentation is available in the `docs/` folder:
+
+### 📖 Complete Index
+- **[Documentation Index](docs/DOCUMENTATION_INDEX.md)** - Start here for all documentation
+
+### 🏗️ Architecture & Design
+| Document | Description |
+|----------|-------------|
+| [Project Architecture](docs/PROJECT_ARCHITECTURE.md) | System design and data flow |
+| [Database Schema](docs/DATABASE_SCHEMA.md) | Complete database documentation |
+| [Backend File Reference](docs/BACKEND_FILE_REFERENCE.md) | All backend Python files documented |
+| [Frontend Guide](docs/FRONTEND_GUIDE.md) | React components and pages |
+
+### 🔌 API & Features
+| Document | Description |
+|----------|-------------|
+| [API Documentation](docs/API_DOCS.md) | Complete REST API reference with auth |
+| [Assessment System](docs/ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, Coding, Psychometric tests |
+| [Proctoring System](docs/PROCTOR_GUIDE.md) | Face detection and monitoring |
+| [Admin Dashboard](docs/ADMIN_DASHBOARD_GUIDE.md) | User and job management |
+
+### 🚀 Deployment & Configuration
+| Document | Description |
+|----------|-------------|
+| [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) | Production deployment |
+| [Environment Config](docs/ENVIRONMENT_CONFIG.md) | All environment variables |
 
 ---
 
 ## 📄 License
 MIT License
+

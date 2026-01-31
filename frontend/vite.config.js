@@ -9,9 +9,18 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    extensions: ['.js', '.jsx', '.json'],
   },
   build: {
     outDir: 'dist',
     sourcemap: false,
-  }
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
+  },
+  ssr: {
+    noExternal: [],
+  },
 })

@@ -1,0 +1,17 @@
+# Railway Nixpacks configuration for backend (Python)
+
+[phases.setup]
+# Ensure Python comes with pip (use the "Full" derivation) and include PostgreSQL client libs
+nixPkgs = ["python311Full", "gcc", "postgresql"]
+nixLibs = ["postgresql"]
+
+[phases.install]
+# Install backend requirements; bootstrap pip if needed
+commands = [
+  "python -m ensurepip --upgrade || true",
+  "python -m pip install -r requirements.txt"
+]
+
+[start]
+# Use gunicorn with explicit LD_LIBRARY_PATH for PostgreSQL; Railway provides $PORT
+cmd = "LD_LIBRARY_PATH=/nix/var/nix/profiles/default/lib:$LD_LIBRARY_PATH gunicorn app:app --bind 0.0.0.0:$PORT --timeout 90"
