@@ -56,21 +56,21 @@ def get_dashboard_stats():
     # Scheduled today
     cursor.execute("""
         SELECT COUNT(*) as count FROM scheduled_assessments
-        WHERE DATE(scheduled_time) = DATE('now') AND status = 'scheduled'
+        WHERE DATE(scheduled_time) = CURRENT_DATE AND status = 'scheduled'
     """)
     scheduled_today = cursor.fetchone()['count']
     
     # Completed today
     cursor.execute("""
         SELECT COUNT(*) as count FROM assessments
-        WHERE DATE(completed_at) = DATE('now') AND status = 'completed'
+        WHERE DATE(completed_at) = CURRENT_DATE AND status = 'completed'
     """)
     completed_today = cursor.fetchone()['count']
     
     # Total violations today
     cursor.execute("""
         SELECT COUNT(*) as count FROM proctoring_events
-        WHERE DATE(timestamp) = DATE('now')
+        WHERE DATE(timestamp) = CURRENT_DATE
     """)
     violations_today = cursor.fetchone()['count']
     
@@ -100,8 +100,8 @@ def get_active_assessments():
             COUNT(DISTINCT pe.id) as violation_count,
             a.proctoring_violations,
             CASE 
-                WHEN (julianday('now') - julianday(a.started_at)) * 24 * 60 > 60 THEN 'overdue'
-                WHEN (julianday('now') - julianday(a.started_at)) * 24 * 60 > 45 THEN 'near_end'
+                WHEN EXTRACT(EPOCH FROM (NOW() - a.started_at)) / 60 > 60 THEN 'overdue'
+                WHEN EXTRACT(EPOCH FROM (NOW() - a.started_at)) / 60 > 45 THEN 'near_end'
                 ELSE 'in_progress'
             END as time_status
         FROM assessments a
@@ -110,7 +110,7 @@ def get_active_assessments():
         LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE a.status = 'in_progress'
-        GROUP BY a.id
+        GROUP BY a.id, c.name, c.email, jd.title, a.started_at, a.proctoring_violations
         ORDER BY a.started_at ASC
     """)
     
@@ -135,14 +135,14 @@ def get_scheduled_assessments():
             c.email as candidate_email,
             jd.title as job_title,
             sa.scheduled_time,
-            ROUND((julianday(sa.scheduled_time) - julianday('now')) * 24 * 60) as minutes_until_start,
+            ROUND(EXTRACT(EPOCH FROM (sa.scheduled_time - NOW())) / 60) as minutes_until_start,
             sa.status
         FROM scheduled_assessments sa
         JOIN candidates c ON sa.candidate_id = c.id
         LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
         WHERE sa.status = 'scheduled'
-            AND sa.scheduled_time <= datetime('now', '+' || ? || ' days')
-            AND sa.scheduled_time > datetime('now')
+            AND sa.scheduled_time <= NOW() + (? || ' days')::INTERVAL
+            AND sa.scheduled_time > NOW()
         ORDER BY sa.scheduled_time ASC
     """, (days_ahead,))
     
@@ -178,8 +178,9 @@ def get_completed_assessments():
         LEFT JOIN job_descriptions jd ON a.job_id = jd.id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE a.status = 'completed'
-            AND DATE(a.completed_at) >= DATE('now', '-' || ? || ' days')
-        GROUP BY a.id
+            AND a.completed_at >= NOW() - (? || ' days')::INTERVAL
+        GROUP BY a.id, c.name, c.email, jd.title, a.technical_score, a.psychometric_score, 
+                 a.overall_score, a.proctoring_violations, a.completed_at
         ORDER BY a.completed_at DESC
         LIMIT ?
     """, (days, limit))
@@ -303,7 +304,7 @@ def detect_anomalies():
             c.email as candidate_email,
             jd.title as job_title,
             COUNT(pe.id) as violation_count,
-            GROUP_CONCAT(DISTINCT pe.event_type) as violation_types,
+            STRING_AGG(DISTINCT pe.event_type, ',') as violation_types,
             a.overall_score,
             CASE 
                 WHEN COUNT(pe.id) > 5 THEN 'critical'
@@ -315,8 +316,8 @@ def detect_anomalies():
         JOIN candidates c ON a.candidate_id = c.id
         LEFT JOIN job_descriptions jd ON a.job_id = jd.id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
-        WHERE a.status = 'completed' AND a.completed_at >= datetime('now', '-7 days')
-        GROUP BY a.id
+        WHERE a.status = 'completed' AND a.completed_at >= NOW() - INTERVAL '7 days'
+        GROUP BY a.id, c.name, c.email, jd.title, a.overall_score
         HAVING COUNT(pe.id) > 1
         ORDER BY COUNT(pe.id) DESC
     """)
@@ -380,8 +381,8 @@ def get_job_performance_metrics():
         FROM job_descriptions jd
         LEFT JOIN assessments a ON jd.id = a.job_id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
-        WHERE a.completed_at >= datetime('now', '-30 days')
-        GROUP BY jd.id
+        WHERE a.completed_at >= NOW() - INTERVAL '30 days'
+        GROUP BY jd.id, jd.title, jd.role_complexity_level
         ORDER BY avg_violations DESC
     """)
     
@@ -475,7 +476,7 @@ def get_shift_summary():
         FROM scheduled_assessments sa
         LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
-        WHERE sa.proctor_id = ? AND DATE(sa.scheduled_time) = DATE('now')
+        WHERE sa.proctor_id = ? AND DATE(sa.scheduled_time) = CURRENT_DATE
     """, (user_id,))
     
     summary = dict(cursor.fetchone())
@@ -497,9 +498,9 @@ def get_stats():
     cursor.execute("""
         SELECT 
             COUNT(DISTINCT CASE WHEN a.status = 'in_progress' THEN a.id END) as active_assessments,
-            COUNT(DISTINCT CASE WHEN a.status = 'completed' AND DATE(a.completed_at) = DATE('now') THEN a.id END) as completed_today,
-            COUNT(DISTINCT CASE WHEN sa.status = 'scheduled' AND DATE(sa.scheduled_time) = DATE('now') THEN sa.id END) as scheduled_today,
-            COUNT(DISTINCT CASE WHEN pe.id IS NOT NULL AND DATE(pe.timestamp) = DATE('now') THEN pe.id END) as violations_today
+            COUNT(DISTINCT CASE WHEN a.status = 'completed' AND DATE(a.completed_at) = CURRENT_DATE THEN a.id END) as completed_today,
+            COUNT(DISTINCT CASE WHEN sa.status = 'scheduled' AND DATE(sa.scheduled_time) = CURRENT_DATE THEN sa.id END) as scheduled_today,
+            COUNT(DISTINCT CASE WHEN pe.id IS NOT NULL AND DATE(pe.timestamp) = CURRENT_DATE THEN pe.id END) as violations_today
         FROM scheduled_assessments sa
         LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
@@ -560,7 +561,7 @@ def get_all_active_assessments():
         LEFT JOIN job_descriptions jd ON a.job_id = jd.id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE a.status = 'in_progress'
-        GROUP BY a.id
+        GROUP BY a.id, c.name, c.email, jd.title, a.started_at, a.proctoring_violations
         ORDER BY a.started_at ASC
     """)
     
@@ -593,7 +594,7 @@ def get_all_completed_assessments():
         LEFT JOIN job_descriptions jd ON a.job_id = jd.id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE a.status = 'completed'
-        GROUP BY a.id
+        GROUP BY a.id, c.name, c.email, jd.title, a.overall_score, a.proctoring_violations, a.completed_at
         ORDER BY a.completed_at DESC
         LIMIT ?
     """, (limit,))

@@ -9,10 +9,25 @@ from urllib.parse import urlparse
 
 import psycopg2
 from psycopg2 import extensions
+from psycopg2.extras import RealDictCursor
 
 
 class QmarkCursor(extensions.cursor):
     """Cursor that accepts SQLite-style '?' placeholders by mapping to '%s'."""
+
+    def execute(self, query, vars=None):  # type: ignore[override]
+        if query and "?" in query:
+            query = query.replace("?", "%s")
+        return super().execute(query, vars)
+
+    def executemany(self, query, vars_list):  # type: ignore[override]
+        if query and "?" in query:
+            query = query.replace("?", "%s")
+        return super().executemany(query, vars_list)
+
+
+class QmarkDictCursor(RealDictCursor):
+    """Cursor that combines RealDictCursor (dict-like rows) with ? placeholder support."""
 
     def execute(self, query, vars=None):  # type: ignore[override]
         if query and "?" in query:

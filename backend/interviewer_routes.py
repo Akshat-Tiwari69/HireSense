@@ -269,7 +269,9 @@ def get_job_assessment_results(job_id):
     # Get assessments for this job
     cursor.execute("""
         SELECT 
-            a.*, 
+            a.id, a.candidate_id, a.job_id, a.technical_score, a.psychometric_score,
+            a.overall_score, a.status, a.decision, a.proctoring_violations,
+            a.ai_recommendation, a.skill_gap_analysis, a.started_at, a.completed_at,
             c.name as candidate_name,
             c.email as candidate_email,
             COUNT(DISTINCT CASE WHEN pe.event_type = 'violation' THEN pe.id END) as violation_count
@@ -277,7 +279,10 @@ def get_job_assessment_results(job_id):
         JOIN candidates c ON a.candidate_id = c.id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE a.job_id = ?
-        GROUP BY a.id
+        GROUP BY a.id, a.candidate_id, a.job_id, a.technical_score, a.psychometric_score,
+                 a.overall_score, a.status, a.decision, a.proctoring_violations,
+                 a.ai_recommendation, a.skill_gap_analysis, a.started_at, a.completed_at,
+                 c.name, c.email
         ORDER BY a.completed_at DESC
     """, (job_id,))
     
