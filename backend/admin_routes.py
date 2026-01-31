@@ -8,14 +8,16 @@ from werkzeug.security import generate_password_hash
 import json
 from datetime import datetime
 from functools import wraps
-import sqlite3
+from db_config import get_connection
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
 # Database connection helper
 def get_db():
-    conn = sqlite3.connect('assessment_system.db')
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
+    # Enable autocommit for PostgreSQL to avoid transaction issues
+    if hasattr(conn, 'set_session'):
+        conn.set_session(autocommit=True)
     return conn
 
 # Admin authorization decorator

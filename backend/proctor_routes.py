@@ -7,13 +7,15 @@ from flask import Blueprint, request, jsonify
 import json
 from datetime import datetime, timedelta
 from functools import wraps
-import sqlite3
+from db_config import get_connection
 
 proctor_bp = Blueprint('proctor', __name__, url_prefix='/api/proctor')
 
 def get_db():
-    conn = sqlite3.connect('assessment_system.db')
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
+    # Enable autocommit for PostgreSQL to avoid transaction issues
+    if hasattr(conn, 'set_session'):
+        conn.set_session(autocommit=True)
     return conn
 
 def proctor_required(f):
