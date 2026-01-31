@@ -539,3 +539,190 @@ def log_admin_action(admin_id, action_type, entity_type, entity_id, old_values, 
         print(f"Error logging admin action: {e}")
     finally:
         conn.close()
+
+
+# ============================================================================
+# USER MANAGEMENT ENDPOINTS (for old AdminDashboardPage)
+# ============================================================================
+
+@admin_bp.route('/users', methods=['GET'])
+def get_users():
+    """Get all users"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, name, email, role FROM users ORDER BY id")
+        users = cursor.fetchall()
+        result = [{'id': row[0], 'name': row[1], 'email': row[2], 'role': row[3]} for row in users]
+        return jsonify({'status': 'success', 'data': result})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@admin_bp.route('/users', methods=['POST'])
+def create_user():
+    """Create a new user"""
+    from werkzeug.security import generate_password_hash
+    data = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        password_hash = generate_password_hash(data.get('password', 'password123'))
+        cursor.execute(
+            "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+            (data.get('name'), data.get('email'), password_hash, data.get('role', 'interviewer'))
+        )
+        conn.commit()
+        return jsonify({'status': 'success', 'message': 'User created'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@admin_bp.route('/users/<int:user_id>', methods=['PUT'])
+def update_user(user_id):
+    """Update a user"""
+    data = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE users SET name = ?, email = ?, role = ? WHERE id = ?",
+            (data.get('name'), data.get('email'), data.get('role'), user_id)
+        )
+        conn.commit()
+        return jsonify({'status': 'success', 'message': 'User updated'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@admin_bp.route('/users/<int:user_id>', methods=['DELETE'])
+def delete_user(user_id):
+    """Delete a user"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return jsonify({'status': 'success', 'message': 'User deleted'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+# ============================================================================
+# CANDIDATE MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/candidates', methods=['GET'])
+def get_candidates():
+    """Get all candidates"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, name, email, phone, status, match_score FROM candidates ORDER BY id")
+        candidates = cursor.fetchall()
+        result = [{'id': row[0], 'name': row[1], 'email': row[2], 'phone': row[3], 'status': row[4], 'match_score': row[5]} for row in candidates]
+        return jsonify({'status': 'success', 'data': result})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@admin_bp.route('/candidates/<int:candidate_id>', methods=['PUT'])
+def update_candidate(candidate_id):
+    """Update a candidate"""
+    data = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE candidates SET name = ?, email = ?, phone = ?, status = ? WHERE id = ?",
+            (data.get('name'), data.get('email'), data.get('phone'), data.get('status'), candidate_id)
+        )
+        conn.commit()
+        return jsonify({'status': 'success', 'message': 'Candidate updated'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@admin_bp.route('/candidates/<int:candidate_id>', methods=['DELETE'])
+def delete_candidate(candidate_id):
+    """Delete a candidate"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
+        conn.commit()
+        return jsonify({'status': 'success', 'message': 'Candidate deleted'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+# ============================================================================
+# DATABASE STATS ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/db/stats', methods=['GET'])
+def get_db_stats():
+    """Get database statistics"""
+    import os
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        stats = {}
+        tables = ['users', 'candidates', 'assessments', 'job_descriptions']
+        for table in tables:
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                stats[table] = cursor.fetchone()[0]
+            except:
+                stats[table] = 0
+        
+        stats['database_type'] = 'PostgreSQL' if os.environ.get('DATABASE_URL') else 'SQLite'
+        return jsonify({'status': 'success', 'data': stats})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@admin_bp.route('/db/tables', methods=['GET'])
+def get_db_tables():
+    """Get list of database tables"""
+    import os
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        if os.environ.get('DATABASE_URL'):
+            # PostgreSQL
+            cursor.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'public' ORDER BY table_name
+            """)
+        else:
+            # SQLite
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        
+        tables = [row[0] for row in cursor.fetchall()]
+        return jsonify({'status': 'success', 'data': tables})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@admin_bp.route('/settings/env', methods=['GET'])
+def get_env_settings():
+    """Get environment settings status (not values for security)"""
+    import os
+    env_vars = {
+        'DATABASE_URL': bool(os.environ.get('DATABASE_URL')),
+        'JWT_SECRET_KEY': bool(os.environ.get('JWT_SECRET_KEY')),
+        'OPENAI_API_KEY': bool(os.environ.get('OPENAI_API_KEY')),
+        'SMTP_HOST': bool(os.environ.get('SMTP_HOST')),
+        'SMTP_PORT': bool(os.environ.get('SMTP_PORT')),
+    }
+    return jsonify({'status': 'success', 'data': env_vars})
