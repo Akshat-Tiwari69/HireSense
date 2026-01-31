@@ -22,8 +22,13 @@ def get_db():
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        from flask import session
+        from flask import session, request
+        # DEBUG: Log preflight requests
+        if request.method == 'OPTIONS':
+            print(f"[CORS DEBUG] OPTIONS request to {request.path} - allowing without auth")
+            return f(*args, **kwargs)
         if 'user_id' not in session or session.get('role') != 'admin':
+            print(f"[CORS DEBUG] Blocked request to {request.path} - no admin session")
             return jsonify({'error': 'Admin access required'}), 403
         return f(*args, **kwargs)
     return decorated_function

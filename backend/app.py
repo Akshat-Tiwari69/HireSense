@@ -73,6 +73,19 @@ def unauthorized_callback(error):
 # Enable CORS - Allow ALL origins (temporary fix for debugging)
 CORS(app, supports_credentials=False, origins="*")
 
+# Global OPTIONS handler for CORS preflight requests
+@app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
+@app.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    """Handle all OPTIONS requests for CORS preflight"""
+    print(f"[CORS DEBUG] Global OPTIONS handler triggered for: {path}")
+    response = app.make_response('')
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    response.headers['Access-Control-Max-Age'] = '86400'
+    return response
+
 # Register authentication blueprint
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
