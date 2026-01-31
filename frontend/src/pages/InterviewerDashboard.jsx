@@ -176,7 +176,7 @@ const InterviewerDashboard = () => {
                     <Input
                       type="number"
                       value={newJob.min_experience}
-                      onChange={(e) => setNewJob({ ...newJob, min_experience: parseInt(e.target.value) })}
+                      onChange={(e) => setNewJob({ ...newJob, min_experience: parseInt(e.target.value) || 0 })}
                     />
                   </div>
                   <div className="space-y-2">
