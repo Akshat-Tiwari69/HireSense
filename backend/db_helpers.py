@@ -1456,10 +1456,10 @@ def record_proctoring_violation(assessment_id, violation_type, description, seve
         cursor = conn.cursor()
         
         cursor.execute(
-            """INSERT INTO proctoring_violations 
-               (assessment_id, violation_type, description, severity, screenshot_url)
-               VALUES (?, ?, ?, ?, ?) RETURNING id""",
-            (assessment_id, violation_type, description, severity, screenshot_url)
+            """INSERT INTO proctoring_events 
+               (assessment_id, event_type, severity, details)
+               VALUES (?, ?, ?, ?) RETURNING id""",
+            (assessment_id, violation_type, severity, description)
         )
         
         result = cursor.fetchone()
@@ -1489,9 +1489,8 @@ def get_violations_for_assessment(assessment_id):
         cursor = conn.cursor()
         
         cursor.execute(
-            """SELECT id, assessment_id, violation_type, description, severity, 
-                      screenshot_url, timestamp, resolved
-               FROM proctoring_violations 
+            """SELECT id, assessment_id, event_type, details, severity, timestamp
+               FROM proctoring_events
                WHERE assessment_id = ?
                ORDER BY timestamp DESC""",
             (assessment_id,)
@@ -1508,9 +1507,9 @@ def get_violations_for_assessment(assessment_id):
                 'violation_type': row[2],
                 'description': row[3],
                 'severity': row[4],
-                'screenshot_url': row[5],
-                'timestamp': row[6],
-                'resolved': row[7]
+                'screenshot_url': None,
+                'timestamp': row[5],
+                'resolved': False
             })
         
         return violations
@@ -1534,7 +1533,7 @@ def count_violations_for_assessment(assessment_id):
         cursor = conn.cursor()
         
         cursor.execute(
-            "SELECT COUNT(*) FROM proctoring_violations WHERE assessment_id = ?",
+            "SELECT COUNT(*) FROM proctoring_events WHERE assessment_id = ?",
             (assessment_id,)
         )
         

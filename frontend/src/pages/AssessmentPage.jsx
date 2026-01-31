@@ -63,10 +63,14 @@ const AssessmentPage = () => {
   const [cameraStream, setCameraStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
   const [faceDetected, setFaceDetected] = useState(true);
+  const [faceCount, setFaceCount] = useState(1);
   const [violationCount, setViolationCount] = useState(0);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const faceDetectionIntervalRef = useRef(null);
+  const faceDetectorRef = useRef(null);
+  const lastViolationRef = useRef({});
+  const lastFaceCountRef = useRef(null);
 
   // Verify token and load assessment
   useEffect(() => {
@@ -168,8 +172,11 @@ const AssessmentPage = () => {
   };
 
   const startFaceDetection = () => {
-    // Simple face detection by analyzing video brightness patterns
-    // For production, use TensorFlow.js face-api or similar
+    // Use FaceDetector API when available; fallback to brightness analysis
+    if (window.FaceDetector) {
+      faceDetectorRef.current = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 3 });
+    }
+
     faceDetectionIntervalRef.current = setInterval(() => {
       if (!videoRef.current || !canvasRef.current) return;
       
@@ -181,15 +188,36 @@ const AssessmentPage = () => {
       canvas.height = video.videoHeight || 240;
       ctx.drawImage(video, 0, 0);
       
-      // Get image data and analyze for face-like patterns
       try {
+        if (faceDetectorRef.current) {
+          faceDetectorRef.current.detect(video).then((faces) => {
+            const count = faces?.length || 0;
+            setFaceCount(count || 0);
+
+            if (count === 0) {
+              setFaceDetected(false);
+              reportViolation('no_face', 'No face detected in camera', 'high', 15000);
+            } else if (count > 1) {
+              setFaceDetected(true);
+              reportViolation('multiple_faces', 'Multiple faces detected in camera', 'critical', 15000);
+            } else {
+              setFaceDetected(true);
+            }
+
+            lastFaceCountRef.current = count;
+          }).catch(() => {
+            // Ignore detector errors
+          });
+          return;
+        }
+
+        // Fallback: Get image data and analyze for face-like patterns
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const detected = analyzeForFace(imageData);
-        
+
         if (!detected && faceDetected) {
-          // Face lost
           setFaceDetected(false);
-          reportViolation('no_face', 'No face detected in camera', 'medium');
+          reportViolation('no_face', 'No face detected in camera', 'medium', 15000);
         } else if (detected && !faceDetected) {
           setFaceDetected(true);
         }
@@ -224,8 +252,17 @@ const AssessmentPage = () => {
     return (skinTonePixels / totalPixels) > 0.05;
   };
 
-  const reportViolation = async (type, description, severity = 'medium') => {
+  const shouldReportViolation = (type, cooldownMs = 30000) => {
+    const now = Date.now();
+    const last = lastViolationRef.current[type] || 0;
+    if (now - last < cooldownMs) return false;
+    lastViolationRef.current[type] = now;
+    return true;
+  };
+
+  const reportViolation = async (type, description, severity = 'medium', cooldownMs = 30000) => {
     if (!assessmentId) return;
+    if (!shouldReportViolation(type, cooldownMs)) return;
     
     try {
       const res = await api.post(`/api/interviewee/assessment/${assessmentId}/violation`, {
@@ -246,17 +283,64 @@ const AssessmentPage = () => {
     }
   };
 
-  // Tab visibility monitoring
+  // Tab visibility and window focus monitoring
   useEffect(() => {
+    if (!proctoringEnabled) return;
+
     const handleVisibilityChange = () => {
       if (document.hidden && assessmentId && !submitted) {
-        reportViolation('tab_switch', 'Candidate switched away from assessment tab', 'high');
+        reportViolation('tab_switch', 'Candidate switched away from assessment tab', 'high', 15000);
       }
     };
-    
+
+    const handleWindowBlur = () => {
+      if (assessmentId && !submitted) {
+        reportViolation('window_blur', 'Assessment window lost focus', 'high', 15000);
+      }
+    };
+
+    const handlePaste = (event) => {
+      event.preventDefault();
+      reportViolation('paste_detected', 'Paste action detected', 'high', 10000);
+    };
+
+    const handleCopy = (event) => {
+      event.preventDefault();
+      reportViolation('copy_detected', 'Copy action detected', 'medium', 10000);
+    };
+
+    const handleCut = (event) => {
+      event.preventDefault();
+      reportViolation('cut_detected', 'Cut action detected', 'medium', 10000);
+    };
+
+    const handleKeyDown = (event) => {
+      const key = event.key?.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === 'v') {
+        event.preventDefault();
+        reportViolation('paste_shortcut', 'Ctrl/Cmd+V detected', 'high', 10000);
+      }
+      if (key === 'tab') {
+        reportViolation('tab_key', 'Tab key pressed during assessment', 'low', 5000);
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [assessmentId, submitted]);
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('paste', handlePaste);
+    document.addEventListener('copy', handleCopy);
+    document.addEventListener('cut', handleCut);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('paste', handlePaste);
+      document.removeEventListener('copy', handleCopy);
+      document.removeEventListener('cut', handleCut);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [assessmentId, submitted, proctoringEnabled]);
 
   // Timer
   useEffect(() => {
