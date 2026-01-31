@@ -77,16 +77,16 @@ CORS(app)
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
 # Register interviewer routes blueprint
-app.register_blueprint(interviewer_bp, url_prefix='/api/interviewer')
+app.register_blueprint(interviewer_bp)
 
 # Register interviewee routes blueprint
 app.register_blueprint(interviewee_bp, url_prefix='/api/interviewee')
 
 # Register admin routes blueprint
-app.register_blueprint(admin_bp, url_prefix='/api/admin')
+app.register_blueprint(admin_bp)
 
 # Register proctor routes blueprint
-app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
+app.register_blueprint(proctor_bp)
 
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
