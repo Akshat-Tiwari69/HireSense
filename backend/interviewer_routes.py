@@ -500,36 +500,86 @@ def get_active_assessments():
 @interviewer_bp.route('/candidates', methods=['GET'])
 @interviewer_required
 def get_candidates():
-    """Get all candidates for this interviewer's jobs"""
+    """Get all candidates with their auto-matched jobs"""
     user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
     status = request.args.get('status', None)
     
+    # Get all candidates with their matched job info
     query = """
         SELECT DISTINCT 
             c.*,
             jd.title as job_title,
+            jd.id as matched_job_id,
             sa.scheduled_time,
             a.overall_score,
             a.status as assessment_status
         FROM candidates c
-        LEFT JOIN scheduled_assessments sa ON c.id = sa.candidate_id
-        LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
+        LEFT JOIN job_descriptions jd ON c.job_id = jd.id
+        LEFT JOIN scheduled_assessments sa ON c.id = sa.candidate_id AND sa.interviewer_id = ?
         LEFT JOIN assessments a ON c.id = a.candidate_id
-        WHERE sa.interviewer_id = ?
     """
     params = [user_id]
     
     if status:
-        query += " AND c.status = ?"
+        query += " WHERE c.status = ?"
         params.append(status)
     
     query += " ORDER BY c.created_at DESC"
     
     cursor.execute(query, params)
-    candidates = [dict(row) for row in cursor.fetchall()]
+    rows = cursor.fetchall()
+    
+    candidates = []
+    for row in rows:
+        candidate = dict(row)
+        
+        # Parse JSON fields
+        try:
+            candidate['parsed_skills'] = json.loads(candidate.get('parsed_skills') or '[]')
+        except:
+            candidate['parsed_skills'] = []
+        
+        try:
+            pros_data = candidate.get('pros')
+            if pros_data:
+                # Handle both JSON array and newline-separated string
+                if pros_data.startswith('['):
+                    candidate['pros'] = json.loads(pros_data)
+                else:
+                    candidate['pros'] = pros_data.split('\n')
+            else:
+                candidate['pros'] = []
+        except:
+            candidate['pros'] = []
+        
+        try:
+            cons_data = candidate.get('cons')
+            if cons_data:
+                # Handle both JSON array and newline-separated string
+                if cons_data.startswith('['):
+                    candidate['cons'] = json.loads(cons_data)
+                else:
+                    candidate['cons'] = cons_data.split('\n')
+            else:
+                candidate['cons'] = []
+        except:
+            candidate['cons'] = []
+        
+        # Build parsed_data object for frontend
+        candidate['parsed_data'] = {
+            'skills': candidate.get('parsed_skills', []),
+            'experience': candidate.get('years_experience', 0),
+            'education': candidate.get('education', ''),
+            'match_score': candidate.get('match_score', 0),
+            'pros': candidate['pros'],
+            'cons': candidate['cons']
+        }
+        
+        candidates.append(candidate)
+    
     conn.close()
     
     return jsonify(candidates)

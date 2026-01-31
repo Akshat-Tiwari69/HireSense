@@ -20,6 +20,7 @@ const InterviewerDashboard = () => {
   const [selectedJob, setSelectedJob] = useState(null);
   const [showJobModal, setShowJobModal] = useState(false);
   const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
+  const [candidates, setCandidates] = useState([]);
   const [newJob, setNewJob] = useState({
     title: '',
     description: '',
@@ -32,6 +33,7 @@ const InterviewerDashboard = () => {
   useEffect(() => {
     if (activeTab === 'my-jobs') fetchJobs();
     if (activeTab === 'active') fetchActiveAssessments();
+    if (activeTab === 'candidates') fetchCandidates();
   }, [activeTab]);
 
   const fetchJobs = async () => {
@@ -52,6 +54,18 @@ const InterviewerDashboard = () => {
       setActiveAssessments(response.data);
     } catch (error) {
       console.error('Error fetching assessments:', error);
+    }
+    setLoading(false);
+  };
+
+  const fetchCandidates = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/interviewer/candidates');
+      setCandidates(response.data);
+    } catch (error) {
+      console.error('Error fetching candidates:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to fetch candidates' });
     }
     setLoading(false);
   };
@@ -125,8 +139,9 @@ const InterviewerDashboard = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="my-jobs">My Job Postings</TabsTrigger>
+          <TabsTrigger value="candidates">Candidates</TabsTrigger>
           <TabsTrigger value="active">Active Assessments</TabsTrigger>
           <TabsTrigger value="results">Assessment Results</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
@@ -275,6 +290,158 @@ const InterviewerDashboard = () => {
                 </CardContent>
               </Card>
             ))}
+          </div>
+        </TabsContent>
+
+        {/* CANDIDATES TAB */}
+        <TabsContent value="candidates" className="space-y-4">
+          <div className="grid gap-4">
+            {candidates.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-center text-gray-500">No candidates yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              candidates.map((candidate) => {
+                const matchScore = candidate.parsed_data?.match_score || 0;
+                const matchLevel = matchScore >= 80 ? 'high' : matchScore >= 60 ? 'medium' : 'low';
+                const matchColor = matchLevel === 'high' ? 'bg-green-100 text-green-800' : 
+                                 matchLevel === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
+                                 'bg-red-100 text-red-800';
+                
+                return (
+                  <Card key={candidate.id}>
+                    <CardHeader>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <CardTitle className="text-base">{candidate.name}</CardTitle>
+                          <p className="text-sm text-gray-600">{candidate.email}</p>
+                          {candidate.job_title && (
+                            <p className="text-sm text-blue-600 mt-1">Applied for: {candidate.job_title}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 items-start">
+                          <Badge className={matchColor}>
+                            {matchScore}% Match
+                          </Badge>
+                          <Badge variant={candidate.status === 'pending' ? 'secondary' : 'default'}>
+                            {candidate.status || 'pending'}
+                          </Badge>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {candidate.parsed_data && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Strengths</p>
+                            <ul className="text-sm text-gray-600 list-disc list-inside">
+                              {candidate.parsed_data.pros?.slice(0, 3).map((pro, idx) => (
+                                <li key={idx}>{pro}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Areas to Explore</p>
+                            <ul className="text-sm text-gray-600 list-disc list-inside">
+                              {candidate.parsed_data.cons?.slice(0, 3).map((con, idx) => (
+                                <li key={idx}>{con}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-2 pt-2 border-t">
+                        {candidate.resume_path && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const apiBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || window.location.origin;
+                              window.open(`${apiBase}${candidate.resume_path}`, '_blank');
+                            }}
+                          >
+                            View Resume
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              const response = await api.get(`/api/interviewer/candidates/${candidate.id}`);
+                              toast({
+                                title: "Candidate Details",
+                                description: `Full details: ${JSON.stringify(response.data, null, 2)}`
+                              });
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: "Failed to load candidate details",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          View Details
+                        </Button>
+                        {candidate.status === 'pending' && (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={async () => {
+                                try {
+                                  await api.post(`/api/interviewer/candidates/${candidate.id}/schedule`, {
+                                    scheduled_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+                                  });
+                                  toast({
+                                    title: "Success",
+                                    description: "Interview scheduled successfully"
+                                  });
+                                  fetchCandidates();
+                                } catch (err) {
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to schedule interview",
+                                    variant: "destructive"
+                                  });
+                                }
+                              }}
+                            >
+                              Schedule Interview
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={async () => {
+                                try {
+                                  await api.post(`/api/interviewer/candidates/${candidate.id}/reject`);
+                                  toast({
+                                    title: "Success",
+                                    description: "Candidate rejected"
+                                  });
+                                  fetchCandidates();
+                                } catch (err) {
+                                  toast({
+                                    title: "Error",
+                                    description: "Failed to reject candidate",
+                                    variant: "destructive"
+                                  });
+                                }
+                              }}
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
           </div>
         </TabsContent>
 

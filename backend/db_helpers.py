@@ -145,7 +145,7 @@ def get_user_by_id(user_id):
 #                            CANDIDATE FUNCTIONS
 # ============================================================================
 
-def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending'):
+def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending', job_id=None):
     """
     Insert a new candidate into the database.
     
@@ -158,6 +158,7 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         pros (list, optional): List of AI-generated pros about the candidate
         cons (list, optional): List of AI-generated cons about the candidate
         status (str, optional): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
+        job_id (int, optional): ID of the job this candidate is matched to
     
     Returns:
         int: Candidate ID of the newly inserted candidate
@@ -183,9 +184,9 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         
         cursor.execute("""
             INSERT INTO candidates 
-            (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status))
+            (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status, job_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status, job_id))
         
         conn.commit()
         candidate_id = cursor.lastrowid
@@ -1546,6 +1547,91 @@ def count_violations_for_assessment(assessment_id):
         raise DatabaseError(f"Error counting violations: {str(e)}")
 
 
-if __name__ == "__main__":
-    print("Database Helper Functions Module")
-    print("Import this module to use database functions")
+def auto_match_candidate_to_job(candidate_skills, candidate_experience, candidate_id):
+    """
+    Automatically match a candidate to the best matching job based on skills and experience.
+    
+    Args:
+        candidate_skills (list): List of candidate's skills
+        candidate_experience (int): Candidate's years of experience
+        candidate_id (int): The candidate ID to update
+    
+    Returns:
+        tuple: (job_id, match_score, job_title) or (None, 0, None) if no jobs found
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Get all available jobs
+        cursor.execute("""
+            SELECT id, title, required_skills, min_experience 
+            FROM job_descriptions 
+            ORDER BY created_at DESC
+        """)
+        
+        jobs = cursor.fetchall()
+        
+        if not jobs:
+            conn.close()
+            return (None, 0, None)
+        
+        best_match = None
+        best_score = 0
+        best_job_title = None
+        
+        # Calculate match score for each job
+        for job in jobs:
+            job_id = job[0]
+            job_title = job[1]
+            required_skills_json = job[2]
+            min_experience = job[3] or 0
+            
+            # Parse required skills
+            try:
+                if required_skills_json:
+                    required_skills = json.loads(required_skills_json)
+                else:
+                    required_skills = []
+            except:
+                required_skills = []
+            
+            # Calculate skill match
+            if not required_skills:
+                skill_match = 50  # Default if no skills specified
+            else:
+                matched_skills = sum(1 for skill in candidate_skills if any(
+                    skill.lower() in req.lower() or req.lower() in skill.lower() 
+                    for req in required_skills
+                ))
+                skill_match = (matched_skills / len(required_skills)) * 100 if len(required_skills) > 0 else 0
+            
+            # Calculate experience match
+            exp_match = 100 if candidate_experience >= min_experience else (candidate_experience / min_experience * 100 if min_experience > 0 else 100)
+            
+            # Overall match score (70% skills, 30% experience)
+            match_score = (skill_match * 0.7) + (exp_match * 0.3)
+            
+            if match_score > best_score:
+                best_score = match_score
+                best_match = job_id
+                best_job_title = job_title
+        
+        # Update candidate with best matching job if score is reasonable (>= 30%)
+        if best_match and best_score >= 30:
+            cursor.execute("""
+                UPDATE candidates 
+                SET job_id = ?, match_score = ?
+                WHERE id = ?
+            """, (best_match, int(best_score), candidate_id))
+            conn.commit()
+        
+        conn.close()
+        
+        return (best_match, int(best_score), best_job_title)
+    
+    except Exception as e:
+        print(f"Error auto-matching candidate: {str(e)}")
+        return (None, 0, None)
+
+

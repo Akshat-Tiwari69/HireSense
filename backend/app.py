@@ -408,6 +408,24 @@ def upload_resume():
             status=status
         )
         logger.info(f"✅ Candidate saved with ID: {candidate_id}")
+        
+        # Auto-match candidate to best job
+        from db_helpers import auto_match_candidate_to_job
+        matched_job_id, match_score, job_title = auto_match_candidate_to_job(
+            candidate_skills=parsed_data.get('skills', []),
+            candidate_experience=parsed_data.get('experience', 0),
+            candidate_id=candidate_id
+        )
+        
+        if matched_job_id:
+            logger.info(f"🎯 Auto-matched to job: {job_title} (ID: {matched_job_id}, Score: {match_score}%)")
+            # Update parsed_data with matched job info
+            parsed_data['matched_job_id'] = matched_job_id
+            parsed_data['matched_job_title'] = job_title
+            parsed_data['match_score'] = match_score
+        else:
+            logger.info("ℹ️ No suitable job matches found")
+            
     except Exception as e:
         logger.exception(f"❌ Error saving candidate to database: {e}")
         # Continue anyway - parsing was successful
