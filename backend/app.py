@@ -71,7 +71,20 @@ def unauthorized_callback(error):
     }), 401
 
 # Enable CORS so frontend can call our APIs
-CORS(app)
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "https://hiresense-moil.onrender.com",
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000"
+        ],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
 
 # Register authentication blueprint
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
