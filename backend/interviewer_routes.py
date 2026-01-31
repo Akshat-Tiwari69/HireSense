@@ -4,6 +4,7 @@ Includes: Job creation, AI refinement, job-specific assessments, performance ana
 """
 
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 import json
 from datetime import datetime
 from functools import wraps
@@ -12,17 +13,22 @@ from db_config import get_connection
 interviewer_bp = Blueprint('interviewer', __name__, url_prefix='/api/interviewer')
 
 def get_db():
-    conn = get_connection()
+    conn = get_connection(use_dict_cursor=True)
     # Enable autocommit for PostgreSQL to avoid transaction issues
     if hasattr(conn, 'set_session'):
         conn.set_session(autocommit=True)
     return conn
 
+def get_current_user_id():
+    """Get current user ID from JWT token."""
+    return int(get_jwt_identity())
+
 def interviewer_required(f):
     @wraps(f)
+    @jwt_required()
     def decorated_function(*args, **kwargs):
-        from flask import session
-        if 'user_id' not in session or session.get('role') != 'interviewer':
+        claims = get_jwt()
+        if claims.get('role') != 'interviewer':
             return jsonify({'error': 'Interviewer access required'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -35,7 +41,7 @@ def interviewer_required(f):
 @interviewer_required
 def get_interviewer_jobs():
     """Get all jobs created by this interviewer"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
@@ -43,7 +49,7 @@ def get_interviewer_jobs():
         SELECT * FROM job_descriptions 
         WHERE created_by_id = ? AND is_archived = FALSE
         ORDER BY created_at DESC
-    """, (session['user_id'],))
+    """, (user_id,))
     
     jobs = [dict(row) for row in cursor.fetchall()]
     
@@ -74,7 +80,7 @@ def get_interviewer_jobs():
 @interviewer_required
 def create_job():
     """Create new job posting"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -94,7 +100,7 @@ def create_job():
             data.get('min_experience', 0),
             data.get('department'),
             data.get('location'),
-            session['user_id'],
+            user_id,
             'active'
         ))
         
@@ -122,7 +128,7 @@ def create_job():
 @interviewer_required
 def ai_refine_job(job_id):
     """Use AI to refine and enhance job description"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -131,7 +137,7 @@ def ai_refine_job(job_id):
     try:
         # Get job details
         cursor.execute("SELECT * FROM job_descriptions WHERE id = ? AND created_by_id = ?",
-                      (job_id, session['user_id']))
+                      (job_id, user_id))
         job = dict(cursor.fetchone())
         
         if not job:
@@ -208,7 +214,7 @@ def ai_refine_job(job_id):
 @interviewer_required
 def schedule_assessment_with_job():
     """Schedule assessment linked to specific job posting"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -223,7 +229,7 @@ def schedule_assessment_with_job():
             ) VALUES (?, ?, ?, ?, ?, ?)
         """, (
             data['candidate_id'],
-            session['user_id'],
+            user_id,
             data['scheduled_time'],
             data.get('job_id'),
             'scheduled',
@@ -250,13 +256,13 @@ def schedule_assessment_with_job():
 @interviewer_required
 def get_job_assessment_results(job_id):
     """Get all assessment results for a specific job"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
     # Verify job belongs to interviewer
     cursor.execute("SELECT * FROM job_descriptions WHERE id = ? AND created_by_id = ?",
-                  (job_id, session['user_id']))
+                  (job_id, user_id))
     if not cursor.fetchone():
         return jsonify({'error': 'Job not found'}), 404
     
@@ -294,13 +300,13 @@ def get_job_assessment_results(job_id):
 @interviewer_required
 def get_job_analytics(job_id):
     """Get detailed analytics for a job posting"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
     # Verify ownership
     cursor.execute("SELECT * FROM job_descriptions WHERE id = ? AND created_by_id = ?",
-                  (job_id, session['user_id']))
+                  (job_id, user_id))
     if not cursor.fetchone():
         return jsonify({'error': 'Job not found'}), 404
     
@@ -350,13 +356,13 @@ def get_job_analytics(job_id):
 @interviewer_required
 def manage_preferences():
     """Get or update interviewer preferences"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
     if request.method == 'GET':
         cursor.execute("SELECT * FROM interviewer_preferences WHERE interviewer_id = ?",
-                      (session['user_id'],))
+                      (user_id,))
         prefs = cursor.fetchone()
         conn.close()
         
@@ -374,7 +380,7 @@ def manage_preferences():
         
         # Check if preferences exist
         cursor.execute("SELECT id FROM interviewer_preferences WHERE interviewer_id = ?",
-                      (session['user_id'],))
+                      (user_id,))
         exists = cursor.fetchone()
         
         if exists:
@@ -389,7 +395,7 @@ def manage_preferences():
                 data.get('default_assessment_template_id'),
                 data.get('email_notifications', True),
                 data.get('assessment_time_window_minutes', 30),
-                session['user_id']
+                user_id
             ))
         else:
             cursor.execute("""
@@ -398,7 +404,7 @@ def manage_preferences():
                     email_notifications, assessment_time_window_minutes
                 ) VALUES (?, ?, ?, ?)
             """, (
-                session['user_id'],
+                user_id,
                 data.get('default_assessment_template_id'),
                 data.get('email_notifications', True),
                 data.get('assessment_time_window_minutes', 30)
@@ -417,7 +423,7 @@ def manage_preferences():
 @interviewer_required
 def get_active_assessments():
     """Get currently active assessments for interviewer"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
@@ -437,9 +443,151 @@ def get_active_assessments():
         JOIN job_descriptions jd ON sa.job_id = jd.id
         WHERE sa.interviewer_id = ? AND a.status IN ('in_progress', 'pending')
         ORDER BY a.started_at DESC
-    """, (session['user_id'],))
+    """, (user_id,))
     
     assessments = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
     return jsonify(assessments)
+
+# ============================================================================
+# CANDIDATE MANAGEMENT (For Legacy UI)
+# ============================================================================
+
+@interviewer_bp.route('/candidates', methods=['GET'])
+@interviewer_required
+def get_candidates():
+    """Get all candidates for this interviewer's jobs"""
+    user_id = get_current_user_id()
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    status = request.args.get('status', None)
+    
+    query = """
+        SELECT DISTINCT 
+            c.*,
+            jd.title as job_title,
+            sa.scheduled_time,
+            a.overall_score,
+            a.status as assessment_status
+        FROM candidates c
+        LEFT JOIN scheduled_assessments sa ON c.id = sa.candidate_id
+        LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
+        LEFT JOIN assessments a ON c.id = a.candidate_id
+        WHERE sa.interviewer_id = ?
+    """
+    params = [user_id]
+    
+    if status:
+        query += " AND c.status = ?"
+        params.append(status)
+    
+    query += " ORDER BY c.created_at DESC"
+    
+    cursor.execute(query, params)
+    candidates = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify(candidates)
+
+@interviewer_bp.route('/candidates/<int:candidate_id>', methods=['GET'])
+@interviewer_required
+def get_candidate_details(candidate_id):
+    """Get detailed candidate information"""
+    user_id = get_current_user_id()
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT c.*, 
+            jd.title as job_title,
+            a.technical_score, a.psychometric_score, a.overall_score,
+            a.decision, a.rationale, a.proctoring_violations
+        FROM candidates c
+        LEFT JOIN scheduled_assessments sa ON c.id = sa.candidate_id
+        LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
+        LEFT JOIN assessments a ON c.id = a.candidate_id
+        WHERE c.id = ? AND sa.interviewer_id = ?
+    """, (candidate_id, user_id))
+    
+    candidate = cursor.fetchone()
+    conn.close()
+    
+    if not candidate:
+        return jsonify({'error': 'Candidate not found'}), 404
+    
+    return jsonify(dict(candidate))
+
+@interviewer_bp.route('/candidates/<int:candidate_id>/reject', methods=['POST'])
+@interviewer_required
+def reject_candidate(candidate_id):
+    """Reject a candidate"""
+    user_id = get_current_user_id()
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        # Verify interviewer has access to this candidate
+        cursor.execute("""
+            SELECT 1 FROM scheduled_assessments sa
+            WHERE sa.candidate_id = ? AND sa.interviewer_id = ?
+        """, (candidate_id, user_id))
+        
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'error': 'Candidate not found'}), 404
+        
+        # Update candidate status
+        cursor.execute("""
+            UPDATE candidates SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (candidate_id,))
+        
+        # Update assessment decision if exists
+        cursor.execute("""
+            UPDATE assessments SET decision = 'rejected', rationale = ?
+            WHERE candidate_id = ?
+        """, (data.get('reason', ''), candidate_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Candidate rejected'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@interviewer_bp.route('/candidates/<int:candidate_id>/schedule', methods=['POST'])
+@interviewer_required
+def schedule_candidate_assessment(candidate_id):
+    """Schedule an assessment for a candidate"""
+    user_id = get_current_user_id()
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO scheduled_assessments (
+                candidate_id, interviewer_id, scheduled_time, job_id, status, proctoring_enabled
+            ) VALUES (?, ?, ?, ?, 'scheduled', ?)
+        """, (
+            candidate_id,
+            user_id,
+            data['scheduled_time'],
+            data.get('job_id'),
+            data.get('proctoring_enabled', True)
+        ))
+        
+        conn.commit()
+        scheduled_id = cursor.lastrowid
+        conn.close()
+        
+        return jsonify({'id': scheduled_id, 'message': 'Assessment scheduled'}), 201
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400

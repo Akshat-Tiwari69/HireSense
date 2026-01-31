@@ -4,6 +4,7 @@ Includes: Job Management, Question Bank, Email Templates, Assessment Templates, 
 """
 
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from werkzeug.security import generate_password_hash
 import json
 from datetime import datetime
@@ -14,23 +15,28 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
 # Database connection helper
 def get_db():
-    conn = get_connection()
+    conn = get_connection(use_dict_cursor=True)
     # Enable autocommit for PostgreSQL to avoid transaction issues
     if hasattr(conn, 'set_session'):
         conn.set_session(autocommit=True)
     return conn
 
+def get_current_user_id():
+    """Get current user ID from JWT token."""
+    return int(get_jwt_identity())
+
 # Admin authorization decorator
 def admin_required(f):
     @wraps(f)
+    @jwt_required()
     def decorated_function(*args, **kwargs):
-        from flask import session, request
         # DEBUG: Log preflight requests
         if request.method == 'OPTIONS':
             print(f"[CORS DEBUG] OPTIONS request to {request.path} - allowing without auth")
             return f(*args, **kwargs)
-        if 'user_id' not in session or session.get('role') != 'admin':
-            print(f"[CORS DEBUG] Blocked request to {request.path} - no admin session")
+        claims = get_jwt()
+        if claims.get('role') != 'admin':
+            print(f"[CORS DEBUG] Blocked request to {request.path} - not admin role")
             return jsonify({'error': 'Admin access required'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -67,7 +73,7 @@ def list_jobs():
 @admin_required
 def create_job():
     """Create new job posting"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -86,7 +92,7 @@ def create_job():
             data.get('min_experience', 0),
             data.get('department'),
             data.get('location'),
-            session['user_id'],
+            user_id,
             'active'
         ))
         
@@ -94,7 +100,7 @@ def create_job():
         job_id = cursor.lastrowid
         
         # Log action
-        log_admin_action(session['user_id'], 'create_job', 'job', job_id, None, data)
+        log_admin_action(user_id, 'create_job', 'job', job_id, None, data)
         
         conn.close()
         return jsonify({'id': job_id, 'message': 'Job created successfully'}), 201
@@ -106,7 +112,7 @@ def create_job():
 @admin_required
 def update_job(job_id):
     """Update job posting"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -133,14 +139,14 @@ def update_job(job_id):
             data.get('location', old_job['location']),
             json.dumps(data.get('skill_taxonomy', json.loads(old_job['skill_taxonomy'] or '[]'))),
             data.get('role_complexity_level', old_job['role_complexity_level']),
-            session['user_id'],
+            user_id,
             job_id
         ))
         
         conn.commit()
         
         # Log action
-        log_admin_action(session['user_id'], 'update_job', 'job', job_id, old_job, data)
+        log_admin_action(user_id, 'update_job', 'job', job_id, old_job, data)
         
         conn.close()
         return jsonify({'message': 'Job updated successfully'})
@@ -152,7 +158,7 @@ def update_job(job_id):
 @admin_required
 def delete_job(job_id):
     """Delete job posting"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
@@ -160,7 +166,7 @@ def delete_job(job_id):
         cursor.execute("UPDATE job_descriptions SET is_archived = TRUE WHERE id = ?", (job_id,))
         conn.commit()
         
-        log_admin_action(session['user_id'], 'delete_job', 'job', job_id, None, None)
+        log_admin_action(user_id, 'delete_job', 'job', job_id, None, None)
         
         conn.close()
         return jsonify({'message': 'Job archived successfully'})
@@ -172,7 +178,6 @@ def delete_job(job_id):
 @admin_required
 def manage_job_scoring_profile(job_id):
     """Get or manage scoring profile for a job"""
-    from flask import session
     conn = get_db()
     cursor = conn.cursor()
     
@@ -275,7 +280,7 @@ def list_questions():
 @admin_required
 def create_question():
     """Add new question to question bank"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -302,7 +307,7 @@ def create_question():
             data.get('expected_solution'),
             data.get('trait'),
             json.dumps(data.get('job_specific_keywords', [])),
-            session['user_id'],
+            user_id,
             True
         ))
         
@@ -319,7 +324,7 @@ def create_question():
 @admin_required
 def delete_question(question_id):
     """Remove question from question bank"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
@@ -327,7 +332,7 @@ def delete_question(question_id):
         cursor.execute("UPDATE question_bank SET is_active = FALSE WHERE id = ?", (question_id,))
         conn.commit()
         
-        log_admin_action(session['user_id'], 'delete_question', 'question', question_id, None, None)
+        log_admin_action(user_id, 'delete_question', 'question', question_id, None, None)
         
         conn.close()
         return jsonify({'message': 'Question deactivated'})
@@ -360,7 +365,6 @@ def list_email_templates():
 @admin_required
 def create_email_template():
     """Create new email template"""
-    from flask import session
     data = request.get_json()
     
     conn = get_db()

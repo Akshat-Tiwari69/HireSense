@@ -29,30 +29,48 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', 'elite_hire.
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 
-def _get_postgres_connection(database_url: str):
+def _get_postgres_connection(database_url: str, use_dict_cursor: bool = False):
     """Create a Postgres connection using psycopg2."""
     # Render/Railway often provide postgres://; psycopg2 expects postgresql://
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
-    return psycopg2.connect(database_url, cursor_factory=QmarkCursor)
+    cursor_factory = QmarkDictCursor if use_dict_cursor else QmarkCursor
+    return psycopg2.connect(database_url, cursor_factory=cursor_factory)
 
 
-def _get_sqlite_connection():
+def _get_sqlite_connection(use_dict_cursor: bool = False):
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
+    if use_dict_cursor:
+        conn.row_factory = sqlite3.Row  # Enables dict-like access via row['column']
     return conn
 
 
-def get_connection():
-    """Return a DB connection (Postgres when DATABASE_URL is set, else SQLite)."""
+def get_connection(use_dict_cursor: bool = False):
+    """Return a DB connection (Postgres when DATABASE_URL is set, else SQLite).
+    
+    Args:
+        use_dict_cursor: If True, rows can be accessed like dicts (row['column']).
+                        For PostgreSQL: uses RealDictCursor.
+                        For SQLite: uses sqlite3.Row.
+    """
     database_url = os.environ.get("DATABASE_URL")
     try:
         if database_url:
-            return _get_postgres_connection(database_url)
-        return _get_sqlite_connection()
+            return _get_postgres_connection(database_url, use_dict_cursor)
+        return _get_sqlite_connection(use_dict_cursor)
     except Exception as e:
         print(f"Error connecting to database: {e}")
         return None
+
+
+def detect_driver():
+    """Detect which database driver is active.
+    
+    Returns:
+        str: 'postgres' if DATABASE_URL is set, 'sqlite' otherwise.
+    """
+    return 'postgres' if os.environ.get("DATABASE_URL") else 'sqlite'
 
 
 def test_connection():

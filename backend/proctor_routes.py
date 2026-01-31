@@ -4,6 +4,7 @@ Includes: Real-time monitoring, violation review, anomaly detection, quality met
 """
 
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 import json
 from datetime import datetime, timedelta
 from functools import wraps
@@ -12,17 +13,22 @@ from db_config import get_connection
 proctor_bp = Blueprint('proctor', __name__, url_prefix='/api/proctor')
 
 def get_db():
-    conn = get_connection()
+    conn = get_connection(use_dict_cursor=True)
     # Enable autocommit for PostgreSQL to avoid transaction issues
     if hasattr(conn, 'set_session'):
         conn.set_session(autocommit=True)
     return conn
 
+def get_current_user_id():
+    """Get current user ID from JWT token."""
+    return int(get_jwt_identity())
+
 def proctor_required(f):
     @wraps(f)
+    @jwt_required()
     def decorated_function(*args, **kwargs):
-        from flask import session
-        if 'user_id' not in session or session.get('role') != 'proctor':
+        claims = get_jwt()
+        if claims.get('role') != 'proctor':
             return jsonify({'error': 'Proctor access required'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -209,7 +215,7 @@ def get_assessment_violations(assessment_id):
 @proctor_required
 def review_violation(violation_id):
     """Mark violation as reviewed and add proctor notes"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -226,7 +232,7 @@ def review_violation(violation_id):
             WHERE id = ?
         """, (
             data.get('violation_acknowledged', False),
-            session['user_id'],
+            user_id,
             data.get('notes', ''),
             violation_id
         ))
@@ -327,12 +333,12 @@ def detect_anomalies():
 @proctor_required
 def get_quality_metrics():
     """Get proctoring quality metrics"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
     # Get this proctor's metrics if assigned
-    proctor_id = request.args.get('proctor_id', session['user_id'], type=int)
+    proctor_id = request.args.get('proctor_id', user_id, type=int)
     
     cursor.execute("""
         SELECT 
@@ -347,8 +353,8 @@ def get_quality_metrics():
         LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE sa.proctor_id = ? OR (? IS NULL)
-    """, (proctor_id if proctor_id != session['user_id'] else session['user_id'], 
-          None if proctor_id == session['user_id'] else None))
+    """, (proctor_id if proctor_id != user_id else user_id, 
+          None if proctor_id == user_id else None))
     
     metrics = dict(cursor.fetchone())
     
@@ -392,7 +398,7 @@ def get_job_performance_metrics():
 @proctor_required
 def assign_assessment():
     """Assign assessment to this proctor"""
-    from flask import session
+    user_id = get_current_user_id()
     data = request.get_json()
     
     conn = get_db()
@@ -404,7 +410,7 @@ def assign_assessment():
             SET proctor_id = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (session['user_id'], data['assessment_id']))
+        """, (user_id, data['assessment_id']))
         
         conn.commit()
         conn.close()
@@ -453,7 +459,7 @@ def get_violation_statistics():
 @proctor_required
 def get_shift_summary():
     """Get summary of assessments proctored in current shift"""
-    from flask import session
+    user_id = get_current_user_id()
     conn = get_db()
     cursor = conn.cursor()
     
@@ -470,9 +476,129 @@ def get_shift_summary():
         LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE sa.proctor_id = ? AND DATE(sa.scheduled_time) = DATE('now')
-    """, (session['user_id'],))
+    """, (user_id,))
     
     summary = dict(cursor.fetchone())
     conn.close()
     
     return jsonify(summary)
+
+# ============================================================================
+# LEGACY UI ENDPOINTS
+# ============================================================================
+
+@proctor_bp.route('/stats', methods=['GET'])
+@proctor_required
+def get_stats():
+    """Get overall proctoring statistics (legacy endpoint)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT 
+            COUNT(DISTINCT CASE WHEN a.status = 'in_progress' THEN a.id END) as active_assessments,
+            COUNT(DISTINCT CASE WHEN a.status = 'completed' AND DATE(a.completed_at) = DATE('now') THEN a.id END) as completed_today,
+            COUNT(DISTINCT CASE WHEN sa.status = 'scheduled' AND DATE(sa.scheduled_time) = DATE('now') THEN sa.id END) as scheduled_today,
+            COUNT(DISTINCT CASE WHEN pe.id IS NOT NULL AND DATE(pe.timestamp) = DATE('now') THEN pe.id END) as violations_today
+        FROM scheduled_assessments sa
+        LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
+        LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
+    """)
+    
+    stats = dict(cursor.fetchone())
+    conn.close()
+    
+    return jsonify(stats)
+
+@proctor_bp.route('/assessments/scheduled', methods=['GET'])
+@proctor_required
+def get_all_scheduled_assessments():
+    """Get all scheduled assessments (legacy endpoint)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT 
+            sa.id,
+            c.name as candidate_name,
+            c.email as candidate_email,
+            jd.title as job_title,
+            sa.scheduled_time,
+            sa.status,
+            u.name as interviewer_name
+        FROM scheduled_assessments sa
+        JOIN candidates c ON sa.candidate_id = c.id
+        LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
+        LEFT JOIN users u ON sa.interviewer_id = u.id
+        WHERE sa.status = 'scheduled'
+        ORDER BY sa.scheduled_time ASC
+    """)
+    
+    assessments = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify(assessments)
+
+@proctor_bp.route('/assessments/active', methods=['GET'])
+@proctor_required
+def get_all_active_assessments():
+    """Get all currently active assessments (legacy endpoint)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT 
+            a.id,
+            c.name as candidate_name,
+            c.email as candidate_email,
+            jd.title as job_title,
+            a.started_at,
+            a.proctoring_violations,
+            COUNT(DISTINCT pe.id) as violation_count
+        FROM assessments a
+        JOIN candidates c ON a.candidate_id = c.id
+        LEFT JOIN job_descriptions jd ON a.job_id = jd.id
+        LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
+        WHERE a.status = 'in_progress'
+        GROUP BY a.id
+        ORDER BY a.started_at ASC
+    """)
+    
+    assessments = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify(assessments)
+
+@proctor_bp.route('/assessments/completed', methods=['GET'])
+@proctor_required
+def get_all_completed_assessments():
+    """Get all completed assessments (legacy endpoint)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    limit = request.args.get('limit', 50, type=int)
+    
+    cursor.execute("""
+        SELECT 
+            a.id,
+            c.name as candidate_name,
+            c.email as candidate_email,
+            jd.title as job_title,
+            a.overall_score,
+            a.proctoring_violations,
+            a.completed_at,
+            COUNT(DISTINCT pe.id) as violation_count
+        FROM assessments a
+        JOIN candidates c ON a.candidate_id = c.id
+        LEFT JOIN job_descriptions jd ON a.job_id = jd.id
+        LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
+        WHERE a.status = 'completed'
+        GROUP BY a.id
+        ORDER BY a.completed_at DESC
+        LIMIT ?
+    """, (limit,))
+    
+    assessments = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify(assessments)
