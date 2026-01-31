@@ -138,10 +138,16 @@ def ai_refine_job(job_id):
         # Get job details
         cursor.execute("SELECT * FROM job_descriptions WHERE id = ? AND created_by_id = ?",
                       (job_id, user_id))
-        job = dict(cursor.fetchone())
+        job_row = cursor.fetchone()
         
-        if not job:
+        if not job_row:
+            conn.close()
             return jsonify({'error': 'Job not found'}), 404
+        
+        job = dict(job_row)
+        
+        # Get request data (if any)
+        data = request.get_json() or {}
         
         # Call AI to refine
         from ai_question_generator import AIQuestionGenerator
@@ -203,6 +209,9 @@ def ai_refine_job(job_id):
             'refined_data': refined
         })
     except Exception as e:
+        import traceback
+        print(f"Error in ai_refine_job: {str(e)}")
+        print(traceback.format_exc())
         conn.close()
         return jsonify({'error': str(e)}), 400
 
