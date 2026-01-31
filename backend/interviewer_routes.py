@@ -6,6 +6,7 @@ Includes: Job creation, AI refinement, job-specific assessments, performance ana
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 import json
+import os
 from datetime import datetime
 from functools import wraps
 from db_config import get_connection
@@ -615,23 +616,27 @@ def get_candidate_details(candidate_id):
 @interviewer_bp.route('/candidates/<int:candidate_id>/reject', methods=['POST'])
 @interviewer_required
 def reject_candidate(candidate_id):
-    """Reject a candidate"""
+    """Reject a candidate and send rejection email"""
     user_id = get_current_user_id()
-    data = request.get_json()
+    data = request.get_json() or {}
     
     conn = get_db()
     cursor = conn.cursor()
     
     try:
-        # Verify interviewer has access to this candidate
+        # Get candidate details
         cursor.execute("""
-            SELECT 1 FROM scheduled_assessments sa
-            WHERE sa.candidate_id = ? AND sa.interviewer_id = ?
-        """, (candidate_id, user_id))
+            SELECT c.name, c.email, c.status
+            FROM candidates c
+            WHERE c.id = ?
+        """, (candidate_id,))
         
-        if not cursor.fetchone():
+        candidate_row = cursor.fetchone()
+        if not candidate_row:
             conn.close()
             return jsonify({'error': 'Candidate not found'}), 404
+        
+        candidate = dict(candidate_row)
         
         # Update candidate status
         cursor.execute("""
@@ -643,12 +648,30 @@ def reject_candidate(candidate_id):
         cursor.execute("""
             UPDATE assessments SET decision = 'rejected', rationale = ?
             WHERE candidate_id = ?
-        """, (data.get('reason', ''), candidate_id))
+        """, (data.get('reason', 'After careful consideration'), candidate_id))
         
         conn.commit()
         conn.close()
         
-        return jsonify({'message': 'Candidate rejected'})
+        # Send rejection email
+        email_sent = False
+        try:
+            from email_service import EmailService
+            email_service = EmailService()
+            email_sent = email_service.send_rejection_email(
+                candidate_email=candidate['email'],
+                candidate_name=candidate['name'],
+                reason=data.get('reason', 'After careful consideration, we have decided to move forward with other candidates.')
+            )
+            print(f"✅ Rejection email sent to {candidate['email']}")
+        except Exception as email_error:
+            print(f"⚠️ Failed to send rejection email: {email_error}")
+        
+        return jsonify({
+            'message': 'Candidate rejected successfully',
+            'candidate_name': candidate['name'],
+            'email_sent': email_sent
+        })
     except Exception as e:
         conn.close()
         return jsonify({'error': str(e)}), 400
@@ -656,31 +679,240 @@ def reject_candidate(candidate_id):
 @interviewer_bp.route('/candidates/<int:candidate_id>/schedule', methods=['POST'])
 @interviewer_required
 def schedule_candidate_assessment(candidate_id):
-    """Schedule an assessment for a candidate"""
+    """Schedule an assessment for a candidate and send invitation email"""
     user_id = get_current_user_id()
-    data = request.get_json()
+    data = request.get_json() or {}
     
     conn = get_db()
     cursor = conn.cursor()
     
     try:
+        # Get candidate details
+        cursor.execute("""
+            SELECT c.name, c.email, c.job_id, jd.title as job_title
+            FROM candidates c
+            LEFT JOIN job_descriptions jd ON c.job_id = jd.id
+            WHERE c.id = ?
+        """, (candidate_id,))
+        
+        candidate_row = cursor.fetchone()
+        if not candidate_row:
+            conn.close()
+            return jsonify({'error': 'Candidate not found'}), 404
+        
+        candidate = dict(candidate_row)
+        
+        # Get interviewer details
+        cursor.execute("""
+            SELECT name, email FROM users WHERE id = ?
+        """, (user_id,))
+        
+        interviewer_row = cursor.fetchone()
+        interviewer = dict(interviewer_row) if interviewer_row else {'name': 'CYGNUSA Team', 'email': ''}
+        
+        # Generate assessment token
+        from db_helpers import generate_assessment_token
+        import secrets
+        access_token = secrets.token_urlsafe(32)
+        
+        # Insert scheduled assessment
         cursor.execute("""
             INSERT INTO scheduled_assessments (
-                candidate_id, interviewer_id, scheduled_time, job_id, status, proctoring_enabled
-            ) VALUES (?, ?, ?, ?, 'scheduled', ?)
+                candidate_id, interviewer_id, scheduled_time, job_id, 
+                status, proctoring_enabled, access_token
+            ) VALUES (?, ?, ?, ?, 'scheduled', ?, ?)
         """, (
             candidate_id,
             user_id,
-            data['scheduled_time'],
-            data.get('job_id'),
-            data.get('proctoring_enabled', True)
+            data.get('scheduled_time', data.get('scheduled_at')),
+            candidate.get('job_id') or data.get('job_id'),
+            data.get('proctoring_enabled', True),
+            access_token
         ))
+        
+        # Update candidate status
+        cursor.execute("""
+            UPDATE candidates SET status = 'assessment_scheduled', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (candidate_id,))
         
         conn.commit()
         scheduled_id = cursor.lastrowid
         conn.close()
         
-        return jsonify({'id': scheduled_id, 'message': 'Assessment scheduled'}), 201
+        # Generate assessment link
+        frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+        assessment_link = f"{frontend_url}/assessment/{access_token}"
+        
+        # Send invitation email
+        email_sent = False
+        try:
+            from email_service import EmailService
+            from datetime import datetime
+            email_service = EmailService()
+            
+            scheduled_time = data.get('scheduled_time', data.get('scheduled_at', 'Soon'))
+            try:
+                # Format datetime nicely if it's ISO format
+                dt = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
+                formatted_time = dt.strftime('%B %d, %Y at %I:%M %p')
+            except:
+                formatted_time = str(scheduled_time)
+            
+            email_sent = email_service.send_assessment_invitation(
+                candidate_email=candidate['email'],
+                candidate_name=candidate['name'],
+                assessment_link=assessment_link,
+                scheduled_time=formatted_time,
+                interviewer_name=interviewer['name'],
+                additional_info=data.get('additional_info')
+            )
+            print(f"✅ Assessment invitation sent to {candidate['email']}")
+        except Exception as email_error:
+            print(f"⚠️ Failed to send assessment invitation: {email_error}")
+        
+        return jsonify({
+            'id': scheduled_id,
+            'message': 'Assessment scheduled successfully',
+            'candidate_name': candidate['name'],
+            'assessment_link': assessment_link,
+            'access_token': access_token,
+            'email_sent': email_sent
+        }), 201
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@interviewer_bp.route('/completed-assessments', methods=['GET'])
+@interviewer_required
+def get_completed_assessments():
+    """Get all completed assessments for interviewer's jobs"""
+    user_id = get_current_user_id()
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            SELECT 
+                a.id,
+                a.candidate_id,
+                c.name as candidate_name,
+                c.email as candidate_email,
+                jd.title as job_title,
+                a.technical_score,
+                a.psychometric_score,
+                a.overall_score,
+                a.decision,
+                a.rationale,
+                a.proctoring_violations,
+                a.hiring_recommendation,
+                a.completed_at,
+                a.started_at
+            FROM assessments a
+            JOIN candidates c ON a.candidate_id = c.id
+            LEFT JOIN job_descriptions jd ON a.job_id = jd.id
+            LEFT JOIN scheduled_assessments sa ON a.scheduled_assessment_id = sa.id
+            WHERE a.status = 'completed' 
+                AND (sa.interviewer_id = ? OR jd.created_by_id = ?)
+            ORDER BY a.completed_at DESC
+        """, (user_id, user_id))
+        
+        assessments = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify(assessments)
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@interviewer_bp.route('/assessments/<int:assessment_id>/final-decision', methods=['POST'])
+@interviewer_required
+def make_final_decision(assessment_id):
+    """Make final hiring decision (hire or no-hire) and send notification email"""
+    user_id = get_current_user_id()
+    data = request.get_json() or {}
+    
+    decision = data.get('decision')  # 'hire' or 'no-hire'
+    rationale = data.get('rationale', '')
+    next_steps = data.get('next_steps', '')
+    
+    if decision not in ['hire', 'no-hire']:
+        return jsonify({'error': 'Decision must be "hire" or "no-hire"'}), 400
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        # Get assessment and candidate details
+        cursor.execute("""
+            SELECT 
+                a.id,
+                a.candidate_id,
+                c.name as candidate_name,
+                c.email as candidate_email,
+                a.technical_score,
+                a.psychometric_score,
+                a.overall_score
+            FROM assessments a
+            JOIN candidates c ON a.candidate_id = c.id
+            WHERE a.id = ?
+        """, (assessment_id,))
+        
+        assessment_row = cursor.fetchone()
+        if not assessment_row:
+            conn.close()
+            return jsonify({'error': 'Assessment not found'}), 404
+        
+        assessment = dict(assessment_row)
+        
+        # Update assessment decision
+        cursor.execute("""
+            UPDATE assessments 
+            SET decision = ?, rationale = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (decision, rationale, assessment_id))
+        
+        # Update candidate status
+        new_status = 'hired' if decision == 'hire' else 'rejected'
+        cursor.execute("""
+            UPDATE candidates 
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (new_status, assessment['candidate_id']))
+        
+        conn.commit()
+        conn.close()
+        
+        # Send decision email
+        email_sent = False
+        try:
+            from email_service import EmailService
+            email_service = EmailService()
+            
+            scores = {
+                'technical': assessment.get('technical_score'),
+                'psychometric': assessment.get('psychometric_score'),
+                'overall': assessment.get('overall_score')
+            }
+            
+            email_sent = email_service.send_final_decision_email(
+                candidate_email=assessment['candidate_email'],
+                candidate_name=assessment['candidate_name'],
+                decision=decision,
+                rationale=rationale,
+                next_steps=next_steps,
+                scores=scores
+            )
+            print(f"✅ Final decision email sent to {assessment['candidate_email']}")
+        except Exception as email_error:
+            print(f"⚠️ Failed to send decision email: {email_error}")
+        
+        return jsonify({
+            'message': f'Decision recorded: {decision}',
+            'candidate_name': assessment['candidate_name'],
+            'decision': decision,
+            'email_sent': email_sent
+        })
     except Exception as e:
         conn.close()
         return jsonify({'error': str(e)}), 400

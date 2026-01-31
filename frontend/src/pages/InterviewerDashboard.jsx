@@ -21,6 +21,7 @@ const InterviewerDashboard = () => {
   const [showJobModal, setShowJobModal] = useState(false);
   const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
   const [candidates, setCandidates] = useState([]);
+  const [completedAssessments, setCompletedAssessments] = useState([]);
   const [newJob, setNewJob] = useState({
     title: '',
     description: '',
@@ -34,6 +35,7 @@ const InterviewerDashboard = () => {
     if (activeTab === 'my-jobs') fetchJobs();
     if (activeTab === 'active') fetchActiveAssessments();
     if (activeTab === 'candidates') fetchCandidates();
+    if (activeTab === 'results') fetchResults();
   }, [activeTab]);
 
   const fetchJobs = async () => {
@@ -66,6 +68,18 @@ const InterviewerDashboard = () => {
     } catch (error) {
       console.error('Error fetching candidates:', error);
       toast({ variant: 'destructive', title: 'Error', description: 'Failed to fetch candidates' });
+    }
+    setLoading(false);
+  };
+
+  const fetchResults = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/interviewer/completed-assessments');
+      setCompletedAssessments(response.data);
+    } catch (error) {
+      console.error('Error fetching results:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to fetch assessment results' });
     }
     setLoading(false);
   };
@@ -393,18 +407,28 @@ const InterviewerDashboard = () => {
                               size="sm"
                               onClick={async () => {
                                 try {
-                                  await api.post(`/api/interviewer/candidates/${candidate.id}/schedule`, {
-                                    scheduled_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+                                  // Calculate scheduled time (7 days from now)
+                                  const scheduledDate = new Date();
+                                  scheduledDate.setDate(scheduledDate.getDate() + 7);
+                                  const scheduled_time = scheduledDate.toISOString();
+                                  
+                                  const response = await api.post(`/api/interviewer/candidates/${candidate.id}/schedule`, {
+                                    scheduled_time: scheduled_time,
+                                    job_id: candidate.matched_job_id || candidate.job_id,
+                                    proctoring_enabled: true,
+                                    additional_info: 'Please complete the assessment within the scheduled time window.'
                                   });
+                                  
                                   toast({
                                     title: "Success",
-                                    description: "Interview scheduled successfully"
+                                    description: `Interview scheduled for ${candidate.name}. ${response.data.email_sent ? 'Invitation email sent!' : 'Email pending.'}`
                                   });
                                   fetchCandidates();
                                 } catch (err) {
+                                  console.error('Schedule error:', err);
                                   toast({
                                     title: "Error",
-                                    description: "Failed to schedule interview",
+                                    description: err?.response?.data?.error || "Failed to schedule interview",
                                     variant: "destructive"
                                   });
                                 }
@@ -416,17 +440,23 @@ const InterviewerDashboard = () => {
                               variant="destructive"
                               size="sm"
                               onClick={async () => {
+                                if (!confirm(`Are you sure you want to reject ${candidate.name}?`)) return;
+                                
                                 try {
-                                  await api.post(`/api/interviewer/candidates/${candidate.id}/reject`);
+                                  const response = await api.post(`/api/interviewer/candidates/${candidate.id}/reject`, {
+                                    reason: 'After careful review, we have decided to move forward with other candidates.'
+                                  });
+                                  
                                   toast({
                                     title: "Success",
-                                    description: "Candidate rejected"
+                                    description: `${candidate.name} rejected. ${response.data.email_sent ? 'Notification email sent!' : 'Email pending.'}`
                                   });
                                   fetchCandidates();
                                 } catch (err) {
+                                  console.error('Reject error:', err);
                                   toast({
                                     title: "Error",
-                                    description: "Failed to reject candidate",
+                                    description: err?.response?.data?.error || "Failed to reject candidate",
                                     variant: "destructive"
                                   });
                                 }
@@ -485,6 +515,256 @@ const InterviewerDashboard = () => {
                         </p>
                       </div>
                     </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        {/* RESULTS TAB */}
+        <TabsContent value="results" className="space-y-4">
+          <div className="grid gap-4">
+            {completedAssessments.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-center text-gray-500">No completed assessments yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              completedAssessments.map((assessment) => (
+                <Card key={assessment.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-base">{assessment.candidate_name}</CardTitle>
+                        <p className="text-sm text-gray-600">{assessment.job_title || 'General Assessment'}</p>
+                        <p className="text-xs text-gray-500">
+                          Completed: {new Date(assessment.completed_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Badge variant={assessment.decision === 'hire' ? 'default' : assessment.decision === 'rejected' ? 'destructive' : 'secondary'}>
+                        {assessment.decision || 'Pending Decision'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="text-center p-3 bg-blue-50 rounded">
+                        <p className="text-xs text-gray-600">Technical</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.technical_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-purple-50 rounded">
+                        <p className="text-xs text-gray-600">Psychometric</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.psychometric_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-green-50 rounded">
+                        <p className="text-xs text-gray-600">Overall</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.overall_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-red-50 rounded">
+                        <p className="text-xs text-gray-600">Violations</p>
+                        <p className="text-xl font-bold text-red-600">{assessment.proctoring_violations || 0}</p>
+                      </div>
+                    </div>
+
+                    {assessment.hiring_recommendation && (
+                      <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
+                        <p className="text-sm font-semibold text-yellow-900">AI Recommendation:</p>
+                        <p className="text-sm text-gray-700">{assessment.hiring_recommendation}</p>
+                      </div>
+                    )}
+
+                    {assessment.rationale && (
+                      <div className="bg-gray-50 p-3 rounded">
+                        <p className="text-sm font-semibold text-gray-900">Decision Rationale:</p>
+                        <p className="text-sm text-gray-700">{assessment.rationale}</p>
+                      </div>
+                    )}
+
+                    {!assessment.decision && (
+                      <div className="flex gap-2 pt-2 border-t">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={async () => {
+                            const rationale = prompt('Enter hiring rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'hire',
+                                rationale: rationale || 'Strong performance in assessment',
+                                next_steps: 'HR will contact you for next steps'
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate marked for hire. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-1" /> Hire
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={async () => {
+                            const rationale = prompt('Enter rejection rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'no-hire',
+                                rationale: rationale || 'After careful review',
+                                next_steps: ''
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate rejected. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <AlertCircle className="w-4 h-4 mr-1" /> Reject
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        {/* RESULTS TAB */}
+        <TabsContent value="results" className="space-y-4">
+          <div className="grid gap-4">
+            {completedAssessments.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-center text-gray-500">No completed assessments yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              completedAssessments.map((assessment) => (
+                <Card key={assessment.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-base">{assessment.candidate_name}</CardTitle>
+                        <p className="text-sm text-gray-600">{assessment.job_title || 'General Assessment'}</p>
+                        <p className="text-xs text-gray-500">
+                          Completed: {assessment.completed_at ? new Date(assessment.completed_at).toLocaleDateString() : 'Recently'}
+                        </p>
+                      </div>
+                      <Badge variant={assessment.decision === 'hire' ? 'default' : assessment.decision === 'rejected' ? 'destructive' : 'secondary'}>
+                        {assessment.decision || 'Pending Decision'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="text-center p-3 bg-blue-50 rounded">
+                        <p className="text-xs text-gray-600">Technical</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.technical_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-purple-50 rounded">
+                        <p className="text-xs text-gray-600">Psychometric</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.psychometric_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-green-50 rounded">
+                        <p className="text-xs text-gray-600">Overall</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.overall_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-red-50 rounded">
+                        <p className="text-xs text-gray-600">Violations</p>
+                        <p className="text-xl font-bold text-red-600">{assessment.proctoring_violations || 0}</p>
+                      </div>
+                    </div>
+
+                    {assessment.hiring_recommendation && (
+                      <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
+                        <p className="text-sm font-semibold text-yellow-900">🤖 AI Recommendation:</p>
+                        <p className="text-sm text-gray-700">{assessment.hiring_recommendation}</p>
+                      </div>
+                    )}
+
+                    {assessment.rationale && (
+                      <div className="bg-gray-50 p-3 rounded">
+                        <p className="text-sm font-semibold text-gray-900">Decision Rationale:</p>
+                        <p className="text-sm text-gray-700">{assessment.rationale}</p>
+                      </div>
+                    )}
+
+                    {!assessment.decision && (
+                      <div className="flex gap-2 pt-2 border-t">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={async () => {
+                            const rationale = prompt('Enter hiring rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'hire',
+                                rationale: rationale || 'Strong performance in assessment',
+                                next_steps: 'HR will contact you for next steps'
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate marked for hire. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-1" /> Hire
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={async () => {
+                            const rationale = prompt('Enter rejection rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'no-hire',
+                                rationale: rationale || 'After careful review',
+                                next_steps: ''
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate rejected. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <AlertCircle className="w-4 h-4 mr-1" /> Reject
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               ))
