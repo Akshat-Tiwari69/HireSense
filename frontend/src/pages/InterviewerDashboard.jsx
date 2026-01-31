@@ -30,13 +30,53 @@ const InterviewerDashboard = () => {
     department: '',
     location: ''
   });
+  const [preferences, setPreferences] = useState({
+    default_assessment_template_id: null,
+    email_notifications: true,
+    assessment_time_window_minutes: 30
+  });
+  const [savingPreferences, setSavingPreferences] = useState(false);
+
+  // Schedule modal state
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [scheduleForm, setScheduleForm] = useState({
+    scheduled_date: '',
+    scheduled_time: '',
+    proctoring_enabled: true,
+    additional_info: ''
+  });
 
   useEffect(() => {
     if (activeTab === 'my-jobs') fetchJobs();
     if (activeTab === 'active') fetchActiveAssessments();
     if (activeTab === 'candidates') fetchCandidates();
     if (activeTab === 'results') fetchResults();
+    if (activeTab === 'settings') fetchPreferences();
   }, [activeTab]);
+
+  const fetchPreferences = async () => {
+    try {
+      const response = await api.get('/api/interviewer/preferences');
+      if (response.data) {
+        setPreferences(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching preferences:', error);
+    }
+  };
+
+  const handleSavePreferences = async () => {
+    setSavingPreferences(true);
+    try {
+      await api.post('/api/interviewer/preferences', preferences);
+      toast({ title: 'Success', description: 'Preferences saved successfully' });
+    } catch (error) {
+      console.error('Error saving preferences:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to save preferences' });
+    }
+    setSavingPreferences(false);
+  };
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -320,10 +360,10 @@ const InterviewerDashboard = () => {
               candidates.map((candidate) => {
                 const matchScore = candidate.parsed_data?.match_score || 0;
                 const matchLevel = matchScore >= 80 ? 'high' : matchScore >= 60 ? 'medium' : 'low';
-                const matchColor = matchLevel === 'high' ? 'bg-green-100 text-green-800' : 
-                                 matchLevel === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
-                                 'bg-red-100 text-red-800';
-                
+                const matchColor = matchLevel === 'high' ? 'bg-green-100 text-green-800' :
+                  matchLevel === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800';
+
                 return (
                   <Card key={candidate.id}>
                     <CardHeader>
@@ -366,7 +406,7 @@ const InterviewerDashboard = () => {
                           </div>
                         </div>
                       )}
-                      
+
                       <div className="flex gap-2 pt-2 border-t">
                         {candidate.resume_path && (
                           <Button
@@ -401,37 +441,22 @@ const InterviewerDashboard = () => {
                         >
                           View Details
                         </Button>
-                        {candidate.status === 'pending' && (
+                        {['pending', 'Applied', 'applied'].includes(candidate.status) && (
                           <>
                             <Button
                               size="sm"
-                              onClick={async () => {
-                                try {
-                                  // Calculate scheduled time (7 days from now)
-                                  const scheduledDate = new Date();
-                                  scheduledDate.setDate(scheduledDate.getDate() + 7);
-                                  const scheduled_time = scheduledDate.toISOString();
-                                  
-                                  const response = await api.post(`/api/interviewer/candidates/${candidate.id}/schedule`, {
-                                    scheduled_time: scheduled_time,
-                                    job_id: candidate.matched_job_id || candidate.job_id,
-                                    proctoring_enabled: true,
-                                    additional_info: 'Please complete the assessment within the scheduled time window.'
-                                  });
-                                  
-                                  toast({
-                                    title: "Success",
-                                    description: `Interview scheduled for ${candidate.name}. ${response.data.email_sent ? 'Invitation email sent!' : 'Email pending.'}`
-                                  });
-                                  fetchCandidates();
-                                } catch (err) {
-                                  console.error('Schedule error:', err);
-                                  toast({
-                                    title: "Error",
-                                    description: err?.response?.data?.error || "Failed to schedule interview",
-                                    variant: "destructive"
-                                  });
-                                }
+                              onClick={() => {
+                                setSelectedCandidate(candidate);
+                                // Default to 7 days from now
+                                const defaultDate = new Date();
+                                defaultDate.setDate(defaultDate.getDate() + 7);
+                                setScheduleForm({
+                                  scheduled_date: defaultDate.toISOString().split('T')[0],
+                                  scheduled_time: '10:00',
+                                  proctoring_enabled: true,
+                                  additional_info: 'Please complete the assessment within the scheduled time window.'
+                                });
+                                setShowScheduleModal(true);
                               }}
                             >
                               Schedule Interview
@@ -441,12 +466,12 @@ const InterviewerDashboard = () => {
                               size="sm"
                               onClick={async () => {
                                 if (!confirm(`Are you sure you want to reject ${candidate.name}?`)) return;
-                                
+
                                 try {
                                   const response = await api.post(`/api/interviewer/candidates/${candidate.id}/reject`, {
                                     reason: 'After careful review, we have decided to move forward with other candidates.'
                                   });
-                                  
+
                                   toast({
                                     title: "Success",
                                     description: `${candidate.name} rejected. ${response.data.email_sent ? 'Notification email sent!' : 'Email pending.'}`
@@ -833,25 +858,39 @@ const InterviewerDashboard = () => {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-semibold">Default Assessment Template</label>
-                <select className="w-full border rounded p-2">
-                  <option>None</option>
-                  <option>SWE_Junior</option>
-                  <option>SWE_Mid</option>
-                  <option>SWE_Senior</option>
+                <select
+                  className="w-full border rounded p-2"
+                  value={preferences.default_assessment_template_id || ''}
+                  onChange={(e) => setPreferences({ ...preferences, default_assessment_template_id: e.target.value || null })}
+                >
+                  <option value="">None</option>
+                  <option value="SWE_Junior">SWE_Junior</option>
+                  <option value="SWE_Mid">SWE_Mid</option>
+                  <option value="SWE_Senior">SWE_Senior</option>
                 </select>
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-semibold">Assessment Time Window (minutes)</label>
-                <Input type="number" defaultValue="30" />
+                <Input
+                  type="number"
+                  value={preferences.assessment_time_window_minutes}
+                  onChange={(e) => setPreferences({ ...preferences, assessment_time_window_minutes: parseInt(e.target.value) || 30 })}
+                />
               </div>
 
               <label className="flex items-center gap-2">
-                <input type="checkbox" defaultChecked />
+                <input
+                  type="checkbox"
+                  checked={preferences.email_notifications}
+                  onChange={(e) => setPreferences({ ...preferences, email_notifications: e.target.checked })}
+                />
                 <span className="text-sm">Email notifications for scheduled assessments</span>
               </label>
 
-              <Button>Save Preferences</Button>
+              <Button onClick={handleSavePreferences} disabled={savingPreferences}>
+                {savingPreferences ? 'Saving...' : 'Save Preferences'}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -919,6 +958,99 @@ const InterviewerDashboard = () => {
                   <p className="text-sm font-semibold text-gray-600">Complexity Level</p>
                   <Badge>{selectedJob.role_complexity_level || 'standard'}</Badge>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Schedule Assessment Modal */}
+      {showScheduleModal && selectedCandidate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="max-w-md w-full">
+            <CardHeader>
+              <div className="flex justify-between items-start">
+                <div>
+                  <CardTitle>Schedule Assessment</CardTitle>
+                  <p className="text-sm text-gray-600">For: {selectedCandidate.name}</p>
+                </div>
+                <Button variant="ghost" onClick={() => setShowScheduleModal(false)}>✕</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Date</label>
+                <Input
+                  type="date"
+                  value={scheduleForm.scheduled_date}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Time</label>
+                <Input
+                  type="time"
+                  value={scheduleForm.scheduled_time}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, scheduled_time: e.target.value })}
+                />
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={scheduleForm.proctoring_enabled}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, proctoring_enabled: e.target.checked })}
+                />
+                <span className="text-sm">Enable proctoring (camera monitoring)</span>
+              </label>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Additional Instructions</label>
+                <textarea
+                  className="w-full border rounded-md p-2 min-h-[80px]"
+                  value={scheduleForm.additional_info}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, additional_info: e.target.value })}
+                  placeholder="Any additional instructions for the candidate..."
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button
+                  className="flex-1"
+                  onClick={async () => {
+                    try {
+                      const scheduled_time = new Date(`${scheduleForm.scheduled_date}T${scheduleForm.scheduled_time}`).toISOString();
+
+                      const response = await api.post(`/api/interviewer/candidates/${selectedCandidate.id}/schedule`, {
+                        scheduled_time: scheduled_time,
+                        job_id: selectedCandidate.matched_job_id || selectedCandidate.job_id,
+                        proctoring_enabled: scheduleForm.proctoring_enabled,
+                        additional_info: scheduleForm.additional_info
+                      });
+
+                      toast({
+                        title: "Success",
+                        description: `Assessment scheduled for ${selectedCandidate.name}. ${response.data.email_sent ? 'Invitation email sent!' : ''}`
+                      });
+                      setShowScheduleModal(false);
+                      setSelectedCandidate(null);
+                      fetchCandidates();
+                    } catch (err) {
+                      console.error('Schedule error:', err);
+                      toast({
+                        title: "Error",
+                        description: err?.response?.data?.error || "Failed to schedule assessment",
+                        variant: "destructive"
+                      });
+                    }
+                  }}
+                >
+                  Schedule Assessment
+                </Button>
+                <Button variant="outline" onClick={() => setShowScheduleModal(false)}>
+                  Cancel
+                </Button>
               </div>
             </CardContent>
           </Card>

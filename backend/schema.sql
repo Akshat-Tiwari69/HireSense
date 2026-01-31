@@ -125,19 +125,25 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     candidate_id INTEGER NOT NULL,
     interviewer_id INTEGER NOT NULL,
+    job_id INTEGER,  -- Link to job_descriptions table
     scheduled_time TIMESTAMP NOT NULL,
-    status TEXT DEFAULT 'scheduled',  -- 'scheduled', 'in_progress', 'completed', 'cancelled'
+    assessment_token TEXT UNIQUE,  -- Secure token for assessment URL
+    status TEXT DEFAULT 'scheduled',  -- 'scheduled', 'in_progress', 'completed', 'cancelled', 'expired'
+    proctoring_enabled INTEGER DEFAULT 1,  -- Whether proctoring is required
+    notes TEXT,  -- Additional instructions for candidate
     assessment_id INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
     FOREIGN KEY (interviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES job_descriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE SET NULL
 );
 
 -- Create indexes for scheduled_assessments table
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_candidate ON scheduled_assessments(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_time ON scheduled_assessments(scheduled_time);
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_token ON scheduled_assessments(assessment_token);
 
 -- Email logs table: Track all emails sent to candidates
 CREATE TABLE IF NOT EXISTS email_logs (

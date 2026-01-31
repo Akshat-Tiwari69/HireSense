@@ -711,15 +711,14 @@ def schedule_candidate_assessment(candidate_id):
         interviewer = dict(interviewer_row) if interviewer_row else {'name': 'CYGNUSA Team', 'email': ''}
         
         # Generate assessment token
-        from db_helpers import generate_assessment_token
         import secrets
-        access_token = secrets.token_urlsafe(32)
+        assessment_token = secrets.token_urlsafe(32)
         
         # Insert scheduled assessment
         cursor.execute("""
             INSERT INTO scheduled_assessments (
                 candidate_id, interviewer_id, scheduled_time, job_id, 
-                status, proctoring_enabled, access_token
+                status, proctoring_enabled, assessment_token
             ) VALUES (?, ?, ?, ?, 'scheduled', ?, ?)
         """, (
             candidate_id,
@@ -727,7 +726,7 @@ def schedule_candidate_assessment(candidate_id):
             data.get('scheduled_time', data.get('scheduled_at')),
             candidate.get('job_id') or data.get('job_id'),
             data.get('proctoring_enabled', True),
-            access_token
+            assessment_token
         ))
         
         # Update candidate status
@@ -742,7 +741,7 @@ def schedule_candidate_assessment(candidate_id):
         
         # Generate assessment link
         frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
-        assessment_link = f"{frontend_url}/assessment/{access_token}"
+        assessment_link = f"{frontend_url}/assessment/{assessment_token}"
         
         # Send invitation email
         email_sent = False
@@ -776,10 +775,13 @@ def schedule_candidate_assessment(candidate_id):
             'message': 'Assessment scheduled successfully',
             'candidate_name': candidate['name'],
             'assessment_link': assessment_link,
-            'access_token': access_token,
+            'assessment_token': assessment_token,
             'email_sent': email_sent
         }), 201
     except Exception as e:
+        import traceback
+        print(f"❌ Schedule error: {e}")
+        traceback.print_exc()
         conn.close()
         return jsonify({'error': str(e)}), 400
 

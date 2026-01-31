@@ -132,15 +132,30 @@ class EmailService:
         """
         print(f"[EMAIL] Starting send: {email_type} to {recipient_email}", flush=True)
         
-        # Try Resend API first (works on cloud platforms like Render)
+        # Try Gmail/SMTP FIRST (primary method)
+        if self.smtp_user and self.smtp_pass:
+            smtp_success = self._send_via_smtp(recipient_email, recipient_name, subject, html_body, text_body, email_type)
+            if smtp_success:
+                return True
+            print(f"[EMAIL] SMTP failed, trying Resend fallback...", flush=True)
+        
+        # Fall back to Resend API
         if self.resend_api_key and RESEND_AVAILABLE:
             return self._send_via_resend(recipient_email, recipient_name, subject, html_body, email_type)
         
-        # Fall back to SMTP
-        if not self.smtp_user or not self.smtp_pass:
-            print(f"[EMAIL] ⚠️ No email service configured, skipping email to {recipient_email}", flush=True)
-            return False
-        
+        print(f"[EMAIL] ⚠️ No email service configured, skipping email to {recipient_email}", flush=True)
+        return False
+    
+    def _send_via_smtp(
+        self,
+        recipient_email: str,
+        recipient_name: str,
+        subject: str,
+        html_body: str,
+        text_body: Optional[str],
+        email_type: str
+    ) -> bool:
+        """Send email via SMTP (Gmail)"""
         try:
             print(f"[EMAIL] SMTP config: {self.smtp_host}:{self.smtp_port}", flush=True)
             

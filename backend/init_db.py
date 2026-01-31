@@ -1,18 +1,16 @@
 """
 Database Initialization Module
-Creation of all database tables
-Supports both SQLite (local) and PostgreSQL (Render/production)
+Creation of all database tables for PostgreSQL (Render production)
 """
 
 import os
-import sqlite3
 from werkzeug.security import generate_password_hash
-from db_config import get_connection, DB_PATH
+from db_config import get_connection
 
 
 def drop_all_tables():
     """
-    Drop all tables from the database.
+    Drop all tables from the PostgreSQL database.
     Useful for resetting/clearing the database completely.
     """
     try:
@@ -22,35 +20,21 @@ def drop_all_tables():
             return False
         
         cursor = conn.cursor()
-        is_postgres = 'psycopg2' in str(type(conn).__module__)
         
         print("\n[INFO] Dropping all existing tables...")
         
-        if is_postgres:
-            # Get all table names from PostgreSQL
-            cursor.execute(
-                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-            )
-            tables = [row[0] for row in cursor.fetchall()]
-            
-            # Drop all tables
-            for table in tables:
-                print(f"   Dropping table: {table}")
-                cursor.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-            
-            conn.commit()
-        else:
-            # SQLite: get all table names
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in cursor.fetchall()]
-            
-            # Drop all tables
-            for table in tables:
-                print(f"   Dropping table: {table}")
-                cursor.execute(f"DROP TABLE IF EXISTS {table}")
-            
-            conn.commit()
+        # Get all table names from PostgreSQL
+        cursor.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        )
+        tables = [row[0] for row in cursor.fetchall()]
         
+        # Drop all tables
+        for table in tables:
+            print(f"   Dropping table: {table}")
+            cursor.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        
+        conn.commit()
         conn.close()
         
         if tables:
@@ -69,36 +53,23 @@ def drop_all_tables():
 
 def init_database():
     """
-    Initializing the database by reading and executing the appropriate schema.
-    - Uses schema_postgres.sql for PostgreSQL (DATABASE_URL env var set)
-    - Uses schema.sql for SQLite (local development)
+    Initialize the PostgreSQL database by reading and executing schema_postgres.sql.
     Creates all tables defined in the schema.
     """
     try:
-        # Getting the database connection
+        # Get the database connection
         conn = get_connection()
         if conn is None:
             print("[ERROR] Failed to connect to database")
             return False
         
-        # Detect which database type we're using
-        is_postgres = hasattr(conn, 'cursor') and 'psycopg2' in str(type(conn).__module__)
-        db_type = "PostgreSQL" if is_postgres else "SQLite"
-        
-        print(f"[INFO] Detected database type: {db_type}")
+        print("[INFO] Connected to PostgreSQL database")
         
         cursor = conn.cursor()
         
-        # Choose the correct schema file
-        if is_postgres:
-            schema_file = 'schema_postgres.sql'
-        else:
-            schema_file = 'schema.sql'
-        
-        # Try local backend directory first, then database directory
+        # Use PostgreSQL schema file
+        schema_file = 'schema_postgres.sql'
         schema_path = os.path.join(os.path.dirname(__file__), schema_file)
-        if not os.path.exists(schema_path):
-            schema_path = os.path.join(os.path.dirname(__file__), '..', 'database', schema_file)
         
         if not os.path.exists(schema_path):
             print(f"[ERROR] Schema file not found at {schema_path}")
@@ -109,27 +80,20 @@ def init_database():
         with open(schema_path, 'r') as f:
             schema_sql = f.read()
         
-        # Execute schema SQL
-        if is_postgres:
-            # PostgreSQL: execute statements one by one
-            statements = [s.strip() for s in schema_sql.split(';') if s.strip()]
-            for stmt in statements:
+        # PostgreSQL: execute statements one by one
+        statements = [s.strip() for s in schema_sql.split(';') if s.strip()]
+        for stmt in statements:
+            try:
                 cursor.execute(stmt)
-            conn.commit()
-        else:
-            # SQLite: use executescript
-            cursor.executescript(schema_sql)
-            conn.commit()
+            except Exception as stmt_error:
+                print(f"[WARNING] Statement failed: {stmt[:50]}... Error: {stmt_error}")
+        conn.commit()
         
         # Verify tables were created
-        if is_postgres:
-            cursor.execute(
-                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-            )
-            tables = [row[0] for row in cursor.fetchall()]
-        else:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in cursor.fetchall()]
+        cursor.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        )
+        tables = [row[0] for row in cursor.fetchall()]
         
         conn.close()
         
@@ -140,9 +104,6 @@ def init_database():
         
         return True
         
-    except sqlite3.Error as e:
-        print(f"[ERROR] SQLite error: {e}")
-        return False
     except Exception as e:
         print(f"[ERROR] Error: {e}")
         import traceback
@@ -152,7 +113,7 @@ def init_database():
 
 def seed_default_users():
     """
-    Seed default users (interviewer and admin) into the database.
+    Seed default users (interviewer, admin, proctor) into the database.
     Skips if users already exist.
     """
     try:
@@ -162,7 +123,6 @@ def seed_default_users():
             return False
         
         cursor = conn.cursor()
-        is_postgres = 'psycopg2' in str(type(conn).__module__)
         
         # Default users to create
         default_users = [
@@ -177,6 +137,12 @@ def seed_default_users():
                 'password': 'admin123',
                 'role': 'admin',
                 'name': 'Demo Admin'
+            },
+            {
+                'email': 'proctor@company.com',
+                'password': 'proctor123',
+                'role': 'proctor',
+                'name': 'Demo Proctor'
             }
         ]
         
@@ -184,25 +150,16 @@ def seed_default_users():
         
         for user in default_users:
             # Check if user exists
-            if is_postgres:
-                cursor.execute("SELECT id FROM users WHERE email = %s", (user['email'],))
-            else:
-                cursor.execute("SELECT id FROM users WHERE email = ?", (user['email'],))
+            cursor.execute("SELECT id FROM users WHERE email = %s", (user['email'],))
             
             if cursor.fetchone():
                 print(f"   ⚠️  User {user['email']} already exists, skipping")
             else:
                 hashed_pw = generate_password_hash(user['password'])
-                if is_postgres:
-                    cursor.execute(
-                        "INSERT INTO users (email, password_hash, role, name) VALUES (%s, %s, %s, %s)",
-                        (user['email'], hashed_pw, user['role'], user['name'])
-                    )
-                else:
-                    cursor.execute(
-                        "INSERT INTO users (email, password_hash, role, name) VALUES (?, ?, ?, ?)",
-                        (user['email'], hashed_pw, user['role'], user['name'])
-                    )
+                cursor.execute(
+                    "INSERT INTO users (email, password_hash, role, name) VALUES (%s, %s, %s, %s)",
+                    (user['email'], hashed_pw, user['role'], user['name'])
+                )
                 conn.commit()
                 print(f"   ✅ User {user['email']} ({user['role']}) created")
         
@@ -217,12 +174,15 @@ def seed_default_users():
 
 
 if __name__ == "__main__":
-    db_url = os.environ.get('DATABASE_URL', 'SQLite')
-    print(f"🔄 Database Initialization (with table reset)")
-    if 'postgresql' in str(db_url):
-        print(f"[INFO] Using Postgres (DATABASE_URL detected)")
-    else:
-        print(f"[INFO] Using SQLite at: {DB_PATH}")
+    db_url = os.environ.get('DATABASE_URL')
+    print(f"🔄 Database Initialization (PostgreSQL)")
+    
+    if not db_url:
+        print("[ERROR] DATABASE_URL environment variable is not set!")
+        print("Set it with: export DATABASE_URL='postgresql://user:pass@host:5432/dbname'")
+        exit(1)
+    
+    print(f"[INFO] Connecting to PostgreSQL...")
     
     # Step 1: Drop all existing tables
     print("\n" + "="*60)
@@ -253,6 +213,7 @@ if __name__ == "__main__":
             print("\nDefault users created:")
             print("  - interviewer@company.com / password123 (interviewer)")
             print("  - admin@company.com / admin123 (admin)")
+            print("  - proctor@company.com / proctor123 (proctor)")
         else:
             print("\n[WARNING] Database schema created but user seeding failed.")
     else:

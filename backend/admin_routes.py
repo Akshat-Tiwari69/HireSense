@@ -622,16 +622,61 @@ def delete_user(user_id):
 
 @admin_bp.route('/candidates', methods=['GET'])
 def get_candidates():
-    """Get all candidates"""
+    """Get all candidates with job info"""
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, name, email, phone, status, match_score FROM candidates ORDER BY id")
-        candidates = cursor.fetchall()
-        result = [{'id': row[0], 'name': row[1], 'email': row[2], 'phone': row[3], 'status': row[4], 'match_score': row[5]} for row in candidates]
-        return jsonify({'status': 'success', 'data': result})
+        cursor.execute("""
+            SELECT c.id, c.name, c.email, c.phone, c.status, c.match_score,
+                   c.resume_path, c.parsed_skills, c.job_id,
+                   j.title as job_title
+            FROM candidates c
+            LEFT JOIN job_descriptions j ON c.job_id = j.id
+            ORDER BY c.id DESC
+        """)
+        candidates = []
+        for row in cursor.fetchall():
+            candidate = dict(row)
+            # Parse JSON fields
+            if candidate.get('parsed_skills'):
+                try:
+                    import json
+                    candidate['parsed_data'] = {'skills': json.loads(candidate['parsed_skills'])}
+                except:
+                    candidate['parsed_data'] = {}
+            else:
+                candidate['parsed_data'] = {}
+            # Set default status if not set
+            if not candidate.get('status'):
+                candidate['status'] = 'Applied'
+            candidates.append(candidate)
+        return jsonify(candidates)
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        print(f"Error fetching candidates: {e}")
+        return jsonify([])
+    finally:
+        conn.close()
+
+@admin_bp.route('/candidates/<int:candidate_id>/status', methods=['PUT'])
+def update_candidate_status(candidate_id):
+    """Update candidate status"""
+    data = request.json
+    new_status = data.get('status')
+    
+    if not new_status:
+        return jsonify({'error': 'Status is required'}), 400
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE candidates SET status = ? WHERE id = ?",
+            (new_status, candidate_id)
+        )
+        conn.commit()
+        return jsonify({'message': f'Status updated to {new_status}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
 
@@ -666,6 +711,7 @@ def delete_candidate(candidate_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
     finally:
         conn.close()
+
 
 # ============================================================================
 # DATABASE STATS ENDPOINTS

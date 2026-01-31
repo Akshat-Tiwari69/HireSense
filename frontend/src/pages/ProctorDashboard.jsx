@@ -140,6 +140,51 @@ const ProctorDashboard = () => {
     navigate('/login');
   };
 
+  // Handler for Monitor button - opens monitor view
+  const [showMonitorModal, setShowMonitorModal] = useState(false);
+  const [selectedAssessment, setSelectedAssessment] = useState(null);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [showReviewModal, setShowReviewModal] = useState(false);
+
+  const handleMonitor = (assessment) => {
+    setSelectedAssessment(assessment);
+    setShowMonitorModal(true);
+  };
+
+  const handleReviewViolation = (violation) => {
+    setSelectedAssessment(violation);
+    setReviewNotes('');
+    setShowReviewModal(true);
+  };
+
+  const handleSubmitReview = async () => {
+    if (!selectedAssessment) return;
+    try {
+      await api.post(`/api/proctor/violations/${selectedAssessment.id}/review`, {
+        reviewer_notes: reviewNotes
+      });
+      setShowReviewModal(false);
+      fetchFlaggedViolations();
+      alert('Review submitted successfully');
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      alert('Failed to submit review');
+    }
+  };
+
+  const handleFlagForReview = async (assessment) => {
+    try {
+      await api.post(`/api/proctor/assessments/${assessment.id}/flag`, {
+        reason: 'Flagged from anomaly detection'
+      });
+      fetchAnomalies();
+      alert('Assessment flagged for review');
+    } catch (error) {
+      console.error('Error flagging assessment:', error);
+      alert('Failed to flag assessment');
+    }
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex justify-between items-center">
@@ -274,7 +319,7 @@ const ProctorDashboard = () => {
                         <p className="font-semibold text-sm">{assessment.candidate_email}</p>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => handleMonitor(assessment)}>
                       <Eye className="w-4 h-4 mr-2" /> Monitor
                     </Button>
                   </CardContent>
@@ -375,7 +420,7 @@ const ProctorDashboard = () => {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <p className="text-sm">{violation.details}</p>
-                  <Button size="sm" variant="outline">
+                  <Button size="sm" variant="outline" onClick={() => handleReviewViolation(violation)}>
                     <MessageSquare className="w-4 h-4 mr-2" /> Review & Comment
                   </Button>
                 </CardContent>
@@ -421,7 +466,7 @@ const ProctorDashboard = () => {
                       <p className="font-bold">{Math.round(assessment.overall_score || 0)}%</p>
                     </div>
                   </div>
-                  <Button size="sm" variant="destructive">
+                  <Button size="sm" variant="destructive" onClick={() => handleFlagForReview(assessment)}>
                     <AlertCircle className="w-4 h-4 mr-2" /> Flag for Review
                   </Button>
                 </CardContent>
@@ -491,6 +536,99 @@ const ProctorDashboard = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Modal Components */}
+      <MonitorModal
+        show={showMonitorModal}
+        assessment={selectedAssessment}
+        onClose={() => setShowMonitorModal(false)}
+      />
+      <ReviewModal
+        show={showReviewModal}
+        violation={selectedAssessment}
+        notes={reviewNotes}
+        setNotes={setReviewNotes}
+        onSubmit={handleSubmitReview}
+        onClose={() => setShowReviewModal(false)}
+      />
+    </div>
+  );
+};
+
+// Monitor Modal Component
+const MonitorModal = ({ show, assessment, onClose }) => {
+  if (!show || !assessment) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-4 border-b flex justify-between items-center">
+          <h2 className="text-xl font-semibold">Monitoring: {assessment.candidate_name}</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">✕</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-100 rounded-lg p-4">
+              <h3 className="font-semibold mb-2">Assessment Info</h3>
+              <p><span className="text-gray-600">Job:</span> {assessment.job_title}</p>
+              <p><span className="text-gray-600">Email:</span> {assessment.candidate_email}</p>
+              <p><span className="text-gray-600">Started:</span> {new Date(assessment.started_at).toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-100 rounded-lg p-4">
+              <h3 className="font-semibold mb-2">Proctoring Status</h3>
+              <p><span className="text-gray-600">Violations:</span> <span className={assessment.violation_count > 2 ? 'text-red-600 font-bold' : ''}>{assessment.violation_count}</span></p>
+              <p><span className="text-gray-600">Status:</span> {assessment.time_status}</p>
+            </div>
+          </div>
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p className="text-sm text-yellow-800">Live video monitoring requires webcam permission from the candidate. Real-time feed will appear here when available.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Review Modal Component  
+const ReviewModal = ({ show, violation, notes, setNotes, onSubmit, onClose }) => {
+  if (!show || !violation) return null;
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-lg w-full">
+        <div className="p-4 border-b flex justify-between items-center">
+          <h2 className="text-xl font-semibold">Review Violation</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">✕</button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <p className="font-semibold">{violation.candidate_name}</p>
+            <p className="text-sm text-gray-600">{violation.event_type}</p>
+            <p className="text-sm mt-2">{violation.details}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Reviewer Notes</label>
+            <textarea
+              className="w-full border rounded-md p-2 min-h-[100px]"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add your review notes here..."
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onSubmit}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Submit Review
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 border rounded-md hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
