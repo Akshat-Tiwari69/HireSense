@@ -1,519 +1,534 @@
 """
-Admin Routes Module
-Handles all admin dashboard endpoints for system management
-Protected routes requiring JWT authentication with 'admin' role
+Enhanced Admin Routes - Features for complete dashboard control
+Includes: Job Management, Question Bank, Email Templates, Assessment Templates, Audit Logs
 """
 
-import os
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
+from werkzeug.security import generate_password_hash
+import json
 from datetime import datetime
-import logging
-from db_config import get_connection
-from db_helpers import DatabaseError
-from auth import hash_password
+from functools import wraps
+import sqlite3
 
-# Setup logger
-logger = logging.getLogger(__name__)
+admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
-# Create blueprint for admin routes
-admin_bp = Blueprint('admin', __name__)
+# Database connection helper
+def get_db():
+    conn = sqlite3.connect('assessment_system.db')
+    conn.row_factory = sqlite3.Row
+    return conn
 
-
-def require_admin_role(f):
-    """Decorator to check for admin role"""
-    from functools import wraps
+# Admin authorization decorator
+def admin_required(f):
     @wraps(f)
-    def check_admin_role(*args, **kwargs):
-        claims = get_jwt()
-        if claims.get('role') != 'admin':
-            return jsonify({
-                'status': 'error',
-                'message': 'Access denied. Admin role required.'
-            }), 403
+    def decorated_function(*args, **kwargs):
+        from flask import session
+        if 'user_id' not in session or session.get('role') != 'admin':
+            return jsonify({'error': 'Admin access required'}), 403
         return f(*args, **kwargs)
-    return check_admin_role
-
-
-# ============================================================================
-#                           USER MANAGEMENT
-# ============================================================================
-
-@admin_bp.route('/users', methods=['GET'])
-@jwt_required()
-@require_admin_role
-def get_all_users():
-    """Get all users in the system"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id")
-        rows = cursor.fetchall()
-        conn.close()
-        
-        users = [{
-            'id': row[0],
-            'name': row[1],
-            'email': row[2],
-            'role': row[3],
-            'created_at': row[4]
-        } for row in rows]
-        
-        return jsonify({'status': 'success', 'data': users}), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/users', methods=['POST'])
-@jwt_required()
-@require_admin_role
-def create_user():
-    """Create a new user"""
-    try:
-        data = request.get_json()
-        name = data.get('name')
-        email = data.get('email')
-        password = data.get('password')
-        role = data.get('role', 'interviewer')
-        
-        if not all([name, email, password]):
-            return jsonify({'status': 'error', 'message': 'Name, email, and password are required'}), 400
-        
-        if role not in ['interviewer', 'admin', 'proctor']:
-            return jsonify({'status': 'error', 'message': 'Invalid role. Must be interviewer, proctor, or admin'}), 400
-        
-        admin_email = get_jwt_identity()
-        logger.info(f"[ADMIN ACTION] {admin_email} creating new user: {email} with role: {role}")
-        
-        password_hash = hash_password(password)
-        
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?) RETURNING id",
-            (name, email, password_hash, role)
-        )
-        result = cursor.fetchone()
-        user_id = result[0] if result else None
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"[ADMIN ACTION] {admin_email} successfully created user ID: {user_id} ({email})")
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'User created successfully',
-            'data': {'id': user_id, 'name': name, 'email': email, 'role': role}
-        }), 201
-    except Exception as e:
-        if 'unique constraint' in str(e).lower() or 'duplicate' in str(e).lower():
-            return jsonify({'status': 'error', 'message': 'Email already exists'}), 409
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/users/<int:user_id>', methods=['PUT'])
-@jwt_required()
-@require_admin_role
-def update_user(user_id):
-    """Update a user's details"""
-    try:
-        admin_email = get_jwt_identity()
-        data = request.get_json()
-        
-        logger.info(f"[ADMIN ACTION] {admin_email} updating user ID: {user_id} with data: {list(data.keys())}")
-        
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Build update query dynamically
-        updates = []
-        values = []
-        
-        if 'name' in data:
-            updates.append("name = ?")
-            values.append(data['name'])
-        if 'email' in data:
-            updates.append("email = ?")
-            values.append(data['email'])
-        if 'role' in data:
-            if data['role'] not in ['interviewer', 'admin', 'proctor']:
-                return jsonify({'status': 'error', 'message': 'Invalid role. Must be interviewer, proctor, or admin'}), 400
-            updates.append("role = ?")
-            values.append(data['role'])
-        if 'password' in data and data['password']:
-            updates.append("password_hash = ?")
-            values.append(hash_password(data['password']))
-        
-        if not updates:
-            return jsonify({'status': 'error', 'message': 'No fields to update'}), 400
-        
-        values.append(user_id)
-        query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
-        cursor.execute(query, values)
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"[ADMIN ACTION] {admin_email} successfully updated user ID: {user_id}")
-        
-        return jsonify({'status': 'success', 'message': 'User updated successfully'}), 200
-    except Exception as e:
-        logger.error(f"[ADMIN ERROR] Failed to update user ID {user_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/users/<int:user_id>', methods=['DELETE'])
-@jwt_required()
-@require_admin_role
-def delete_user(user_id):
-    """Delete a user"""
-    try:
-        # Prevent deleting yourself
-        admin_email = get_jwt_identity()
-        current_user_id = int(admin_email.split('@')[0]) if '@' in admin_email else 0
-        
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get user info before deleting
-        cursor.execute("SELECT email, role FROM users WHERE id = ?", (user_id,))
-        user = cursor.fetchone()
-        
-        if not user:
-            conn.close()
-            return jsonify({'status': 'error', 'message': 'User not found'}), 404
-        
-        user_email = user[0]
-        user_role = user[1]
-        
-        logger.warning(f"[ADMIN ACTION] {admin_email} deleting user ID: {user_id} ({user_email}, role: {user_role})")
-        
-        cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"[ADMIN ACTION] {admin_email} successfully deleted user ID: {user_id}")
-        
-        return jsonify({'status': 'success', 'message': 'User deleted successfully'}), 200
-    except Exception as e:
-        logger.error(f"[ADMIN ERROR] Failed to delete user ID {user_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
+    return decorated_function
 
 # ============================================================================
-#                           CANDIDATE MANAGEMENT
+# JOB MANAGEMENT ENDPOINTS
 # ============================================================================
 
-@admin_bp.route('/candidates', methods=['GET'])
-@jwt_required()
-@require_admin_role
-def get_all_candidates():
-    """Get all candidates with full details"""
+@admin_bp.route('/jobs', methods=['GET'])
+@admin_required
+def list_jobs():
+    """Get all job postings with filtering"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    status = request.args.get('status', 'active')
+    search = request.args.get('search', '')
+    
+    query = "SELECT * FROM job_descriptions WHERE status = ? AND (title LIKE ? OR department LIKE ?)"
+    cursor.execute(query, (status, f'%{search}%', f'%{search}%'))
+    jobs = [dict(row) for row in cursor.fetchall()]
+    
+    # Parse JSON fields
+    for job in jobs:
+        if job['required_skills']:
+            job['required_skills'] = json.loads(job['required_skills'])
+        if job['skill_taxonomy']:
+            job['skill_taxonomy'] = json.loads(job['skill_taxonomy'])
+    
+    conn.close()
+    return jsonify(jobs)
+
+@admin_bp.route('/jobs', methods=['POST'])
+@admin_required
+def create_job():
+    """Create new job posting"""
+    from flask import session
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, name, email, phone, resume_path, match_score, 
-                   shortlist_status, pros, cons, created_at, status
-            FROM candidates ORDER BY id DESC
-        """)
-        rows = cursor.fetchall()
-        conn.close()
-        
-        candidates = [{
-            'id': row[0],
-            'name': row[1],
-            'email': row[2],
-            'phone': row[3],
-            'resume_path': row[4],
-            'match_score': row[5],
-            'shortlist_status': row[6],
-            'pros': row[7],
-            'cons': row[8],
-            'created_at': row[9],
-            'status': row[10] or row[6] or 'Applied'
-        } for row in rows]
-        
-        return jsonify({'status': 'success', 'data': candidates}), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/candidates/<int:candidate_id>', methods=['PUT'])
-@jwt_required()
-@require_admin_role
-def update_candidate(candidate_id):
-    """Update a candidate's details"""
-    try:
-        admin_email = get_jwt_identity()
-        data = request.get_json()
-        
-        logger.info(f"[ADMIN ACTION] {admin_email} updating candidate ID: {candidate_id} with data: {list(data.keys())}")
-        
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        updates = []
-        values = []
-        
-        if 'name' in data:
-            updates.append("name = ?")
-            values.append(data['name'])
-        if 'email' in data:
-            updates.append("email = ?")
-            values.append(data['email'])
-        if 'phone' in data:
-            updates.append("phone = ?")
-            values.append(data['phone'])
-        if 'status' in data:
-            updates.append("status = ?")
-            values.append(data['status'])
-            updates.append("shortlist_status = ?")
-            values.append(data['status'])
-        if 'match_score' in data:
-            updates.append("match_score = ?")
-            values.append(data['match_score'])
-        
-        if not updates:
-            return jsonify({'status': 'error', 'message': 'No fields to update'}), 400
-        
-        values.append(candidate_id)
-        query = f"UPDATE candidates SET {', '.join(updates)} WHERE id = ?"
-        cursor.execute(query, values)
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"[ADMIN ACTION] {admin_email} successfully updated candidate ID: {candidate_id}")
-        
-        return jsonify({'status': 'success', 'message': 'Candidate updated successfully'}), 200
-    except Exception as e:
-        logger.error(f"[ADMIN ERROR] Failed to update candidate ID {candidate_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/candidates/<int:candidate_id>', methods=['DELETE'])
-@jwt_required()
-@require_admin_role
-def delete_candidate(candidate_id):
-    """Delete a candidate and all related data"""
-    try:
-        admin_email = get_jwt_identity()
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get candidate info before deleting
-        cursor.execute("SELECT name, email FROM candidates WHERE id = ?", (candidate_id,))
-        candidate = cursor.fetchone()
-        
-        if not candidate:
-            conn.close()
-            return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
-        
-        candidate_name = candidate[0]
-        candidate_email = candidate[1]
-        
-        logger.warning(f"[ADMIN ACTION] {admin_email} deleting candidate ID: {candidate_id} ({candidate_name}, {candidate_email}) and all related data")
-        
-        # Delete related records first
-        cursor.execute("DELETE FROM scheduled_assessments WHERE candidate_id = ?", (candidate_id,))
-        cursor.execute("DELETE FROM assessments WHERE candidate_id = ?", (candidate_id,))
-        cursor.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
+            INSERT INTO job_descriptions (
+                title, description, required_skills, min_experience, 
+                department, location, created_by_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data['title'],
+            data['description'],
+            json.dumps(data.get('required_skills', [])),
+            data.get('min_experience', 0),
+            data.get('department'),
+            data.get('location'),
+            session['user_id'],
+            'active'
+        ))
         
         conn.commit()
-        conn.close()
+        job_id = cursor.lastrowid
         
-        logger.info(f"[ADMIN ACTION] {admin_email} successfully deleted candidate ID: {candidate_id}")
-        
-        return jsonify({'status': 'success', 'message': 'Candidate deleted successfully'}), 200
-    except Exception as e:
-        logger.error(f"[ADMIN ERROR] Failed to delete candidate ID {candidate_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-# ============================================================================
-#                           DATABASE MANAGEMENT
-# ============================================================================
-
-@admin_bp.route('/db/tables', methods=['GET'])
-@jwt_required()
-@require_admin_role
-def get_db_tables():
-    """Get list of all tables in the database"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # PostgreSQL query for tables
-        cursor.execute("""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public'
-            ORDER BY table_name
-        """)
-        rows = cursor.fetchall()
-        conn.close()
-        
-        tables = [row[0] for row in rows]
-        return jsonify({'status': 'success', 'data': tables}), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/db/tables/<table_name>', methods=['GET'])
-@jwt_required()
-@require_admin_role
-def get_table_data(table_name):
-    """Get data from a specific table (limited to 100 rows)"""
-    try:
-        # Whitelist allowed tables for security
-        allowed_tables = ['users', 'candidates', 'assessments', 'scheduled_assessments', 'email_logs', 'questions', 'proctoring_violations']
-        if table_name not in allowed_tables:
-            return jsonify({'status': 'error', 'message': 'Table not allowed'}), 403
-        
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get column names
-        cursor.execute(f"""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name = '{table_name}'
-            ORDER BY ordinal_position
-        """)
-        columns = [row[0] for row in cursor.fetchall()]
-        
-        # Get data (limit 100 rows)
-        cursor.execute(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 100")
-        rows = cursor.fetchall()
-        conn.close()
-        
-        data = [dict(zip(columns, row)) for row in rows]
-        
-        return jsonify({
-            'status': 'success',
-            'data': data,
-            'columns': columns,
-            'count': len(data)
-        }), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/db/stats', methods=['GET'])
-@jwt_required()
-@require_admin_role
-def get_db_stats():
-    """Get database statistics"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        stats = {}
-        
-        # Count users by role
-        cursor.execute("SELECT role, COUNT(*) FROM users GROUP BY role")
-        stats['users_by_role'] = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # Count candidates by status
-        cursor.execute("SELECT COALESCE(status, shortlist_status, 'Applied') as s, COUNT(*) FROM candidates GROUP BY s")
-        stats['candidates_by_status'] = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # Count scheduled assessments
-        cursor.execute("SELECT status, COUNT(*) FROM scheduled_assessments GROUP BY status")
-        stats['assessments_by_status'] = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        # Total counts
-        cursor.execute("SELECT COUNT(*) FROM users")
-        stats['total_users'] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM candidates")
-        stats['total_candidates'] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM assessments")
-        stats['total_assessments'] = cursor.fetchone()[0]
+        # Log action
+        log_admin_action(session['user_id'], 'create_job', 'job', job_id, None, data)
         
         conn.close()
-        
-        return jsonify({'status': 'success', 'data': stats}), 200
+        return jsonify({'id': job_id, 'message': 'Job created successfully'}), 201
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        conn.close()
+        return jsonify({'error': str(e)}), 400
 
-
-# ============================================================================
-#                           SYSTEM SETTINGS
-# ============================================================================
-
-@admin_bp.route('/settings/env', methods=['GET'])
-@jwt_required()
-@require_admin_role
-def get_env_status():
-    """Get status of required environment variables (not values)"""
+@admin_bp.route('/jobs/<int:job_id>', methods=['PUT'])
+@admin_required
+def update_job(job_id):
+    """Update job posting"""
+    from flask import session
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
     try:
-        env_vars = [
-            'DATABASE_URL',
-            'JWT_SECRET_KEY',
-            'OPENAI_API_KEY',
-            'RESEND_API_KEY',
-            'RESEND_FROM_EMAIL',
-            'SMTP_HOST',
-            'SMTP_USER',
-            'FRONTEND_URL'
-        ]
-        
-        status = {}
-        for var in env_vars:
-            value = os.environ.get(var)
-            if value:
-                # Mask the value for security
-                if len(value) > 8:
-                    status[var] = f"{value[:4]}...{value[-4:]}"
-                else:
-                    status[var] = "***configured***"
-            else:
-                status[var] = None
-        
-        return jsonify({'status': 'success', 'data': status}), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
-@admin_bp.route('/reset-candidate-status/<int:candidate_id>', methods=['POST'])
-@jwt_required()
-@require_admin_role
-def reset_candidate_status(candidate_id):
-    """Reset a candidate's status back to Applied"""
-    try:
-        admin_email = get_jwt_identity()
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get candidate info
-        cursor.execute("SELECT name, email FROM candidates WHERE id = ?", (candidate_id,))
-        candidate = cursor.fetchone()
-        
-        if not candidate:
-            conn.close()
-            return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
-        
-        candidate_name = candidate[0]
-        candidate_email = candidate[1]
-        
-        logger.info(f"[ADMIN ACTION] {admin_email} resetting status to 'Applied' for candidate ID: {candidate_id} ({candidate_name})")
+        # Get old values for audit log
+        cursor.execute("SELECT * FROM job_descriptions WHERE id = ?", (job_id,))
+        old_job = dict(cursor.fetchone())
         
         cursor.execute("""
-            UPDATE candidates 
-            SET status = 'Applied', shortlist_status = 'Applied'
+            UPDATE job_descriptions 
+            SET title = ?, description = ?, required_skills = ?, 
+                min_experience = ?, department = ?, location = ?,
+                skill_taxonomy = ?, role_complexity_level = ?,
+                last_modified_by_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (candidate_id,))
+        """, (
+            data.get('title', old_job['title']),
+            data.get('description', old_job['description']),
+            json.dumps(data.get('required_skills', json.loads(old_job['required_skills'] or '[]'))),
+            data.get('min_experience', old_job['min_experience']),
+            data.get('department', old_job['department']),
+            data.get('location', old_job['location']),
+            json.dumps(data.get('skill_taxonomy', json.loads(old_job['skill_taxonomy'] or '[]'))),
+            data.get('role_complexity_level', old_job['role_complexity_level']),
+            session['user_id'],
+            job_id
+        ))
         
-        # Also delete any scheduled assessments for this candidate
-        cursor.execute("DELETE FROM scheduled_assessments WHERE candidate_id = ?", (candidate_id,))
+        conn.commit()
+        
+        # Log action
+        log_admin_action(session['user_id'], 'update_job', 'job', job_id, old_job, data)
+        
+        conn.close()
+        return jsonify({'message': 'Job updated successfully'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.route('/jobs/<int:job_id>', methods=['DELETE'])
+@admin_required
+def delete_job(job_id):
+    """Delete job posting"""
+    from flask import session
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("UPDATE job_descriptions SET is_archived = TRUE WHERE id = ?", (job_id,))
+        conn.commit()
+        
+        log_admin_action(session['user_id'], 'delete_job', 'job', job_id, None, None)
+        
+        conn.close()
+        return jsonify({'message': 'Job archived successfully'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.route('/jobs/<int:job_id>/scoring-profile', methods=['GET', 'POST', 'PUT'])
+@admin_required
+def manage_job_scoring_profile(job_id):
+    """Get or manage scoring profile for a job"""
+    from flask import session
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    if request.method == 'GET':
+        cursor.execute("SELECT * FROM job_scoring_profiles WHERE job_id = ?", (job_id,))
+        profile = cursor.fetchone()
+        conn.close()
+        
+        if not profile:
+            return jsonify({'message': 'No scoring profile found'}), 404
+        
+        profile_dict = dict(profile)
+        if profile_dict['skill_thresholds']:
+            profile_dict['skill_thresholds'] = json.loads(profile_dict['skill_thresholds'])
+        return jsonify(profile_dict)
+    
+    elif request.method == 'POST':
+        data = request.get_json()
+        cursor.execute("""
+            INSERT INTO job_scoring_profiles (
+                job_id, technical_weight, psychometric_weight, 
+                min_passing_score, skill_thresholds
+            ) VALUES (?, ?, ?, ?, ?)
+        """, (
+            job_id,
+            data.get('technical_weight', 0.7),
+            data.get('psychometric_weight', 0.3),
+            data.get('min_passing_score', 70.0),
+            json.dumps(data.get('skill_thresholds', {}))
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'Scoring profile created'}), 201
+    
+    elif request.method == 'PUT':
+        data = request.get_json()
+        cursor.execute("""
+            UPDATE job_scoring_profiles 
+            SET technical_weight = ?, psychometric_weight = ?,
+                min_passing_score = ?, skill_thresholds = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = ?
+        """, (
+            data.get('technical_weight', 0.7),
+            data.get('psychometric_weight', 0.3),
+            data.get('min_passing_score', 70.0),
+            json.dumps(data.get('skill_thresholds', {})),
+            job_id
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'Scoring profile updated'})
+
+# ============================================================================
+# QUESTION BANK ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/question-bank', methods=['GET'])
+@admin_required
+def list_questions():
+    """Get questions from question bank with filtering"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    question_type = request.args.get('type')
+    category = request.args.get('category')
+    difficulty = request.args.get('difficulty')
+    
+    query = "SELECT * FROM question_bank WHERE is_active = TRUE"
+    params = []
+    
+    if question_type:
+        query += " AND question_type = ?"
+        params.append(question_type)
+    if category:
+        query += " AND category = ?"
+        params.append(category)
+    if difficulty:
+        query += " AND difficulty = ?"
+        params.append(difficulty)
+    
+    cursor.execute(query, params)
+    questions = [dict(row) for row in cursor.fetchall()]
+    
+    # Parse JSON fields
+    for q in questions:
+        if q['options']:
+            q['options'] = json.loads(q['options'])
+        if q['required_skills']:
+            q['required_skills'] = json.loads(q['required_skills'])
+        if q['test_cases']:
+            q['test_cases'] = json.loads(q['test_cases'])
+        if q['job_specific_keywords']:
+            q['job_specific_keywords'] = json.loads(q['job_specific_keywords'])
+    
+    conn.close()
+    return jsonify(questions)
+
+@admin_bp.route('/question-bank', methods=['POST'])
+@admin_required
+def create_question():
+    """Add new question to question bank"""
+    from flask import session
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO question_bank (
+                question_text, question_type, category, difficulty,
+                required_skills, options, correct_answer, code_starter,
+                test_cases, expected_solution, trait, job_specific_keywords,
+                created_by_id, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data['question_text'],
+            data['question_type'],
+            data['category'],
+            data.get('difficulty', 'intermediate'),
+            json.dumps(data.get('required_skills', [])),
+            json.dumps(data.get('options', {})) if data.get('options') else None,
+            data.get('correct_answer'),
+            data.get('code_starter'),
+            json.dumps(data.get('test_cases', [])) if data.get('test_cases') else None,
+            data.get('expected_solution'),
+            data.get('trait'),
+            json.dumps(data.get('job_specific_keywords', [])),
+            session['user_id'],
+            True
+        ))
+        
+        conn.commit()
+        question_id = cursor.lastrowid
+        conn.close()
+        
+        return jsonify({'id': question_id, 'message': 'Question added to bank'}), 201
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.route('/question-bank/<int:question_id>', methods=['DELETE'])
+@admin_required
+def delete_question(question_id):
+    """Remove question from question bank"""
+    from flask import session
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("UPDATE question_bank SET is_active = FALSE WHERE id = ?", (question_id,))
+        conn.commit()
+        
+        log_admin_action(session['user_id'], 'delete_question', 'question', question_id, None, None)
+        
+        conn.close()
+        return jsonify({'message': 'Question deactivated'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+# ============================================================================
+# EMAIL TEMPLATE ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/email-templates', methods=['GET'])
+@admin_required
+def list_email_templates():
+    """Get all email templates"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM email_templates ORDER BY template_name")
+    templates = [dict(row) for row in cursor.fetchall()]
+    
+    for t in templates:
+        if t['variables']:
+            t['variables'] = json.loads(t['variables'])
+    
+    conn.close()
+    return jsonify(templates)
+
+@admin_bp.route('/email-templates', methods=['POST'])
+@admin_required
+def create_email_template():
+    """Create new email template"""
+    from flask import session
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO email_templates (
+                template_name, subject, body, variables, is_default
+            ) VALUES (?, ?, ?, ?, ?)
+        """, (
+            data['template_name'],
+            data['subject'],
+            data['body'],
+            json.dumps(data.get('variables', [])),
+            data.get('is_default', False)
+        ))
         
         conn.commit()
         conn.close()
         
-        logger.info(f"[ADMIN ACTION] {admin_email} successfully reset candidate ID: {candidate_id} to 'Applied'")
-        
-        return jsonify({'status': 'success', 'message': 'Candidate status reset to Applied'}), 200
+        return jsonify({'message': 'Email template created'}), 201
     except Exception as e:
-        logger.error(f"[ADMIN ERROR] Failed to reset candidate ID {candidate_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.route('/email-templates/<int:template_id>', methods=['PUT'])
+@admin_required
+def update_email_template(template_id):
+    """Update email template"""
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            UPDATE email_templates 
+            SET subject = ?, body = ?, variables = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            data['subject'],
+            data['body'],
+            json.dumps(data.get('variables', [])),
+            template_id
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Email template updated'})
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+# ============================================================================
+# ASSESSMENT TEMPLATE ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/assessment-templates', methods=['GET'])
+@admin_required
+def list_assessment_templates():
+    """Get all assessment templates"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM assessment_templates ORDER BY role_type, difficulty_level")
+    templates = [dict(row) for row in cursor.fetchall()]
+    
+    conn.close()
+    return jsonify(templates)
+
+@admin_bp.route('/assessment-templates', methods=['POST'])
+@admin_required
+def create_assessment_template():
+    """Create new assessment template"""
+    data = request.get_json()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO assessment_templates (
+                template_name, description, role_type, difficulty_level,
+                mcq_count, coding_count, psychometric_count, time_limit_minutes,
+                tech_weight, psych_weight, is_default
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data['template_name'],
+            data.get('description'),
+            data['role_type'],
+            data.get('difficulty_level', 'intermediate'),
+            data.get('mcq_count', 10),
+            data.get('coding_count', 1),
+            data.get('psychometric_count', 3),
+            data.get('time_limit_minutes', 60),
+            data.get('tech_weight', 0.7),
+            data.get('psych_weight', 0.3),
+            data.get('is_default', False)
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Assessment template created'}), 201
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+# ============================================================================
+# AUDIT LOG ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/audit-logs', methods=['GET'])
+@admin_required
+def get_audit_logs():
+    """Get admin audit logs"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    limit = request.args.get('limit', 100, type=int)
+    admin_id = request.args.get('admin_id', type=int)
+    action_type = request.args.get('action_type')
+    
+    query = "SELECT * FROM admin_audit_log WHERE 1=1"
+    params = []
+    
+    if admin_id:
+        query += " AND admin_id = ?"
+        params.append(admin_id)
+    if action_type:
+        query += " AND action_type = ?"
+        params.append(action_type)
+    
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+    
+    cursor.execute(query, params)
+    logs = [dict(row) for row in cursor.fetchall()]
+    
+    for log in logs:
+        if log['old_values']:
+            log['old_values'] = json.loads(log['old_values'])
+        if log['new_values']:
+            log['new_values'] = json.loads(log['new_values'])
+    
+    conn.close()
+    return jsonify(logs)
+
+# ============================================================================
+# HELPER FUNCTION
+# ============================================================================
+
+def log_admin_action(admin_id, action_type, entity_type, entity_id, old_values, new_values):
+    """Log admin action for audit trail"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO admin_audit_log (
+                admin_id, action_type, entity_type, entity_id, 
+                old_values, new_values
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            admin_id,
+            action_type,
+            entity_type,
+            entity_id,
+            json.dumps(old_values) if old_values else None,
+            json.dumps(new_values) if new_values else None
+        ))
+        conn.commit()
+    except Exception as e:
+        print(f"Error logging admin action: {e}")
+    finally:
+        conn.close()
