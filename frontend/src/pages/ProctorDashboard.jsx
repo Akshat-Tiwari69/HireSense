@@ -40,7 +40,7 @@ const ProctorDashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
-      const response = await api.get('/proctor/dashboard-stats');
+      const response = await api.get('/api/proctor/dashboard-stats');
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -50,7 +50,7 @@ const ProctorDashboard = () => {
   const fetchLiveAssessments = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/proctor/active-assessments');
+      const response = await api.get('/api/proctor/active-assessments');
       setLiveAssessments(response.data);
     } catch (error) {
       console.error('Error fetching live assessments:', error);
@@ -61,7 +61,7 @@ const ProctorDashboard = () => {
   const fetchScheduledAssessments = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/proctor/scheduled-assessments');
+      const response = await api.get('/api/proctor/scheduled-assessments');
       setScheduledAssessments(response.data);
     } catch (error) {
       console.error('Error fetching scheduled assessments:', error);
@@ -72,7 +72,7 @@ const ProctorDashboard = () => {
   const fetchCompletedAssessments = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/proctor/completed-assessments');
+      const response = await api.get('/api/proctor/completed-assessments');
       setCompletedAssessments(response.data);
     } catch (error) {
       console.error('Error fetching completed assessments:', error);
@@ -83,7 +83,7 @@ const ProctorDashboard = () => {
   const fetchFlaggedViolations = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/proctor/violations/flagged');
+      const response = await api.get('/api/proctor/violations/flagged');
       setFlaggedViolations(response.data);
     } catch (error) {
       console.error('Error fetching violations:', error);
@@ -94,7 +94,7 @@ const ProctorDashboard = () => {
   const fetchAnomalies = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/proctor/anomaly-detection');
+      const response = await api.get('/api/proctor/anomaly-detection');
       setAnomalies(response.data.suspicious_assessments || []);
     } catch (error) {
       console.error('Error fetching anomalies:', error);
@@ -105,7 +105,7 @@ const ProctorDashboard = () => {
   const fetchQualityMetrics = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/proctor/quality-metrics');
+      const response = await api.get('/api/proctor/quality-metrics');
       setQualityMetrics(response.data);
     } catch (error) {
       console.error('Error fetching quality metrics:', error);

@@ -30,7 +30,7 @@ const AdminDashboard = () => {
   const fetchJobs = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/admin/jobs', { params: { search } });
+      const response = await api.get('/api/admin/jobs', { params: { search } });
       setJobs(response.data);
     } catch (error) {
       console.error('Error fetching jobs:', error);
@@ -41,7 +41,7 @@ const AdminDashboard = () => {
   const fetchQuestions = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/admin/question-bank');
+      const response = await api.get('/api/admin/question-bank');
       setQuestions(response.data);
     } catch (error) {
       console.error('Error fetching questions:', error);
@@ -52,7 +52,7 @@ const AdminDashboard = () => {
   const fetchEmailTemplates = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/admin/email-templates');
+      const response = await api.get('/api/admin/email-templates');
       setEmailTemplates(response.data);
     } catch (error) {
       console.error('Error fetching templates:', error);
@@ -63,7 +63,7 @@ const AdminDashboard = () => {
   const fetchAssessmentTemplates = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/admin/assessment-templates');
+      const response = await api.get('/api/admin/assessment-templates');
       setAssessmentTemplates(response.data);
     } catch (error) {
       console.error('Error fetching assessment templates:', error);
@@ -74,7 +74,7 @@ const AdminDashboard = () => {
   const fetchAuditLogs = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/admin/audit-logs', { params: { limit: 100 } });
+      const response = await api.get('/api/admin/audit-logs', { params: { limit: 100 } });
       setAuditLogs(response.data);
     } catch (error) {
       console.error('Error fetching audit logs:', error);
@@ -85,7 +85,7 @@ const AdminDashboard = () => {
   const deleteJob = async (jobId) => {
     if (window.confirm('Archive this job?')) {
       try {
-        await api.delete(`/admin/jobs/${jobId}`);
+        await api.delete(`/api/admin/jobs/${jobId}`);
         setJobs(jobs.filter(j => j.id !== jobId));
       } catch (error) {
         console.error('Error deleting job:', error);
@@ -95,7 +95,7 @@ const AdminDashboard = () => {
 
   const deleteQuestion = async (questionId) => {
     try {
-      await api.delete(`/admin/question-bank/${questionId}`);
+      await api.delete(`/api/admin/question-bank/${questionId}`);
       setQuestions(questions.filter(q => q.id !== questionId));
     } catch (error) {
       console.error('Error deleting question:', error);

@@ -32,7 +32,7 @@ const InterviewerDashboard = () => {
   const fetchJobs = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/interviewer/my-jobs');
+      const response = await api.get('/api/interviewer/my-jobs');
       setJobs(response.data);
     } catch (error) {
       console.error('Error fetching jobs:', error);
@@ -43,7 +43,7 @@ const InterviewerDashboard = () => {
   const fetchActiveAssessments = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/interviewer/active-assessments');
+      const response = await api.get('/api/interviewer/active-assessments');
       setActiveAssessments(response.data);
     } catch (error) {
       console.error('Error fetching assessments:', error);
@@ -53,7 +53,7 @@ const InterviewerDashboard = () => {
 
   const createJob = async () => {
     try {
-      await api.post('/interviewer/jobs', newJob);
+      await api.post('/api/interviewer/jobs', newJob);
       setShowJobModal(false);
       setNewJob({
         title: '',
@@ -71,7 +71,7 @@ const InterviewerDashboard = () => {
 
   const refineJobWithAI = async (jobId) => {
     try {
-      const response = await api.post(`/interviewer/jobs/${jobId}/ai-refine`, {});
+      const response = await api.post(`/api/interviewer/jobs/${jobId}/ai-refine`, {});
       alert('Job refined with AI! Check the job details for updates.');
       fetchJobs();
     } catch (error) {
@@ -81,7 +81,7 @@ const InterviewerDashboard = () => {
 
   const viewJobAnalytics = async (jobId) => {
     try {
-      const response = await api.get(`/interviewer/jobs/${jobId}/analytics`);
+      const response = await api.get(`/api/interviewer/jobs/${jobId}/analytics`);
       setJobAnalytics(response.data);
       setActiveTab('analytics');
     } catch (error) {
