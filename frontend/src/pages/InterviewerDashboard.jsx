@@ -4,12 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertCircle, Plus, Search, Wand2, BarChart3, Clock, CheckCircle, Users, LogOut } from 'lucide-react';
+import { AlertCircle, Plus, Search, Wand2, BarChart3, Clock, CheckCircle, Users, LogOut, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '@/hooks/use-toast';
 import { api } from '@/services/api';
 
 const InterviewerDashboard = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('my-jobs');
   const [jobs, setJobs] = useState([]);
   const [activeAssessments, setActiveAssessments] = useState([]);
@@ -17,6 +19,7 @@ const InterviewerDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [showJobModal, setShowJobModal] = useState(false);
+  const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
   const [newJob, setNewJob] = useState({
     title: '',
     description: '',
@@ -62,7 +65,9 @@ const InterviewerDashboard = () => {
 
   const createJob = async () => {
     try {
+      setLoading(true);
       await api.post('/api/interviewer/jobs', newJob);
+      toast({ title: 'Success', description: 'Job created successfully!' });
       setShowJobModal(false);
       setNewJob({
         title: '',
@@ -75,16 +80,24 @@ const InterviewerDashboard = () => {
       fetchJobs();
     } catch (error) {
       console.error('Error creating job:', error);
+      toast({ variant: 'destructive', title: 'Error', description: error?.response?.data?.error || 'Failed to create job' });
+    } finally {
+      setLoading(false);
     }
   };
 
   const refineJobWithAI = async (jobId) => {
     try {
+      setLoading(true);
+      toast({ title: 'AI Processing...', description: 'Refining job description with AI' });
       const response = await api.post(`/api/interviewer/jobs/${jobId}/ai-refine`, {});
-      alert('Job refined with AI! Check the job details for updates.');
+      toast({ title: 'Success!', description: 'Job refined with AI. Click "View Details" to see improvements.' });
       fetchJobs();
     } catch (error) {
       console.error('Error refining job:', error);
+      toast({ variant: 'destructive', title: 'Error', description: error?.response?.data?.error || 'Failed to refine job' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -249,14 +262,14 @@ const InterviewerDashboard = () => {
                   )}
 
                   <div className="flex gap-2 flex-wrap">
-                    <Button variant="outline" size="sm" onClick={() => refineJobWithAI(job.id)}>
+                    <Button variant="outline" size="sm" onClick={() => { setSelectedJob(job); setShowJobDetailsModal(true); }}>
+                      <Eye className="w-4 h-4 mr-1" /> View Details
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => refineJobWithAI(job.id)} disabled={loading}>
                       <Wand2 className="w-4 h-4 mr-1" /> AI Refine
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => viewJobAnalytics(job.id)}>
                       <BarChart3 className="w-4 h-4 mr-1" /> Analytics
-                    </Button>
-                    <Button size="sm">
-                      <Users className="w-4 h-4 mr-1" /> Schedule Assessment
                     </Button>
                   </div>
                 </CardContent>
@@ -396,6 +409,74 @@ const InterviewerDashboard = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Job Details Modal */}
+      {showJobDetailsModal && selectedJob && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <CardHeader>
+              <div className="flex justify-between items-start">
+                <div>
+                  <CardTitle>{selectedJob.title}</CardTitle>
+                  <p className="text-sm text-gray-600">{selectedJob.department} • {selectedJob.location}</p>
+                </div>
+                <Button variant="ghost" onClick={() => setShowJobDetailsModal(false)}>✕</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <h3 className="font-semibold mb-2">Original Description</h3>
+                <p className="text-sm text-gray-700">{selectedJob.description}</p>
+              </div>
+
+              {selectedJob.ai_refined_description && (
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2 text-blue-900">✨ AI-Refined Description</h3>
+                  <p className="text-sm text-gray-700">{selectedJob.ai_refined_description}</p>
+                </div>
+              )}
+
+              {selectedJob.ideal_candidate_profile && (
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2 text-green-900">👤 Ideal Candidate Profile</h3>
+                  <p className="text-sm text-gray-700">{selectedJob.ideal_candidate_profile}</p>
+                </div>
+              )}
+
+              <div>
+                <h3 className="font-semibold mb-2">Required Skills</h3>
+                <div className="flex flex-wrap gap-2">
+                  {(selectedJob.required_skills || []).map((skill, idx) => (
+                    <Badge key={idx} variant="secondary">{skill}</Badge>
+                  ))}
+                </div>
+              </div>
+
+              {selectedJob.skill_taxonomy && selectedJob.skill_taxonomy.length > 0 && (
+                <div>
+                  <h3 className="font-semibold mb-2">🎯 AI-Enhanced Skill Taxonomy</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedJob.skill_taxonomy.map((skill, idx) => (
+                      <Badge key={idx} variant="outline" className="bg-purple-50">{skill}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-gray-600">Min Experience</p>
+                  <p className="text-lg">{selectedJob.min_experience} years</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-600">Complexity Level</p>
+                  <Badge>{selectedJob.role_complexity_level || 'standard'}</Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

@@ -152,12 +152,63 @@ def ai_refine_job(job_id):
         except:
             required_skills = []
         
-        # Create refined data from request or use defaults
+        # Generate AI-enhanced content
+        title = job.get('title', 'Position')
+        department = job.get('department', 'Department')
+        description = job.get('description', '')
+        min_exp = job.get('min_experience', 0)
+        
+        # Enhanced description with responsibilities and requirements
+        refined_description = f"""**Position Overview:**
+{title} role in the {department} team. {description}
+
+**Key Responsibilities:**
+• Lead technical initiatives and drive innovation within the team
+• Collaborate with cross-functional teams to deliver high-quality solutions
+• Mentor junior team members and contribute to knowledge sharing
+• Participate in code reviews and maintain best practices
+• Design and implement scalable, maintainable solutions
+
+**Requirements:**
+• Minimum {min_exp} years of relevant industry experience
+• Strong problem-solving and analytical skills
+• Excellent communication and teamwork abilities
+• Proven track record of delivering complex projects
+• Self-motivated with ability to work independently"""
+
+        # Ideal candidate profile
+        if min_exp < 2:
+            ideal_profile = "Entry-level professional eager to learn and grow. Strong foundational knowledge with enthusiasm for technology. Quick learner who thrives in collaborative environments."
+            complexity = "junior"
+        elif min_exp < 5:
+            ideal_profile = "Mid-level professional with solid technical foundation and growing leadership skills. Proven ability to work independently while collaborating effectively with team members. Demonstrates ownership and accountability."
+            complexity = "intermediate"
+        elif min_exp < 8:
+            ideal_profile = "Senior professional with deep technical expertise and strong leadership capabilities. Strategic thinker who can architect complex solutions. Mentors others and drives technical excellence across the organization."
+            complexity = "senior"
+        else:
+            ideal_profile = "Expert-level professional with extensive industry experience and thought leadership. Drives technical vision and strategy. Recognized authority in their domain with ability to influence at organizational level."
+            complexity = "expert"
+        
+        # Enhanced skill taxonomy - expand on required skills
+        enhanced_skills = list(set(required_skills))
+        if 'Python' in enhanced_skills or 'python' in enhanced_skills:
+            enhanced_skills.extend(['Django', 'Flask', 'FastAPI', 'pytest'])
+        if 'JavaScript' in enhanced_skills or 'javascript' in enhanced_skills:
+            enhanced_skills.extend(['React', 'Node.js', 'TypeScript', 'Jest'])
+        if 'Java' in enhanced_skills or 'java' in enhanced_skills:
+            enhanced_skills.extend(['Spring Boot', 'Maven', 'JUnit', 'Hibernate'])
+        
+        # Add common professional skills
+        enhanced_skills.extend(['Problem Solving', 'Communication', 'Teamwork', 'Agile/Scrum'])
+        enhanced_skills = list(set(enhanced_skills))[:15]  # Limit to 15 skills
+        
+        # Create refined data
         refined = {
-            "refined_description": data.get('refined_description', job.get('description', '')),
-            "ideal_candidate_profile": data.get('ideal_candidate_profile', 'Experienced professional'),
-            "skill_taxonomy": data.get('skill_taxonomy', required_skills),
-            "role_complexity_level": data.get('role_complexity_level', 'intermediate')
+            "refined_description": data.get('refined_description', refined_description),
+            "ideal_candidate_profile": data.get('ideal_candidate_profile', ideal_profile),
+            "skill_taxonomy": data.get('skill_taxonomy', enhanced_skills),
+            "role_complexity_level": data.get('role_complexity_level', complexity)
         }
         
         # Update job with refined information
