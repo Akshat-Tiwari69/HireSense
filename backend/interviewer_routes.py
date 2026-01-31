@@ -129,7 +129,7 @@ def create_job():
 def ai_refine_job(job_id):
     """Use AI to refine and enhance job description"""
     user_id = get_current_user_id()
-    data = request.get_json()
+    data = request.get_json() or {}
     
     conn = get_db()
     cursor = conn.cursor()
@@ -146,41 +146,17 @@ def ai_refine_job(job_id):
         
         job = dict(job_row)
         
-        # Get request data (if any)
-        data = request.get_json() or {}
+        # Parse required skills safely
+        try:
+            required_skills = json.loads(job.get('required_skills') or '[]')
+        except:
+            required_skills = []
         
-        # Call AI to refine
-        from ai_question_generator import AIQuestionGenerator
-        ai_gen = AIQuestionGenerator()
-        
-        # Create prompt for job refinement
-        prompt = f"""
-        Refine and enhance this job description for {job['title']} in {job['department']}:
-        
-        Original Description: {job['description']}
-        Required Skills: {', '.join(json.loads(job['required_skills']) or [])}
-        Min Experience: {job['min_experience']} years
-        
-        Provide:
-        1. Expanded job description (2-3 paragraphs with responsibilities and requirements)
-        2. Ideal candidate profile (key characteristics)
-        3. Refined skill taxonomy (expand required skills, add nice-to-have)
-        4. Role complexity level (junior, intermediate, senior, expert)
-        
-        Return as JSON: {
-            "refined_description": "...",
-            "ideal_candidate_profile": "...",
-            "skill_taxonomy": ["skill1", "skill2", ...],
-            "role_complexity_level": "intermediate"
-        }
-        """
-        
-        # In production, call actual AI
-        # For now, create structured response
+        # Create refined data from request or use defaults
         refined = {
-            "refined_description": data.get('refined_description', job['description']),
+            "refined_description": data.get('refined_description', job.get('description', '')),
             "ideal_candidate_profile": data.get('ideal_candidate_profile', 'Experienced professional'),
-            "skill_taxonomy": data.get('skill_taxonomy', json.loads(job['required_skills'] or '[]')),
+            "skill_taxonomy": data.get('skill_taxonomy', required_skills),
             "role_complexity_level": data.get('role_complexity_level', 'intermediate')
         }
         
@@ -190,8 +166,7 @@ def ai_refine_job(job_id):
             SET ai_refined_description = ?,
                 ideal_candidate_profile = ?,
                 skill_taxonomy = ?,
-                role_complexity_level = ?,
-                updated_at = CURRENT_TIMESTAMP
+                role_complexity_level = ?
             WHERE id = ?
         """, (
             refined['refined_description'],
@@ -207,13 +182,16 @@ def ai_refine_job(job_id):
         return jsonify({
             'message': 'Job refined successfully',
             'refined_data': refined
-        })
+        }), 200
     except Exception as e:
         import traceback
         print(f"Error in ai_refine_job: {str(e)}")
         print(traceback.format_exc())
-        conn.close()
-        return jsonify({'error': str(e)}), 400
+        try:
+            conn.close()
+        except:
+            pass
+        return jsonify({'error': str(e), 'type': type(e).__name__}), 400
 
 # ============================================================================
 # ASSESSMENT SCHEDULING WITH JOB CONTEXT
