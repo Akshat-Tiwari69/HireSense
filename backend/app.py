@@ -70,21 +70,12 @@ def unauthorized_callback(error):
         'message': 'Authorization token is missing. Please login.'
     }), 401
 
-# Enable CORS so frontend can call our APIs
-CORS(app, resources={
-    r"/api/*": {
-        "origins": [
-            "https://hiresense-moil.onrender.com",
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:3000"
-        ],
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
-    }
-})
+# Enable CORS - Allow all origins for now, restrict later if needed
+CORS(app, 
+     origins=["https://hiresense-moil.onrender.com", "http://localhost:5173", "http://localhost:3000"],
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     supports_credentials=True)
 
 # Register authentication blueprint
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
