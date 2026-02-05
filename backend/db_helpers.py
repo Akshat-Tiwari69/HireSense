@@ -229,7 +229,7 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         parsed_skills_json = json.dumps(parsed_skills)
         pros_json = json.dumps(pros) if pros else None
         cons_json = json.dumps(cons) if cons else None
-        skills_jsonb = json.dumps(skills) if skills else json.dumps([])
+        skills_jsonb = json.dumps(skills or [])
         
         cursor.execute("""
             INSERT INTO candidates 
