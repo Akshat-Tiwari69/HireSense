@@ -480,6 +480,19 @@ def upload_resume():
                 status = "Applied"
             logger.info(f"   Status set to: {status}")
         
+        # Get additional candidate info from form
+        candidate_skills = request.form.get('skills', '')
+        candidate_sector = request.form.get('sector', '')
+        
+        # Parse skills if provided as comma-separated string
+        skills_list = []
+        if candidate_skills:
+            skills_list = [s.strip() for s in candidate_skills.split(',') if s.strip()]
+            logger.info(f"[SKILLS] Candidate provided {len(skills_list)} skills: {skills_list}")
+        
+        if candidate_sector:
+            logger.info(f"[SECTOR] Candidate applying to sector: {candidate_sector}")
+        
         candidate_id = insert_candidate(
             name=name,
             email=email,
@@ -488,7 +501,9 @@ def upload_resume():
             parsed_data=parsed_data,
             pros=pros_text,
             cons=cons_text,
-            status=status
+            status=status,
+            skills=skills_list if skills_list else None,
+            sector=candidate_sector if candidate_sector else None
         )
         logger.info(f"[OK] Candidate saved with ID: {candidate_id}")
     except Exception as e:

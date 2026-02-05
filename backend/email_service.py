@@ -28,6 +28,7 @@ class EmailService:
     """
     Email service for sending notifications to candidates and interviewers
     Uses Resend API (if configured) or falls back to SMTP
+    Supports sector-specific email configurations
     """
     
     def __init__(
@@ -69,6 +70,31 @@ class EmailService:
             print(f"[EMAIL] ✅ Resend API configured (from: {self.resend_from_email})", flush=True)
         elif not self.smtp_user or not self.smtp_pass:
             print("[EMAIL] ⚠️ No email service configured (set RESEND_API_KEY or SMTP_USER/SMTP_PASS)", flush=True)
+    
+    def get_sector_sender(self, sector: Optional[str] = None) -> tuple:
+        """
+        Get sender email and name based on sector configuration
+        
+        Args:
+            sector: Sector name (e.g., 'engineering', 'sales')
+        
+        Returns:
+            tuple: (sender_email, sender_name)
+        """
+        if not sector:
+            return (self.sender_email or self.resend_from_email, self.sender_name)
+        
+        try:
+            from db_helpers import get_sector_email_config
+            config = get_sector_email_config(sector)
+            
+            if config and config.get('is_active'):
+                return (config['email_address'], config['display_name'])
+        except Exception as e:
+            logger.warning(f"[EMAIL] Could not get sector config for {sector}: {e}")
+        
+        # Fallback to default sender
+        return (self.sender_email or self.resend_from_email, self.sender_name)
     
     def _send_via_resend(
         self,

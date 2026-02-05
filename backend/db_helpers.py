@@ -192,7 +192,7 @@ def get_candidate_by_email(email):
         raise DatabaseError(f"Error checking candidate email: {str(e)}")
 
 
-def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending'):
+def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending', skills=None, sector=None):
     """
     Insert a new candidate into the database.
     
@@ -205,6 +205,8 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         pros (list, optional): List of AI-generated pros about the candidate
         cons (list, optional): List of AI-generated cons about the candidate
         status (str, optional): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
+        skills (list, optional): Candidate's self-reported skills (separate from parsed_skills)
+        sector (str, optional): Target sector for the candidate
     
     Returns:
         int: Candidate ID of the newly inserted candidate
@@ -217,22 +219,23 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         cursor = conn.cursor()
         
         # Extract parsed data
-        skills = parsed_data.get('skills', [])
+        parsed_skills = parsed_data.get('skills', [])
         experience = parsed_data.get('experience', 0)
         education = parsed_data.get('education', '')
         match_score = parsed_data.get('match_score', 0)
         shortlist_status = parsed_data.get('shortlist_status', 'Potential')
         
         # Converting lists to JSON strings
-        skills_json = json.dumps(skills)
+        parsed_skills_json = json.dumps(parsed_skills)
         pros_json = json.dumps(pros) if pros else None
         cons_json = json.dumps(cons) if cons else None
+        skills_jsonb = json.dumps(skills) if skills else json.dumps([])
         
         cursor.execute("""
             INSERT INTO candidates 
-            (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status))
+            (name, email, phone, resume_path, parsed_skills, skills, years_experience, education, match_score, shortlist_status, pros, cons, status, sector)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+        """, (name, email, phone, resume_path, parsed_skills_json, skills_jsonb, experience, education, match_score, shortlist_status, pros_json, cons_json, status, sector))
         
         result = cursor.fetchone()
         candidate_id = result[0] if result else None
