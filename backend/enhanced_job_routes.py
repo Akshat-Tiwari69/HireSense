@@ -160,11 +160,16 @@ def create_enhanced_job():
         logger.info(f"Enhanced job posting '{data['title']}' created by {user_email}")
         
         # Trigger automatic matching for existing candidates
-        try:
-            # This can be done asynchronously in production
-            matcher.auto_match_all_candidates()
-        except Exception as e:
-            logger.error(f"Error triggering auto-match: {str(e)}")
+        # TODO: Move to background task queue (e.g., Celery) for production
+        # For now, making it optional to avoid blocking API responses
+        trigger_matching = request.args.get('trigger_matching', 'false').lower() == 'true'
+        if trigger_matching:
+            try:
+                matcher.auto_match_all_candidates()
+            except Exception as e:
+                logger.error(f"Error triggering auto-match: {str(e)}")
+        else:
+            logger.info("Auto-matching skipped. Use POST /api/matching/trigger to run manually.")
         
         return jsonify({
             'status': 'success',
@@ -288,11 +293,17 @@ def update_enhanced_job(job_id):
         )
         
         # Trigger re-matching if skills changed
+        # TODO: Move to background task queue (e.g., Celery) for production
+        # For now, making it optional to avoid blocking API responses
         if 'required_skills' in data or 'preferred_skills' in data:
-            try:
-                matcher.auto_match_all_candidates()
-            except Exception as e:
-                logger.error(f"Error triggering auto-match: {str(e)}")
+            trigger_matching = request.args.get('trigger_matching', 'false').lower() == 'true'
+            if trigger_matching:
+                try:
+                    matcher.auto_match_all_candidates()
+                except Exception as e:
+                    logger.error(f"Error triggering auto-match: {str(e)}")
+            else:
+                logger.info("Auto-matching skipped after skill update. Use POST /api/matching/trigger to run manually.")
         
         return jsonify({
             'status': 'success',

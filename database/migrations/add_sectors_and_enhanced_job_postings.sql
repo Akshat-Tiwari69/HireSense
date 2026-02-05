@@ -186,5 +186,6 @@ COMMENT ON COLUMN users.sector_id IS 'Links user to a specific sector for access
 COMMENT ON COLUMN users.is_super_admin IS 'Super admins have access to all sectors';
 COMMENT ON COLUMN job_descriptions.required_skills_json IS 'Array of required skills for the job';
 COMMENT ON COLUMN job_descriptions.preferred_skills_json IS 'Array of preferred (nice-to-have) skills';
+COMMENT ON COLUMN candidates.job_id IS 'Manually assigned job for the candidate application';
 COMMENT ON COLUMN candidates.auto_matched_job_id IS 'Best matching job based on AI analysis';
 COMMENT ON COLUMN candidates.match_confidence IS 'Confidence score (0-100) for the auto-match';

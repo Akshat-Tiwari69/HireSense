@@ -87,7 +87,14 @@ class CandidateJobMatcher:
         
         # Calculate experience match
         experience_match = candidate_experience >= min_experience if min_experience else True
-        experience_score = 100 if experience_match else max(0, (candidate_experience / min_experience * 100) if min_experience > 0 else 0)
+        
+        # Calculate experience score (0-100)
+        if experience_match:
+            experience_score = 100
+        elif min_experience > 0:
+            experience_score = max(0, (candidate_experience / min_experience * 100))
+        else:
+            experience_score = 0
         
         # Calculate overall match score
         # Weights: Required skills (60%), Preferred skills (20%), Experience (20%)

@@ -41,7 +41,9 @@ def require_super_admin(f):
                     'message': 'Access denied. Super Admin role required.'
                 }), 403
             
-            return f(*args, **kwargs)
+            # Call the wrapped function and store result
+            result = f(*args, **kwargs)
+            return result
         finally:
             if conn:
                 return_connection(conn)
