@@ -72,41 +72,44 @@ def get_coding_problem(difficulty="medium"):
     }
     return problems.get(difficulty, problems['medium'])
 
-def get_psychometric_scenarios(count=3):
-    """Return sample psychometric scenarios"""
+def get_psychometric_scenarios(count=8):
+    """Return sample nuanced psychometric scenarios with option-specific trait scores"""
     scenarios = [
         {
             'id': 1,
-            'scenario': 'Your teammate misses a critical deadline. How do you respond?',
+            'scenario': 'Your team is falling behind on a deadline. A colleague suggests cutting corners on quality to meet the date. How do you approach this?',
             'options': [
-                'Immediately escalate to management',
-                'Have a private conversation to understand what happened',
-                'Take over their work without discussing',
-                'Ignore it and focus on your own tasks'
+                'Prioritize the deadline and follow the suggestion.',
+                'Organize a team sync to re-prioritize and find a middle ground.',
+                'Work extra hours alone to maintain quality and meet the deadline.',
+                'Refuse to compromise and notify the project lead about the delay.'
             ],
-            'trait': 'teamwork'
+            'option_scores': [3, 8, 7, 10],
+            'trait': 'Integrity'
         },
         {
             'id': 2,
-            'scenario': 'You discover a potential security vulnerability in production code. What do you do?',
+            'scenario': 'During a meeting, you realize your proposed solution has a subtle but significant flaw. The team is already leaning towards it. What do you do?',
             'options': [
-                'Fix it immediately without telling anyone',
-                'Report it to the security team and your manager',
-                'Wait until the next sprint to address it',
-                'Ignore it if it seems minor'
+                'Immediately point out the flaw and suggest starting over.',
+                'Stay quiet to avoid public embarrassment and fix it later.',
+                'Wait until after the meeting to discuss it with the lead.',
+                'Gradually steer the conversation towards other alternatives.'
             ],
-            'trait': 'responsibility'
+            'option_scores': [10, 2, 6, 5],
+            'trait': 'Transparency'
         },
         {
             'id': 3,
-            'scenario': 'A client requests a feature that conflicts with best practices. How do you handle it?',
+            'scenario': 'A difficult client consistently changes requirements mid-sprint, causing team frustration. How do you navigate this?',
             'options': [
-                'Implement exactly what they ask for',
-                'Refuse to implement it',
-                'Explain the concerns and suggest alternatives',
-                'Implement it but make it hard to use'
+                'Request to be removed from the project.',
+                'Strictly follow the change request process, even if it delays results.',
+                'Schedule a feedback session with the client to align expectations.',
+                'Deliver exactly what was last agreed, ignoring new requests.'
             ],
-            'trait': 'communication'
+            'option_scores': [2, 6, 10, 4],
+            'trait': 'Client Management'
         }
     ]
     return scenarios[:count]

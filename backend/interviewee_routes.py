@@ -499,9 +499,21 @@ def complete_assessment(assessment_id):
         psychometric_scores = get_psychometric_scores(assessment_id)
         logger.info(f"Assessment {assessment_id}: Psychometric Scores = {psychometric_scores}")
         
-        # Calculate technical score (60% MCQ, 40% Coding)
-        technical_score = (float(mcq_score) * 0.6) + (float(coding_score) * 0.4)
-        logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (MCQ: {mcq_score}, Coding: {coding_score})")
+        # Check if coding problem was assigned
+        questions = get_assessment_questions(assessment_id)
+        has_coding = False
+        if questions and questions.get('coding_problem'):
+            has_coding = True
+            
+        # Calculate technical score
+        if has_coding:
+            # 60% MCQ, 40% Coding
+            technical_score = (float(mcq_score) * 0.6) + (float(coding_score) * 0.4)
+            logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (MCQ: {mcq_score}, Coding: {coding_score})")
+        else:
+            # 100% MCQ if no coding problem assigned (non-technical roles)
+            technical_score = float(mcq_score)
+            logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (MCQ ONLY, no coding assigned)")
         
         # Calculate average psychometric score (convert Decimal to float for Postgres compatibility)
         if psychometric_scores:
@@ -719,26 +731,38 @@ def start_assessment_with_token(token):
         is_resume = False
         time_elapsed = 0
         
-        # If already in progress, resume with existing questions
-        if assessment['status'] == 'in_progress' and assessment['assessment_id']:
+        # Check if assessment already exists (created at schedule time)
+        if assessment['assessment_id']:
             assessment_id = assessment['assessment_id']
-            is_resume = True
-            time_elapsed = get_assessment_time_elapsed(assessment_id)
-            logger.info(f"Resuming assessment {assessment_id}, elapsed time: {time_elapsed}s")
             
-            # Try to load stored questions
+            # Check if this is a resume (already started) or first start
+            if assessment['status'] == 'in_progress':
+                is_resume = True
+                time_elapsed = get_assessment_time_elapsed(assessment_id)
+                logger.info(f"Resuming assessment {assessment_id}, elapsed time: {time_elapsed}s")
+            else:
+                # First time starting - update status to in_progress
+                start_assessment_by_token(token)
+                update_scheduled_assessment_status(
+                    scheduled_assessment_id=assessment['id'],
+                    status='in_progress',
+                    assessment_id=assessment_id
+                )
+                logger.info(f"First start of assessment {assessment_id}")
+            
+            # Try to load stored questions (should exist from schedule time)
             stored_questions = get_assessment_questions(assessment_id)
             if stored_questions:
-                logger.info(f"Loaded stored questions for assessment {assessment_id}")
+                logger.info(f"Loaded pre-generated questions for assessment {assessment_id}")
                 mcq_questions = stored_questions.get('mcq_questions', [])
-                coding_problem = stored_questions.get('coding_problem', {})
+                coding_problem = stored_questions.get('coding_problem')
                 psychometric_scenarios = stored_questions.get('psychometric_scenarios', [])
             else:
-                # Questions not stored (legacy assessment), generate new ones
-                logger.warning(f"No stored questions for assessment {assessment_id}, generating new ones")
+                # Questions not stored (legacy or edge case), will generate below
+                logger.warning(f"No stored questions for assessment {assessment_id}, will generate")
                 stored_questions = None
         else:
-            # Start the assessment
+            # Legacy case: assessment not created at schedule time
             start_assessment_by_token(token)
             
             # Create assessment record
@@ -751,9 +775,10 @@ def start_assessment_with_token(token):
                 assessment_id=assessment_id
             )
             stored_questions = None
+            logger.info(f"Created new assessment {assessment_id} (legacy path)")
         
-        # Generate questions only if not resuming with stored questions
-        if not is_resume or not stored_questions:
+        # Generate questions only if not already loaded from storage
+        if not stored_questions:
             # Get candidate skills for AI-generated questions
             candidate = get_candidate_by_id(assessment['candidate_id'])
             candidate_skills = []
@@ -765,6 +790,10 @@ def start_assessment_with_token(token):
             
             logger.info(f"Generating AI questions for candidate skills: {candidate_skills[:10]}")
             
+            # Check if this is a technical role (includes coding exam)
+            is_technical_role = assessment.get('is_technical_role', True)
+            logger.info(f"Assessment is_technical_role: {is_technical_role}")
+            
             # Generate AI-powered questions based on candidate's resume
             try:
                 ai_generator = get_ai_question_generator()
@@ -775,13 +804,23 @@ def start_assessment_with_token(token):
                     logger.info(f"Generating personalized questions for skills: {candidate_skills[:5]}")
                     mcq_questions = ai_generator.generate_mcq_questions(candidate_skills, count=10, difficulty="mixed")
                     logger.info(f"Generated {len(mcq_questions)} MCQ questions")
-                    coding_problem = ai_generator.generate_coding_problem(candidate_skills, difficulty="medium")
-                    logger.info(f"Generated coding problem: {coding_problem.get('title', 'Unknown')}")
+                    
+                    # Only generate coding problem for technical roles
+                    if is_technical_role:
+                        coding_problem = ai_generator.generate_coding_problem(candidate_skills, difficulty="medium")
+                        logger.info(f"Generated coding problem: {coding_problem.get('title', 'Unknown')}")
+                    else:
+                        coding_problem = None
+                        logger.info("Skipping coding problem for non-technical role")
                 else:
                     # Fallback to default questions
                     logger.info("No skills found, using fallback questions")
                     mcq_questions = ai_generator._get_fallback_mcq_questions(10)
-                    coding_problem = ai_generator._get_fallback_coding_problem("medium")
+                    if is_technical_role:
+                        coding_problem = ai_generator._get_fallback_coding_problem("medium")
+                    else:
+                        coding_problem = None
+                        logger.info("Skipping coding problem for non-technical role")
                 
                 psychometric_scenarios = ai_generator.generate_psychometric_scenarios(count=3)
                 logger.info(f"Generated {len(psychometric_scenarios)} psychometric scenarios")
@@ -791,7 +830,10 @@ def start_assessment_with_token(token):
                 logger.warning(f"AI question generation failed, using fallback: {str(e)}")
                 # Fallback to static questions
                 mcq_questions = get_mcq_questions(count=10)
-                coding_problem = get_coding_problem(difficulty="easy")
+                if is_technical_role:
+                    coding_problem = get_coding_problem(difficulty="easy")
+                else:
+                    coding_problem = None
                 psychometric_scenarios = get_psychometric_scenarios(count=3)
             
             # Store questions for future resume
@@ -851,7 +893,8 @@ def start_assessment_with_token(token):
                     'hints': coding_problem.get('hints', []),
                     'starter_code': coding_problem.get('starter_code', {}),
                     'test_cases': [tc for tc in coding_problem.get('test_cases', []) if not tc.get('is_hidden', False)]
-                },
+                } if coding_problem else None,
+                'is_technical_role': assessment.get('is_technical_role', True),
                 'psychometric_scenarios': psychometric_scenarios,
                 'duration_minutes': 60,
                 'remaining_seconds': remaining_seconds,

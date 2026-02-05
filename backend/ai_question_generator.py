@@ -67,15 +67,22 @@ class AIQuestionGenerator:
             return self._get_fallback_mcq_questions(count)
         
         skills_str = ", ".join(skills[:10])  # Limit to top 10 skills
+        # Add a random factor to the prompt to ensure variety
+        import random
+        random_seed = random.randint(1, 100000)
         
-        prompt = f"""Generate {count} multiple choice questions to assess a software developer with these skills: {skills_str}
+        prompt = f"""Generate {count} unique multiple choice questions to assess a software developer with these skills: {skills_str}
+(Variation Seed: {random_seed})
 
 Requirements:
-- Questions should test practical knowledge, not just theory
-- Include a mix of conceptual and problem-solving questions
-- Difficulty: {difficulty}
-- Each question should have exactly 4 options
-- Only ONE option should be correct
+- DO NOT generate generic questions like 'What is time complexity of binary search'.
+- Focus on practical, real-world scenarios and deep technical understanding of the specified skills.
+- Ensure a wide variety of topics within the skill set.
+- Difficulty: {difficulty} (if mixed, provide a balance of easy, medium, and hard).
+- Each question should have exactly 4 specific options (A-D).
+- One and only one option must be correct.
+- Category should be specific to the skill being tested.
+- Time limit should be 30-90 seconds based on complexity.
 
 Return a JSON array with this exact structure:
 [
@@ -84,22 +91,22 @@ Return a JSON array with this exact structure:
         "question": "The question text",
         "options": ["Option A", "Option B", "Option C", "Option D"],
         "correct_answer": "The exact text of the correct option",
-        "category": "skill_category",
+        "category": "specific_skill_topic",
         "difficulty": "easy|medium|hard",
         "time_limit": 60
     }}
 ]
 
-Return ONLY valid JSON, no markdown or explanations."""
+Return ONLY valid JSON."""
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert technical interviewer creating assessment questions."},
+                    {"role": "system", "content": "You are a highly creative technical interviewer who creates unique, challenging, and varied assessment questions. You avoid repetitive or textbook-style questions."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.85, # Slightly higher temperature for more variety
                 max_tokens=4000
             )
             
@@ -154,59 +161,64 @@ Return ONLY valid JSON, no markdown or explanations."""
         skills_lower = [s.lower() for s in skills]
         # Use set lookup for O(1) keyword search instead of nested loop
         keywords_set = {kw: lang for lang, keywords in lang_keywords.items() for kw in keywords}
-        detected_langs = {keywords_set[kw] for skill in skills_lower if any(kw in skill for kw in keywords_set if kw in skill)}
+        detected_langs = {lang for kw, lang in keywords_set.items() if any(kw in skill for skill in skills_lower)}
         languages.extend(list(detected_langs))
         
         if not languages:
             languages = ['python', 'javascript']
         
         skills_str = ", ".join(skills[:8])
+        import random
+        random_seed = random.randint(1, 100000)
         
-        prompt = f"""Create a coding problem for a developer with these skills: {skills_str}
+        prompt = f"""Create a unique and creative coding problem for a developer with these skills: {skills_str}
+(Variation Seed: {random_seed})
 
 Difficulty: {difficulty}
 Target Languages: {', '.join(languages)}
 
-The problem should:
-- Be solvable in 20-30 minutes
-- Test practical coding skills relevant to the candidate's background
-- Have clear input/output specifications
-- Include edge cases in test cases
+Requirements:
+- DO NOT use classic LeetCode problems (like Two Sum, Longest Parentheses, etc.).
+- Create a fresh, scenario-based problem (e.g., building a small tool, processing specific domain data).
+- The problem should be solvable in 25-35 minutes.
+- Include clear input/output specifications and 3-5 diverse test cases (including edge cases).
+- Provide starter code for: {', '.join(languages)}.
+- IMPORTANT: Instructions must explicitly state: "ONLY define the required function. DO NOT use input() or read from standard input as it will cause test failures."
 
 Return JSON with this exact structure:
 {{
     "id": 1,
     "title": "Problem Title",
-    "description": "Full problem description with examples",
+    "description": "Full problem description. INCLUDE A WARNING: 'Do not use input() or stdin. Only implement the function provided.'",
     "example": "Input: [example]\\nOutput: [example]\\nExplanation: [brief explanation]",
     "difficulty": "{difficulty}",
     "constraints": ["Constraint 1", "Constraint 2"],
     "hints": ["Hint 1", "Hint 2"],
     "starter_code": {{
-        "python": "def solution(params):\\n    # Your code here\\n    pass",
-        "javascript": "function solution(params) {{\\n    // Your code here\\n}}",
-        "java": "public class Solution {{\\n    public ReturnType solution(params) {{\\n        // Your code here\\n    }}\\n}}"
+        "python": "def some_unique_name(params):\\n    # Your code here\\n    pass",
+        "javascript": "function someUniqueName(params) {{\\n    // Your code here\\n}}",
+        "java": "public class Solution {{\\n    public ReturnType someUniqueName(params) {{\\n        // Your code here\\n    }}\\n}}"
     }},
     "test_cases": [
         {{"input": "input_value", "expected": "expected_output", "is_hidden": false}},
         {{"input": "edge_case", "expected": "expected_output", "is_hidden": false}},
         {{"input": "hidden_test", "expected": "expected_output", "is_hidden": true}}
     ],
-    "solution_approach": "Brief explanation of the optimal approach",
-    "time_complexity": "O(n)",
-    "space_complexity": "O(1)"
+    "solution_approach": "Optimal approach explanation",
+    "time_complexity": "O(...)",
+    "space_complexity": "O(...)"
 }}
 
-Return ONLY valid JSON, no markdown."""
+Return ONLY valid JSON."""
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert at creating coding challenges for technical interviews."},
+                    {"role": "system", "content": "You are a highly creative technical interviewer who creates unique, challenging, and varied assessment questions. You avoid repetitive or textbook-style questions."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.85,
                 max_tokens=3000
             )
             
@@ -220,7 +232,7 @@ Return ONLY valid JSON, no markdown."""
             problem = json.loads(content)
             problem['id'] = 1
             
-            logger.info(f"Generated coding problem: {problem.get('title', 'Unknown')}")
+            logger.info(f"Generated unique coding problem: {problem.get('title', 'Unknown')}")
             return problem
             
         except Exception as e:
@@ -281,58 +293,67 @@ Return ONLY valid JSON."""
             logger.error(f"Error generating test cases: {e}")
             return []
     
-    def generate_psychometric_scenarios(self, job_role: str = "Software Developer", count: int = 3) -> List[Dict]:
+    def generate_psychometric_scenarios(self, job_role: str = "Software Developer", count: int = 6) -> List[Dict]:
         """
-        Generate psychometric/behavioral scenarios
+        Generate nuanced psychometric/behavioral scenarios
         
         Args:
             job_role: The role the candidate is applying for
             count: Number of scenarios to generate
             
         Returns:
-            List of scenario dictionaries
+            List of scenario dictionaries with option-specific trait scores
         """
         if not self.client:
             return self._get_fallback_psychometric_scenarios(count)
         
-        prompt = f"""Create {count} workplace scenario questions for a {job_role} position.
+        import random
+        random_seed = random.randint(1, 100000)
+        
+        prompt = f"""Create {count} unique, high-quality psychometric workplace scenarios for a {job_role} position.
+(Variation Seed: {random_seed})
 
-Each scenario should:
-- Present a realistic workplace situation
-- Have 4 response options showing different approaches
-- Assess traits like: teamwork, problem-solving, communication, leadership, adaptability, integrity
+Requirements for scenarios:
+- Focus on character, ethics, and behavioral tendencies.
+- NO 'right' or 'wrong' answers. Each option should be a plausible way a person might behave.
+- Scenarios should be nuanced (e.g., conflicting priorities, ethical dilemmas, interpersonal sensitivity).
+- Ensure variety in situations (Remote work, team conflict, fast-paced delivery, quality vs. speed, etc.).
+- IMPORTANT: DO NOT include the score, the trait name, or any indication of the "quality" of the answer in the option text itself. The options should look completely equal to the candidate.
+
+For each scenario, provide 4 options. Each option must have a 'score' from 1 to 10 reflecting how strongly it demonstrates the target trait.
+Traits to rotate through: Leadership, Resilience, Team-First Mentality, Problem Solving, Adaptability, Integrity, and Communication.
 
 Return JSON array:
 [
     {{
         "id": 1,
-        "scenario": "Detailed scenario description",
+        "scenario": "Detailed, nuanced scenario description...",
         "options": [
-            "Response option 1",
-            "Response option 2", 
-            "Response option 3",
-            "Response option 4"
+            "Pure behavioral response 1...",
+            "Pure behavioral response 2...", 
+            "Pure behavioral response 3...",
+            "Pure behavioral response 4..."
         ],
-        "trait": "trait_being_assessed",
-        "optimal_choice": 0
+        "option_scores": [10, 7, 5, 2],
+        "trait": "Name of trait being assessed (e.g., 'Resilience')"
     }}
 ]
 
-The optimal_choice is the index (0-3) of the best response.
 Return ONLY valid JSON."""
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert in workplace psychology and behavioral assessment."},
+                    {"role": "system", "content": "You are an expert industrial psychologist and behavioral specialist. You create deep, nuanced workplace scenarios that reveal a person's character and professional values through their choices, avoiding obvious or 'correct' answers."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=2000
+                temperature=0.85, # Higher temperature for variety
+                max_tokens=3000
             )
             
             content = response.choices[0].message.content.strip()
+            # Handle potential markdown
             if content.startswith("```"):
                 content = content.split("```")[1]
                 if content.startswith("json"):
@@ -342,7 +363,14 @@ Return ONLY valid JSON."""
             scenarios = json.loads(content)
             for i, s in enumerate(scenarios):
                 s['id'] = i + 1
+                
+                # Shuffle options and scores together if they exist
+                if 'options' in s and 'option_scores' in s and len(s['options']) == len(s['option_scores']):
+                    combined = list(zip(s['options'], s['option_scores']))
+                    random.shuffle(combined)
+                    s['options'], s['option_scores'] = map(list, zip(*combined))
             
+            logger.info(f"Generated {len(scenarios)} unique nuanced and shuffled psychometric scenarios")
             return scenarios[:count]
             
         except Exception as e:
@@ -608,8 +636,8 @@ Merging them into one sorted list: 1->1->2->3->4->4->5->6''',
                     'Take over their work without discussing',
                     'Ignore it and adjust your timeline'
                 ],
-                'trait': 'teamwork',
-                'optimal_choice': 1
+                'option_scores': [2, 10, 5, 3],
+                'trait': 'teamwork'
             },
             {
                 'id': 2,
@@ -620,8 +648,8 @@ Merging them into one sorted list: 1->1->2->3->4->4->5->6''',
                     'Wait until the next sprint to address it',
                     'Ignore it if it seems unlikely to be exploited'
                 ],
-                'trait': 'responsibility',
-                'optimal_choice': 1
+                'option_scores': [4, 10, 3, 1],
+                'trait': 'responsibility'
             },
             {
                 'id': 3,
@@ -632,8 +660,8 @@ Merging them into one sorted list: 1->1->2->3->4->4->5->6''',
                     'Go over their head to management',
                     'Implement your preferred solution anyway'
                 ],
-                'trait': 'communication',
-                'optimal_choice': 1
+                'option_scores': [4, 10, 2, 1],
+                'trait': 'communication'
             },
             {
                 'id': 4,
@@ -644,8 +672,8 @@ Merging them into one sorted list: 1->1->2->3->4->4->5->6''',
                     'Pretend you know it and figure it out as you go',
                     'Delegate it to someone else'
                 ],
-                'trait': 'adaptability',
-                'optimal_choice': 1
+                'option_scores': [1, 10, 4, 2],
+                'trait': 'adaptability'
             },
             {
                 'id': 5,
@@ -656,11 +684,19 @@ Merging them into one sorted list: 1->1->2->3->4->4->5->6''',
                     'Approve it anyway to avoid conflict',
                     'Report them to management for repeated mistakes'
                 ],
-                'trait': 'leadership',
-                'optimal_choice': 1
+                'option_scores': [1, 10, 3, 2],
+                'trait': 'leadership'
             }
         ]
-        return scenarios[:count]
+        import random
+        selected = scenarios[:count]
+        for s in selected:
+            # Shuffle options and scores together
+            combined = list(zip(s['options'], s['option_scores']))
+            random.shuffle(combined)
+            s['options'], s['option_scores'] = map(list, zip(*combined))
+            
+        return selected
 
 
 # Singleton instance

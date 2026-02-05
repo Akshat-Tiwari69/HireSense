@@ -51,7 +51,7 @@ const AssessmentPage = () => {
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [psychometricAnswers, setPsychometricAnswers] = useState({});
-  
+
   // Coding test results
   const [testsPassed, setTestsPassed] = useState(false);
   const [codeSaved, setCodeSaved] = useState(false);
@@ -111,7 +111,7 @@ const AssessmentPage = () => {
   // Auto-redirect after submission
   useEffect(() => {
     if (!submitted) return;
-    
+
     const timer = setTimeout(() => {
       console.log('Auto-redirecting to home after assessment submission');
       navigate('/');
@@ -140,14 +140,14 @@ const AssessmentPage = () => {
 
       setAssessmentData(data);
       setAssessmentId(data.assessment_id);
-      
+
       // Use remaining_seconds if resuming, otherwise full duration
       const remainingTime = data.remaining_seconds ?? (data.duration_minutes * 60);
       setTimeRemaining(remainingTime);
-      
+
       if (data.is_resume) {
         console.log(`Resuming assessment, ${remainingTime} seconds remaining`);
-        
+
         // Load saved MCQ answers (convert letter A,B,C,D to index 0,1,2,3)
         if (data.saved_mcq_answers && Object.keys(data.saved_mcq_answers).length > 0) {
           const letterToIndex = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
@@ -158,7 +158,7 @@ const AssessmentPage = () => {
           console.log('Loading saved MCQ answers:', convertedMcqAnswers);
           setMcqAnswers(convertedMcqAnswers);
         }
-        
+
         // Load saved psychometric answers (convert score 1-10 to index 0-9)
         if (data.saved_psychometric_answers && Object.keys(data.saved_psychometric_answers).length > 0) {
           const convertedPsychAnswers = {};
@@ -168,7 +168,7 @@ const AssessmentPage = () => {
           console.log('Loading saved psychometric answers:', convertedPsychAnswers);
           setPsychometricAnswers(convertedPsychAnswers);
         }
-        
+
         // Load saved coding submission
         if (data.saved_coding) {
           console.log('Loading saved coding submission:', data.saved_coding);
@@ -222,7 +222,7 @@ const AssessmentPage = () => {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        
+
         // Wait for video to be ready before starting face detection
         videoRef.current.onloadedmetadata = () => {
           console.log('Video metadata loaded, dimensions:', videoRef.current.videoWidth, videoRef.current.videoHeight);
@@ -257,16 +257,16 @@ const AssessmentPage = () => {
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      
+
       // Check video dimensions - use fallback if needed
       const videoWidth = video.videoWidth || 320;
       const videoHeight = video.videoHeight || 240;
-      
+
       if (video.readyState < 2) {
         console.log('Video not ready, readyState:', video.readyState);
         return;
       }
-      
+
       const ctx = canvas.getContext('2d');
       canvas.width = videoWidth;
       canvas.height = videoHeight;
@@ -275,7 +275,7 @@ const AssessmentPage = () => {
       try {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const detectionResult = detectFaces(imageData, canvas.width, canvas.height);
-        
+
         console.log('Face detection result:', detectionResult.count, 'faces detected');
         setFaceCount(detectionResult.count);
         setDetectionInitialized(true);
@@ -284,7 +284,7 @@ const AssessmentPage = () => {
           // No face detected
           noFaceCountRef.current++;
           multipleFaceCountRef.current = 0;
-          
+
           if (noFaceCountRef.current >= 2) { // 2 consecutive checks (6 seconds)
             setFaceDetected(false);
             if (lastViolationType !== 'no_face') {
@@ -297,7 +297,7 @@ const AssessmentPage = () => {
           // Multiple faces detected
           multipleFaceCountRef.current++;
           noFaceCountRef.current = 0;
-          
+
           if (multipleFaceCountRef.current >= 2) { // 2 consecutive checks
             setFaceDetected(true);
             if (lastViolationType !== 'multiple_faces') {
@@ -323,16 +323,16 @@ const AssessmentPage = () => {
     // Simplified face detection using vertical stripe analysis
     // Counts distinct skin-colored regions in horizontal bands
     const { data } = imageData;
-    
+
     // Divide image into vertical stripes and count skin pixels in each
     const numStripes = 30;
     const stripeWidth = Math.floor(width / numStripes);
     const skinPerStripe = new Array(numStripes).fill(0);
     const totalPerStripe = new Array(numStripes).fill(0);
-    
+
     // Only analyze upper 2/3 of image (where faces typically are)
     const analyzeHeight = Math.floor(height * 0.75);
-    
+
     for (let y = 0; y < analyzeHeight; y++) {
       for (let x = 0; x < width; x++) {
         const stripeIdx = Math.min(Math.floor(x / stripeWidth), numStripes - 1);
@@ -340,42 +340,42 @@ const AssessmentPage = () => {
         const r = data[idx];
         const g = data[idx + 1];
         const b = data[idx + 2];
-        
+
         totalPerStripe[stripeIdx]++;
         if (isSkinTone(r, g, b)) {
           skinPerStripe[stripeIdx]++;
         }
       }
     }
-    
+
     // Calculate skin density per stripe
-    const skinDensity = skinPerStripe.map((skin, i) => 
+    const skinDensity = skinPerStripe.map((skin, i) =>
       totalPerStripe[i] > 0 ? skin / totalPerStripe[i] : 0
     );
-    
+
     // Find peaks (local maxima) in skin density - these are likely faces
     const threshold = 0.08; // Minimum skin density to consider
     const peaks = [];
-    
+
     for (let i = 2; i < numStripes - 2; i++) {
       const current = skinDensity[i];
       if (current > threshold) {
         // Check if this is a local maximum (higher than neighbors)
-        const isLocalMax = current >= skinDensity[i-1] && 
-                          current >= skinDensity[i+1] &&
-                          current >= skinDensity[i-2] &&
-                          current >= skinDensity[i+2];
-        
+        const isLocalMax = current >= skinDensity[i - 1] &&
+          current >= skinDensity[i + 1] &&
+          current >= skinDensity[i - 2] &&
+          current >= skinDensity[i + 2];
+
         // Also check if it's significantly above the average nearby
-        const nearby = (skinDensity[i-2] + skinDensity[i-1] + skinDensity[i+1] + skinDensity[i+2]) / 4;
+        const nearby = (skinDensity[i - 2] + skinDensity[i - 1] + skinDensity[i + 1] + skinDensity[i + 2]) / 4;
         const isSignificant = current > nearby * 0.8 || current > threshold * 1.5;
-        
+
         if (isLocalMax && isSignificant) {
           peaks.push({ stripe: i, density: current });
         }
       }
     }
-    
+
     // Merge peaks that are too close together (same face)
     const mergedPeaks = [];
     for (const peak of peaks) {
@@ -389,16 +389,16 @@ const AssessmentPage = () => {
         mergedPeaks.push(peak);
       }
     }
-    
+
     // Calculate total skin coverage to determine if there's any face at all
     const totalSkinDensity = skinDensity.reduce((a, b) => a + b, 0) / numStripes;
-    
+
     console.log('Skin density per stripe:', skinDensity.map(d => d.toFixed(2)).join(', '));
     console.log('Peaks found:', mergedPeaks.length, 'Total avg density:', totalSkinDensity.toFixed(3));
-    
+
     // Determine face count
     let faceCount = 0;
-    
+
     if (totalSkinDensity < 0.02) {
       // Very little skin visible - no face
       faceCount = 0;
@@ -408,7 +408,7 @@ const AssessmentPage = () => {
     } else {
       faceCount = Math.max(mergedPeaks.length, totalSkinDensity > 0.03 ? 1 : 0);
     }
-    
+
     return {
       count: faceCount,
       peaks: mergedPeaks,
@@ -421,46 +421,46 @@ const AssessmentPage = () => {
     // Based on RGB color space rules
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
-    
+
     // Rule 1: General skin tone in uniform daylight
     const rule1 = r > 95 && g > 40 && b > 20 &&
-                  max - min > 15 && Math.abs(r - g) > 15 && r > g && r > b;
-    
+      max - min > 15 && Math.abs(r - g) > 15 && r > g && r > b;
+
     // Rule 2: Skin tone under flashlight or lateral illumination
     const rule2 = r > 220 && g > 210 && b > 170 &&
-                  Math.abs(r - g) <= 15 && r > b && g > b;
-    
+      Math.abs(r - g) <= 15 && r > b && g > b;
+
     // Rule 3: Darker skin tones
     const rule3 = r > 60 && g > 40 && b > 20 &&
-                  r > g && r > b && (r - g) > 10 && (r - b) > 10 &&
-                  max - min > 10 && max - min < 80;
+      r > g && r > b && (r - g) > 10 && (r - b) > 10 &&
+      max - min > 10 && max - min < 80;
 
     return rule1 || rule2 || rule3;
   };
 
   const captureScreenshot = async () => {
     if (!videoRef.current) return null;
-    
+
     try {
       const video = videoRef.current;
       const canvas = screenshotCanvasRef.current || document.createElement('canvas');
       if (!screenshotCanvasRef.current) {
         screenshotCanvasRef.current = canvas;
       }
-      
+
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 480;
-      
+
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0);
-      
+
       // Add timestamp watermark
       ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.fillRect(5, canvas.height - 25, 200, 20);
       ctx.fillStyle = '#000';
       ctx.font = '12px Arial';
       ctx.fillText(new Date().toLocaleString(), 10, canvas.height - 10);
-      
+
       // Convert to base64 data URL
       const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
       return dataUrl;
@@ -486,7 +486,7 @@ const AssessmentPage = () => {
         description: description,
         severity: severity
       };
-      
+
       // Include screenshot if provided
       if (screenshot) {
         payload.screenshot = screenshot;
@@ -495,7 +495,7 @@ const AssessmentPage = () => {
       const res = await api.post(`/api/interviewee/assessment/${assessmentId}/violation`, payload);
 
       setViolationCount(res.data.data.total_violations);
-      
+
       // Add to violations list for display
       const newViolation = {
         id: res.data.data.violation_id,
@@ -512,7 +512,7 @@ const AssessmentPage = () => {
         title: severity === 'critical' ? '⚠️ Critical Violation' : 'Warning',
         description: `Proctoring violation detected: ${description}`,
       };
-      
+
       if (type === 'multiple_faces') {
         toastConfig.title = '👥 Multiple Faces Detected';
       } else if (type === 'no_face') {
@@ -563,7 +563,7 @@ const AssessmentPage = () => {
     if (loading || submitted || !assessmentId || !assessmentData) return;
 
     const totalDuration = (assessmentData.duration_minutes || 60) * 60;
-    
+
     const syncTimer = setInterval(() => {
       const elapsed = totalDuration - timeRemaining;
       if (elapsed > 0) {
@@ -596,6 +596,24 @@ const AssessmentPage = () => {
       description: 'Your assessment has been automatically submitted.',
     });
     handleSubmit();
+  };
+
+
+  // Helper to extract function name from code
+  const getFunctionName = (code, lang) => {
+    if (!code) return 'solution';
+
+    let match;
+    if (lang === 'python') {
+      match = code.match(/def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/);
+    } else if (lang === 'javascript') {
+      match = code.match(/function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/) ||
+        code.match(/const\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(async\s*)?\(/);
+    } else if (lang === 'java') {
+      match = code.match(/(public|private|protected)\s+[\w<>]+\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/);
+    }
+
+    return match ? match[1] : 'solution';
   };
 
   // Code execution using Piston API
@@ -668,11 +686,22 @@ const AssessmentPage = () => {
         // Create test wrapper code based on language
         let testCode = code;
 
+        // Detect function name - prioritize what the candidate has actually written
+        const functionName = getFunctionName(code, language) ||
+          getFunctionName(assessmentData?.coding_problem?.starter_code?.[language], language) ||
+          'solution';
+
         // Add test execution based on language
         if (language === 'javascript') {
-          testCode += `\n\n// Test execution\nconsole.log(JSON.stringify(${tc.input.includes(',') ? `twoSum(${tc.input})` : `solution(${tc.input})`}));`;
+          testCode += `\n\n// Test execution\ntry {\n  console.log(JSON.stringify(${functionName}(${tc.input})));\n} catch(e) {\n  console.error(e.message);\n}`;
         } else if (language === 'python') {
-          testCode += `\n\n# Test execution\nprint(${tc.input.includes(',') ? `two_sum(${tc.input})` : `solution(${tc.input})`})`;
+          // Wrap in a way that ignores the main block if it exists (by not providing stdin)
+          // and specifically calling the detected function
+          testCode += `\n\n# Test execution\ntry:\n    print(${functionName}(${tc.input}))\nexcept Exception as e:\n    import sys\n    print(f"Error: {e}", file=sys.stderr)`;
+        } else if (language === 'java') {
+          // Java is trickier because it needs a full class wrapper usually, 
+          // but Piston handles single files if they have a main.
+          // This is a simplified version.
         }
 
         const response = await fetch(`${PISTON_API}/execute`, {
@@ -721,7 +750,7 @@ const AssessmentPage = () => {
     setTestsPassed(allPassed);
     setTestsPassedCount(passed);
     setTotalTestsCount(visibleTests.length);
-    
+
     const summary = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 Results: ${passed}/${visibleTests.length} tests passed\n${allPassed ? '🎉 All tests passed! Click "Submit Code" to save your solution.' : `⚠️ ${failed} test(s) failed`}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
 
     setOutput(results.join('\n') + summary);
@@ -730,7 +759,7 @@ const AssessmentPage = () => {
 
   const handleSubmitCode = async () => {
     if (!assessmentId || !assessmentData?.coding_problem) return;
-    
+
     setIsRunning(true);
     try {
       const totalTests = assessmentData.coding_problem.test_cases?.filter(tc => !tc.is_hidden).length || 0;
@@ -742,7 +771,7 @@ const AssessmentPage = () => {
         testsPassed: testsPassedCount,
         totalTests: totalTests || totalTestsCount
       });
-      
+
       setCodeSaved(true);
       toast({
         title: "Code Submitted!",
@@ -790,11 +819,16 @@ const AssessmentPage = () => {
     try {
       const scenario = assessmentData?.psychometric_scenarios?.find(s => s.id === scenarioId);
       if (scenario) {
+        // Use pre-defined option scores if available, otherwise fallback to index-based score
+        const score = (scenario.option_scores && scenario.option_scores[answerIndex]) !== undefined
+          ? scenario.option_scores[answerIndex]
+          : answerIndex + 1;
+
         await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
           type: 'psychometric',
           questionId: scenarioId,
           trait: scenario.trait,
-          score: answerIndex + 1, // Convert 0-9 index to 1-10 score
+          score: score,
         });
       }
     } catch (err) {
@@ -803,7 +837,7 @@ const AssessmentPage = () => {
   }, [assessmentId, assessmentData]);
 
   const handleNextSection = () => {
-    if (currentSection < 2) {
+    if (currentSection < sections.length - 1) {
       setCurrentSection(prev => prev + 1);
       setCurrentQuestion(0);
     }
@@ -887,8 +921,16 @@ const AssessmentPage = () => {
   };
 
   // Define sections and progress (needed by useMemo hooks)
-  const sections = ['MCQ', 'Coding', 'Psychometric'];
-  const progressPercentage = ((currentSection + 1) / 3) * 100;
+  const sections = useMemo(() => {
+    const s = ['MCQ'];
+    if (assessmentData?.coding_problem) {
+      s.push('Coding');
+    }
+    s.push('Psychometric');
+    return s;
+  }, [assessmentData]);
+
+  const progressPercentage = ((currentSection + 1) / sections.length) * 100;
 
   const renderMCQSection = useMemo(() => () => {
     const questions = assessmentData?.mcq_questions || [];
@@ -957,15 +999,15 @@ const AssessmentPage = () => {
             <ChevronLeft className="w-4 h-4" /> Previous
           </Button>
           {currentQuestion < questions.length - 1 ? (
-            <Button 
-              onClick={() => setCurrentQuestion(prev => prev + 1)} 
+            <Button
+              onClick={() => setCurrentQuestion(prev => prev + 1)}
               className="bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 gap-2"
             >
               Next Question <ChevronRight className="w-4 h-4" />
             </Button>
           ) : (
-            <Button 
-              onClick={handleNextSection} 
+            <Button
+              onClick={handleNextSection}
               className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
             >
               Next Section <ChevronRight className="w-4 h-4" />
@@ -1167,15 +1209,15 @@ const AssessmentPage = () => {
         </Card>
 
         <div className="flex justify-between gap-3 pt-4">
-          <Button 
-            variant="outline" 
-            onClick={handlePrevSection} 
+          <Button
+            variant="outline"
+            onClick={handlePrevSection}
             className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
           >
             <ChevronLeft className="w-4 h-4" /> Previous Section
           </Button>
-          <Button 
-            onClick={handleNextSection} 
+          <Button
+            onClick={handleNextSection}
             className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
           >
             Next Section <ChevronRight className="w-4 h-4" />
@@ -1238,7 +1280,7 @@ const AssessmentPage = () => {
                     >
                       <RadioGroupItem value={idx.toString()} id={`psy-${idx}`} className="border-slate-400 mt-1" />
                       <Label htmlFor={`psy-${idx}`} className="flex-1 cursor-pointer text-slate-200 text-base leading-relaxed">
-                        {option}
+                        {option.replace(/\(Score:\s*\d+\)/gi, '').trim()}
                       </Label>
                     </div>
                   ))}
@@ -1250,16 +1292,16 @@ const AssessmentPage = () => {
 
         <div className="flex justify-between gap-3 pt-4">
           {currentQuestion > 0 ? (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setCurrentQuestion(prev => prev - 1)}
               className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
             >
               <ChevronLeft className="w-4 h-4" /> Previous Scenario
             </Button>
           ) : (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handlePrevSection}
               className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
             >
@@ -1267,7 +1309,7 @@ const AssessmentPage = () => {
             </Button>
           )}
           {currentQuestion < scenarios.length - 1 ? (
-            <Button 
+            <Button
               onClick={() => setCurrentQuestion(prev => prev + 1)}
               className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 gap-2"
             >
@@ -1443,23 +1485,20 @@ const AssessmentPage = () => {
                 )}
 
                 {/* Timer - More prominent when time is low */}
-                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg font-mono font-bold transition-all duration-300 ${
-                  timeRemaining < 300 
-                    ? 'bg-red-600/30 border-2 border-red-500 shadow-lg shadow-red-500/50' 
-                    : timeRemaining < 600
+                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg font-mono font-bold transition-all duration-300 ${timeRemaining < 300
+                  ? 'bg-red-600/30 border-2 border-red-500 shadow-lg shadow-red-500/50'
+                  : timeRemaining < 600
                     ? 'bg-amber-600/30 border-2 border-amber-500'
                     : 'bg-slate-700/50 border border-slate-600'
-                }`}>
-                  <Timer className={`w-5 h-5 ${
-                    timeRemaining < 300 ? 'text-red-400 animate-pulse' :
-                    timeRemaining < 600 ? 'text-amber-400' :
-                    'text-slate-300'
-                  }`} />
-                  <span className={`text-lg ${
-                    timeRemaining < 300 ? 'text-red-400' :
-                    timeRemaining < 600 ? 'text-amber-400' :
-                    'text-slate-200'
                   }`}>
+                  <Timer className={`w-5 h-5 ${timeRemaining < 300 ? 'text-red-400 animate-pulse' :
+                    timeRemaining < 600 ? 'text-amber-400' :
+                      'text-slate-300'
+                    }`} />
+                  <span className={`text-lg ${timeRemaining < 300 ? 'text-red-400' :
+                    timeRemaining < 600 ? 'text-amber-400' :
+                      'text-slate-200'
+                    }`}>
                     {formatTime(timeRemaining)}
                   </span>
                 </div>
@@ -1474,27 +1513,25 @@ const AssessmentPage = () => {
             <div className="flex items-center gap-6 mb-5">
               {sections.map((section, idx) => (
                 <div key={section} className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold transition-all duration-300 ${
-                    idx < currentSection 
-                      ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white' :
-                      idx === currentSection 
-                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-2 ring-indigo-400' 
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold transition-all duration-300 ${idx < currentSection
+                    ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white' :
+                    idx === currentSection
+                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-2 ring-indigo-400'
                       : 'bg-slate-600 text-slate-300'
-                  }`}>
+                    }`}>
                     {idx < currentSection ? (
                       <CheckCircle className="w-5 h-5" />
                     ) : (
                       <span>{idx + 1}</span>
                     )}
                   </div>
-                  <span className={`text-sm font-medium transition-colors ${
-                    idx === currentSection ? 'text-white font-bold' : 
-                    idx < currentSection ? 'text-emerald-400' : 
-                    'text-slate-400'
-                  }`}>
+                  <span className={`text-sm font-medium transition-colors ${idx === currentSection ? 'text-white font-bold' :
+                    idx < currentSection ? 'text-emerald-400' :
+                      'text-slate-400'
+                    }`}>
                     {section}
                   </span>
-                  {idx < 2 && <div className="w-16 h-1 bg-gradient-to-r from-slate-600 to-transparent rounded-full" />}
+                  {idx < sections.length - 1 && <div className="w-16 h-1 bg-gradient-to-r from-slate-600 to-transparent rounded-full" />}
                 </div>
               ))}
             </div>
@@ -1509,9 +1546,9 @@ const AssessmentPage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Assessment Content */}
           <div className="lg:col-span-3">
-            {currentSection === 0 && renderMCQSection()}
-            {currentSection === 1 && renderCodingSection()}
-            {currentSection === 2 && renderPsychometricSection()}
+            {sections[currentSection] === 'MCQ' && renderMCQSection()}
+            {sections[currentSection] === 'Coding' && renderCodingSection()}
+            {sections[currentSection] === 'Psychometric' && renderPsychometricSection()}
             {submitted && renderSuccessScreen()}
           </div>
 
@@ -1598,28 +1635,26 @@ const AssessmentPage = () => {
                   <CardContent className="pt-3 max-h-60 overflow-y-auto">
                     <div className="space-y-2">
                       {violationsList.map((violation, idx) => (
-                        <div 
-                          key={violation.id || idx} 
-                          className={`p-2 rounded-lg border text-xs ${
-                            violation.severity === 'high' 
-                              ? 'bg-red-900/40 border-red-700 text-red-300' 
-                              : violation.severity === 'medium'
+                        <div
+                          key={violation.id || idx}
+                          className={`p-2 rounded-lg border text-xs ${violation.severity === 'high'
+                            ? 'bg-red-900/40 border-red-700 text-red-300'
+                            : violation.severity === 'medium'
                               ? 'bg-amber-900/40 border-amber-700 text-amber-300'
                               : 'bg-slate-800 border-slate-700 text-slate-300'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center justify-between mb-1">
-                            <Badge className={`text-[10px] px-1.5 py-0 ${
-                              violation.type === 'tab_switch' ? 'bg-blue-600' :
+                            <Badge className={`text-[10px] px-1.5 py-0 ${violation.type === 'tab_switch' ? 'bg-blue-600' :
                               violation.type === 'multiple_faces' ? 'bg-red-600' :
-                              violation.type === 'no_face' ? 'bg-amber-600' :
-                              violation.type === 'face_not_detected' ? 'bg-amber-600' :
-                              'bg-slate-600'
-                            }`}>
+                                violation.type === 'no_face' ? 'bg-amber-600' :
+                                  violation.type === 'face_not_detected' ? 'bg-amber-600' :
+                                    'bg-slate-600'
+                              }`}>
                               {violation.type === 'tab_switch' ? '🔀 Tab' :
-                               violation.type === 'multiple_faces' ? '👥 Multi-Face' :
-                               violation.type === 'no_face' || violation.type === 'face_not_detected' ? '😶 No Face' :
-                               violation.type}
+                                violation.type === 'multiple_faces' ? '👥 Multi-Face' :
+                                  violation.type === 'no_face' || violation.type === 'face_not_detected' ? '😶 No Face' :
+                                    violation.type}
                             </Badge>
                             <span className="text-[10px] text-slate-500">{violation.timestamp}</span>
                           </div>

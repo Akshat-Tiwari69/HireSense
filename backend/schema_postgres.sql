@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
     is_streaming BOOLEAN DEFAULT false,
     stream_started_at TIMESTAMP,
     stream_ended_at TIMESTAMP,
+    is_technical_role BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,

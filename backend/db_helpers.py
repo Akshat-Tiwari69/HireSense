@@ -265,7 +265,7 @@ def get_candidate_by_id(candidate_id):
         cursor.execute("""
             SELECT id, name, email, phone, resume_path, parsed_skills, years_experience, 
                    education, match_score, shortlist_status, created_at, updated_at
-            FROM candidates WHERE id = ?
+            FROM candidates WHERE id = %s
         """, (candidate_id,))
         
         row = cursor.fetchone()
@@ -274,6 +274,9 @@ def get_candidate_by_id(candidate_id):
         if not row:
             return None
         
+        # Store raw parsed_skills for AI question generation
+        raw_skills = row[5] if row[5] else ''
+        
         # Convert to dictionary and parse JSON skills
         candidate = {
             'id': row[0],
@@ -281,7 +284,8 @@ def get_candidate_by_id(candidate_id):
             'email': row[2],
             'phone': row[3],
             'resume_path': row[4],
-            'skills': json.loads(row[5]) if row[5] else [],
+            'skills': json.loads(row[5]) if row[5] and row[5].startswith('[') else [],
+            'parsed_skills': raw_skills,  # Keep raw string for AI question generation
             'years_experience': row[6],
             'education': row[7],
             'match_score': row[8],
@@ -311,17 +315,28 @@ def get_all_candidates():
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, name, email, phone, resume_path, parsed_skills, years_experience, 
-                   education, match_score, shortlist_status, pros, cons, status, created_at, updated_at
-            FROM candidates ORDER BY created_at DESC
+            SELECT 
+                c.id, c.name, c.email, c.phone, c.resume_path, c.parsed_skills, 
+                c.years_experience, c.education, 
+                COALESCE(
+                    (SELECT a.overall_score FROM assessments a WHERE a.candidate_id = c.id ORDER BY a.created_at DESC LIMIT 1),
+                    c.match_score
+                ) as match_score,
+                c.shortlist_status, 
+                c.pros, c.cons, c.status, c.created_at, c.updated_at,
+                (SELECT a.overall_score FROM assessments a WHERE a.candidate_id = c.id ORDER BY a.created_at DESC LIMIT 1) as assessment_score,
+                (SELECT a.decision FROM assessments a WHERE a.candidate_id = c.id ORDER BY a.created_at DESC LIMIT 1) as assessment_decision
+            FROM candidates c
+            ORDER BY c.created_at DESC
         """)
         
         rows = cursor.fetchall()
         conn.close()
         
-        # Use list comprehension for better performance
-        candidates = [
-            {
+        # Use simple indices for absolute certainty
+        candidates = []
+        for row in rows:
+            candidates.append({
                 'id': row[0],
                 'name': row[1],
                 'email': row[2],
@@ -336,10 +351,10 @@ def get_all_candidates():
                 'cons': json.loads(row[11]) if row[11] else [],
                 'status': row[12],
                 'created_at': row[13],
-                'updated_at': row[14]
-            }
-            for row in rows
-        ]
+                'updated_at': row[14],
+                'assessment_score': row[15],
+                'assessment_decision': row[16]
+            })
         
         return candidates
         
@@ -966,7 +981,7 @@ def get_psychometric_scores(assessment_id):
 #                    ASSESSMENT SCHEDULING FUNCTIONS
 # ============================================================================
 
-def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
+def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time, is_technical_role=True):
     """
     Create a new scheduled assessment session.
     
@@ -974,6 +989,7 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
         candidate_id (int): ID of the candidate
         interviewer_id (int): ID of the interviewer (user)
         scheduled_time (str): ISO format datetime string (e.g., '2026-01-25T10:30:00')
+        is_technical_role (bool): Whether this is a technical role (includes coding problems). Default True.
     
     Returns:
         int: Scheduled assessment ID
@@ -981,7 +997,7 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
     Raises:
         DatabaseError: If creation fails
     """
-    print(f"[DB] create_scheduled_assessment called: candidate={candidate_id}, interviewer={interviewer_id}, time={scheduled_time}", flush=True)
+    print(f"[DB] create_scheduled_assessment called: candidate={candidate_id}, interviewer={interviewer_id}, time={scheduled_time}, is_technical={is_technical_role}", flush=True)
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -989,9 +1005,9 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
         
         # PostgreSQL INSERT
         cursor.execute(
-            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
-               VALUES (%s, %s, %s, 'scheduled') RETURNING id""",
-            (candidate_id, interviewer_id, scheduled_time)
+            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, is_technical_role)
+               VALUES (%s, %s, %s, 'scheduled', %s) RETURNING id""",
+            (candidate_id, interviewer_id, scheduled_time, is_technical_role)
         )
         
         result = cursor.fetchone()
@@ -1490,7 +1506,8 @@ def get_assessment_by_token(token):
         cursor.execute(
             """SELECT sa.id, sa.candidate_id, sa.interviewer_id, sa.scheduled_time, 
                       sa.status, sa.assessment_id, sa.started_at,
-                      c.name as candidate_name, c.email as candidate_email
+                      c.name as candidate_name, c.email as candidate_email,
+                      sa.is_technical_role
                FROM scheduled_assessments sa
                JOIN candidates c ON sa.candidate_id = c.id
                WHERE sa.access_token = %s""",
@@ -1511,7 +1528,8 @@ def get_assessment_by_token(token):
                 'started_at': row[6],
                 'proctoring_enabled': True,  # Default to True
                 'candidate_name': row[7],
-                'candidate_email': row[8]
+                'candidate_email': row[8],
+                'is_technical_role': row[9] if row[9] is not None else True  # Default to True if NULL
             }
         return None
     

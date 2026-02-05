@@ -23,8 +23,12 @@ from db_helpers import (
     update_scheduled_assessment_status,
     check_assessment_time_valid,
     generate_assessment_token,
-    set_assessment_token
+    set_assessment_token,
+    create_assessment,
+    save_assessment_questions
 )
+from ai_question_generator import get_ai_question_generator
+from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
 from email_service import (
     send_rejection_email,
     send_assessment_invitation,
@@ -103,6 +107,9 @@ def get_candidates():
         
         # Parse pros and cons from database text
         for candidate in candidates:
+            if candidate.get('assessment_score') is not None:
+                logger.info(f"[CANDIDATE] {candidate['name']} (ID: {candidate['id']}) has assessment score: {candidate['assessment_score']}")
+            
             if candidate.get('pros'):
                 candidate['pros'] = candidate['pros'].split('\n') if isinstance(candidate['pros'], str) else []
             else:
@@ -123,6 +130,10 @@ def get_candidates():
         
         logger.info(f"[OK] Returning {len(candidates)} candidates to dashboard")
         logger.info("="*80)
+        
+        for c in candidates:
+            if c.get('status', '').lower() == 'completed':
+                logger.info(f"DEBUG: Candidate {c['name']} (score={c['assessment_score']}, decision={c['assessment_decision']})")
         
         return jsonify({
             'status': 'success',
@@ -321,11 +332,12 @@ def schedule_assessment(candidate_id):
         
         scheduled_time_input = data['scheduled_time']
         additional_info = data.get('additional_info', None)
+        is_technical_role = data.get('is_technical_role', True)  # Default to technical role
         
         # Store the time as-is (local time) - no timezone conversion
         # This ensures the time displayed matches what the user entered
         scheduled_time = scheduled_time_input
-        print(f"[SCHEDULE] Using time as entered: {scheduled_time}", flush=True)
+        print(f"[SCHEDULE] Using time as entered: {scheduled_time}, is_technical_role: {is_technical_role}", flush=True)
         
         # Get candidate info
         print(f"[SCHEDULE] Getting candidate info...", flush=True)
@@ -348,7 +360,8 @@ def schedule_assessment(candidate_id):
         scheduled_assessment_id = create_scheduled_assessment(
             candidate_id=candidate_id,
             interviewer_id=interviewer_id,
-            scheduled_time=scheduled_time
+            scheduled_time=scheduled_time,
+            is_technical_role=is_technical_role
         )
         print(f"[SCHEDULE] Assessment ID: {scheduled_assessment_id}", flush=True)
         
@@ -356,6 +369,88 @@ def schedule_assessment(candidate_id):
         access_token = generate_assessment_token()
         set_assessment_token(scheduled_assessment_id, access_token)
         print(f"[SCHEDULE] Access token generated", flush=True)
+        
+        # Create assessment record and generate questions NOW (at schedule time)
+        print(f"[SCHEDULE] Creating assessment record and generating questions...", flush=True)
+        try:
+            # Create assessment record
+            assessment_id = create_assessment(candidate_id)
+            print(f"[SCHEDULE] Created assessment record: {assessment_id}", flush=True)
+            
+            # Link assessment to scheduled assessment
+            update_scheduled_assessment_status(
+                scheduled_assessment_id=scheduled_assessment_id,
+                status='scheduled',
+                assessment_id=assessment_id
+            )
+            
+            # Get candidate skills for AI-generated questions
+            candidate_skills = []
+            if candidate.get('parsed_skills'):
+                raw_skills = candidate['parsed_skills']
+                if isinstance(raw_skills, str):
+                    if raw_skills.strip().startswith('['):
+                        try:
+                            import json
+                            candidate_skills = json.loads(raw_skills)
+                        except:
+                            candidate_skills = [s.strip() for s in raw_skills.replace('\n', ',').split(',') if s.strip()]
+                    else:
+                        candidate_skills = [s.strip() for s in raw_skills.replace('\n', ',').split(',') if s.strip()]
+                elif isinstance(raw_skills, list):
+                    candidate_skills = raw_skills
+            
+            print(f"[SCHEDULE] Candidate skills for question generation: {candidate_skills[:10]}", flush=True)
+            
+            # Initialize with fallbacks first
+            mcq_questions = get_mcq_questions(count=10)
+            coding_problem = get_coding_problem(difficulty="easy") if is_technical_role else None
+            psychometric_scenarios = get_psychometric_scenarios(count=3)
+            
+            # Try to upgrade to AI-generated questions
+            try:
+                ai_generator = get_ai_question_generator()
+                print(f"[SCHEDULE] AI Generator initialized, client exists: {ai_generator.client is not None}", flush=True)
+                
+                if ai_generator.client and candidate_skills:
+                    # 1. AI MCQ Questions
+                    try:
+                        print(f"[SCHEDULE] Generating AI MCQ questions for skills: {candidate_skills[:5]}", flush=True)
+                        mcq_questions = ai_generator.generate_mcq_questions(candidate_skills, count=10, difficulty="mixed")
+                        print(f"[SCHEDULE] Successfully generated {len(mcq_questions)} AI MCQs", flush=True)
+                    except Exception as e:
+                        print(f"[SCHEDULE] AI MCQ generation failed, using static fallback: {str(e)}", flush=True)
+                    
+                    # 2. AI Coding Problem (only for technical roles)
+                    if is_technical_role:
+                        try:
+                            print(f"[SCHEDULE] Generating AI Coding problem", flush=True)
+                            coding_problem = ai_generator.generate_coding_problem(candidate_skills, difficulty="medium")
+                            print(f"[SCHEDULE] Successfully generated AI Coding problem: {coding_problem.get('title')}", flush=True)
+                        except Exception as e:
+                            print(f"[SCHEDULE] AI Coding generation failed, using static fallback: {str(e)}", flush=True)
+                    
+                    # 3. AI Psychometric Scenarios
+                    try:
+                        print(f"[SCHEDULE] Generating AI Psychometric scenarios", flush=True)
+                        psychometric_scenarios = ai_generator.generate_psychometric_scenarios(count=8)
+                        print(f"[SCHEDULE] Successfully generated {len(psychometric_scenarios)} AI Scenarios", flush=True)
+                    except Exception as e:
+                        print(f"[SCHEDULE] AI Psychometric generation failed, using static fallback: {str(e)}", flush=True)
+            except Exception as e:
+                print(f"[SCHEDULE] ERROR initializing AI Generator: {str(e)}", flush=True)
+            
+            # Store questions for this assessment
+            save_assessment_questions(assessment_id, {
+                'mcq_questions': mcq_questions,
+                'coding_problem': coding_problem,
+                'psychometric_scenarios': psychometric_scenarios
+            })
+            print(f"[SCHEDULE] Questions saved for assessment {assessment_id}", flush=True)
+            
+        except Exception as e:
+            print(f"[SCHEDULE] WARNING: Failed to pre-generate questions: {str(e)}", flush=True)
+            # Continue anyway - questions will be generated when candidate starts
         
         # Generate assessment link with token
         # Priority: 1) FRONTEND_URL env var, 2) Origin header from request, 3) Referer header, 4) localhost fallback
