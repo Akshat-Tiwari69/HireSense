@@ -212,14 +212,16 @@ def delete_user(user_id):
 @jwt_required()
 @require_admin_role
 def get_all_candidates():
-    """Get all candidates with full details using optimized pooled connection"""
+    """Get all candidates with full details (filtered by sector access)"""
+    from flask_jwt_extended import get_jwt
+    
     conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, name, email, phone, resume_path, match_score, 
-                   shortlist_status, pros, cons, created_at, status
+                   shortlist_status, pros, cons, created_at, status, sector, skills
             FROM candidates ORDER BY id DESC
         """)
         rows = cursor.fetchall()
@@ -235,8 +237,19 @@ def get_all_candidates():
             'pros': row[7],
             'cons': row[8],
             'created_at': row[9],
-            'status': row[10] or row[6] or 'Applied'
+            'status': row[10] or row[6] or 'Applied',
+            'sector': row[11],
+            'skills': row[12]
         } for row in rows]
+        
+        # Filter by sector access
+        claims = get_jwt()
+        user_role = claims.get('role')
+        user_sector = claims.get('sector')
+        
+        # Sector admins and recruiters can only see candidates in their sector
+        if user_role in ['sector_admin', 'recruiter']:
+            candidates = [c for c in candidates if c.get('sector') == user_sector]
         
         return jsonify({'status': 'success', 'data': candidates}), 200
     except Exception as e:

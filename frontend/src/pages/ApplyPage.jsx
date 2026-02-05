@@ -19,6 +19,10 @@ const ApplyPage = () => {
   const [errors, setErrors] = useState({});
   const [uploadError, setUploadError] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [skills, setSkills] = useState('');
+  const [sector, setSector] = useState('');
+
+  const sectors = ['engineering', 'sales', 'marketing', 'hr', 'finance', 'operations'];
 
   const validateForm = () => {
     const newErrors = {};
@@ -80,6 +84,8 @@ const ApplyPage = () => {
     try {
       const form = new FormData();
       form.append('file', file);
+      if (skills) form.append('skills', skills);
+      if (sector) form.append('sector', sector);
 
       const res = await api.post('/api/resume/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -237,6 +243,43 @@ const ApplyPage = () => {
                   </p>
                 </div>
               )}
+
+              {/* Skills Input */}
+              <div className="space-y-2">
+                <Label htmlFor="skills">Your Skills (Optional)</Label>
+                <Input
+                  id="skills"
+                  type="text"
+                  placeholder="e.g., Python, React, AWS, Project Management"
+                  value={skills}
+                  onChange={(e) => setSkills(e.target.value)}
+                  className="w-full"
+                />
+                <p className="text-xs text-slate-500">
+                  Enter comma-separated skills to help us match you better
+                </p>
+              </div>
+
+              {/* Sector Selection */}
+              <div className="space-y-2">
+                <Label htmlFor="sector">Preferred Sector (Optional)</Label>
+                <select
+                  id="sector"
+                  value={sector}
+                  onChange={(e) => setSector(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Select a sector</option>
+                  {sectors.map((s) => (
+                    <option key={s} value={s}>
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500">
+                  Select your preferred department or leave blank for any
+                </p>
+              </div>
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-blue-800">

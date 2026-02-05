@@ -80,7 +80,16 @@ const AdminDashboardPage = () => {
   const [tableData, setTableData] = useState({ data: [], columns: [] });
   const [emailLogs, setEmailLogs] = useState([]);
   const [jobModalOpen, setJobModalOpen] = useState(false);
-  const [jobForm, setJobForm] = useState({ title: '', description: '', required_skills: '', min_experience: 0, department: '', location: '' });
+  const [jobForm, setJobForm] = useState({ 
+    title: '', 
+    description: '', 
+    required_skills: '', 
+    preferred_skills: '',
+    min_experience: 0, 
+    department: '', 
+    location: '',
+    sector: '' 
+  });
   const [analytics, setAnalytics] = useState({ candidates: {}, assessments: {} });
   const [loading, setLoading] = useState(true);
 
@@ -1265,14 +1274,41 @@ const AdminDashboardPage = () => {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-slate-700">Required Skills</Label>
-                <Input
-                  value={jobForm.required_skills}
-                  onChange={(e) => setJobForm({ ...jobForm, required_skills: e.target.value })}
-                  className="bg-white border-slate-300 text-slate-900"
-                  placeholder="e.g., React, Node.js"
-                />
+                <Label className="text-slate-700">Sector</Label>
+                <select
+                  value={jobForm.sector}
+                  onChange={(e) => setJobForm({ ...jobForm, sector: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
+                >
+                  <option value="">Select sector</option>
+                  <option value="engineering">Engineering</option>
+                  <option value="sales">Sales</option>
+                  <option value="marketing">Marketing</option>
+                  <option value="hr">HR</option>
+                  <option value="finance">Finance</option>
+                  <option value="operations">Operations</option>
+                </select>
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-700">Required Skills *</Label>
+              <Input
+                value={jobForm.required_skills}
+                onChange={(e) => setJobForm({ ...jobForm, required_skills: e.target.value })}
+                className="bg-white border-slate-300 text-slate-900"
+                placeholder="e.g., React, Node.js, TypeScript"
+              />
+              <p className="text-xs text-slate-500">Comma-separated list of must-have skills</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-700">Preferred Skills</Label>
+              <Input
+                value={jobForm.preferred_skills}
+                onChange={(e) => setJobForm({ ...jobForm, preferred_skills: e.target.value })}
+                className="bg-white border-slate-300 text-slate-900"
+                placeholder="e.g., Docker, AWS, GraphQL"
+              />
+              <p className="text-xs text-slate-500">Nice-to-have skills (optional)</p>
             </div>
           </div>
           <DialogFooter>
