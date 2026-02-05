@@ -830,3 +830,40 @@ def get_analytics():
     finally:
         if conn:
             conn.close()
+
+
+# ============================================================================
+#                           AUDIT LOGS
+# ============================================================================
+
+@admin_bp.route('/audit-logs', methods=['GET'])
+@jwt_required()
+@require_admin_role
+def get_audit_logs():
+    """
+    Get audit logs with optional filtering
+    Query parameters: limit, user_id, action, entity_type
+    """
+    try:
+        from audit_logger import AuditLogger
+        
+        limit = int(request.args.get('limit', 100))
+        user_id = request.args.get('user_id', type=int)
+        action = request.args.get('action')
+        entity_type = request.args.get('entity_type')
+        
+        logs = AuditLogger.get_audit_logs(
+            limit=limit,
+            user_id=user_id,
+            action=action,
+            entity_type=entity_type
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'data': logs,
+            'count': len(logs)
+        })
+    except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to fetch audit logs: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500

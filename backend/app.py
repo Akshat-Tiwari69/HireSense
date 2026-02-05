@@ -46,6 +46,8 @@ from interviewer_routes import interviewer_bp
 from interviewee_routes import interviewee_bp
 from admin_routes import admin_bp
 from proctor_routes import proctor_bp
+from sector_routes import sector_bp
+from enhanced_job_routes import enhanced_job_bp
 import time
 
 # Initialize Flask app
@@ -137,6 +139,12 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
 # Register proctor routes blueprint
 app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
+
+# Register sector management routes blueprint
+app.register_blueprint(sector_bp, url_prefix='/api')
+
+# Register enhanced job posting routes blueprint
+app.register_blueprint(enhanced_job_bp, url_prefix='/api')
 
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
