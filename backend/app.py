@@ -1,12 +1,34 @@
-from flask import Flask, jsonify, request
+# IMPORTANT: eventlet monkey_patch MUST be first, before any other imports
+import eventlet
+eventlet.monkey_patch()
+
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+import socketio
 import os
 import uuid
 import re
 import logging
+from pathlib import Path
+
+# Load environment variables
+# Priority: local.env (for local development) > .env (for production)
+
+# Check if local.env exists and load it first
+local_env_path = Path(__file__).parent / 'local.env'
+if local_env_path.exists():
+    load_dotenv(local_env_path)
+    print(f"[CONFIG] Loaded local.env for local development")
+else:
+    # Fall back to .env
+    load_dotenv()
+    print(f"[CONFIG] Loaded .env")
+# Trigger reload for updated SMTP credentials
+from request_logger import init_request_logging
+from security_headers import add_security_headers
 from datetime import timedelta, datetime
 from resume_parser import parse_resume
 from resume_analyzer import analyze_resume
@@ -16,7 +38,7 @@ from db_helpers import (
     update_assessment_scores, get_assessment_by_id,
     get_mcq_score, get_coding_score, get_psychometric_scores,
     get_user_by_email, get_all_candidates, update_candidate_shortlist,
-    update_candidate_status
+    update_candidate_status, get_candidate_by_email
 )
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
 from auth import auth_bp
@@ -37,7 +59,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.info("="*80)
-logger.info("🚀 CYGNUSA Elite-Hire Backend Starting...")
+logger.info("CYGNUSA Elite-Hire Backend Starting...")
 logger.info("="*80)
 
 # Configure JWT
@@ -48,7 +70,7 @@ jwt = JWTManager(app)
 # JWT error handlers
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
-    logger.warning(f"⚠️ JWT token expired")
+    logger.warning(f"[WARNING] JWT token expired")
     return jsonify({
         'status': 'error',
         'message': 'Token has expired. Please login again.'
@@ -56,7 +78,7 @@ def expired_token_callback(jwt_header, jwt_payload):
 
 @jwt.invalid_token_loader
 def invalid_token_callback(error):
-    logger.error(f"❌ Invalid JWT token: {error}")
+    logger.error(f"[ERROR] Invalid JWT token: {error}")
     return jsonify({
         'status': 'error',
         'message': 'Invalid token. Please login again.'
@@ -70,8 +92,36 @@ def unauthorized_callback(error):
         'message': 'Authorization token is missing. Please login.'
     }), 401
 
-# Enable CORS so frontend can call our APIs
-CORS(app)
+# Configure CORS properly for frontend
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:3000",
+            "http://10.39.35.52:5173",
+            "http://10.39.35.52:5174",
+            "http://10.39.150.52:5173",
+            "http://10.39.150.52:5174"
+        ],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
+
+# Initialize Socket.IO for live proctoring
+from websocket_server import get_socketio_app
+sio = get_socketio_app()
+# Wrap Flask app with Socket.IO
+app_with_socketio = socketio.WSGIApp(sio, app)
+logger.info("[PROCTORING] Socket.IO initialized for live video streaming")
+
+# Initialize request logging middleware
+app = init_request_logging(app)
+
+# Add security headers
+app = add_security_headers(app)
 
 # Register authentication blueprint
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -91,7 +141,7 @@ app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-logger.info(f"📁 Upload folder configured: {UPLOAD_FOLDER}")
+logger.info(f"[UPLOAD] Folder configured: {UPLOAD_FOLDER}")
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -138,6 +188,26 @@ def name_from_email(email):
     return " ".join([p.capitalize() for p in parts])
 
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint - API information"""
+    return jsonify({
+        "status": "success",
+        "service": "Cygnusa Elite-Hire API",
+        "version": "1.0.0",
+        "health": "/api/health"
+    }), 200
+
+
+@app.route('/uploads/<path:filename>')
+def serve_uploaded_file(filename):
+    """Serve uploaded files (resumes, violation screenshots, etc.)"""
+    try:
+        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    except FileNotFoundError:
+        return jsonify({"status": "error", "message": "File not found"}), 404
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint to verify API is running"""
@@ -157,23 +227,23 @@ def upload_resume():
         JSON with status, file_path, and message
     """
     logger.info("="*80)
-    logger.info("📤 RESUME UPLOAD REQUEST RECEIVED")
+    logger.info("[UPLOAD] RESUME UPLOAD REQUEST RECEIVED")
     logger.info("="*80)
     
     # Check if file was uploaded
     if 'file' not in request.files:
-        logger.error("❌ No file in request")
+        logger.error("[ERROR] No file in request")
         return jsonify({
             "status": "error",
             "message": "No file uploaded"
         }), 400
     
     file = request.files['file']
-    logger.info(f"📄 File detected: {file.filename}")
+    logger.info(f"[FILE] File detected: {file.filename}")
     
     # Check if file has a filename (no file selected)
     if file.filename == '':
-        logger.error("❌ Empty filename")
+        logger.error("[ERROR] Empty filename")
         return jsonify({
             "status": "error",
             "message": "No file selected"
@@ -181,41 +251,41 @@ def upload_resume():
     
     # Check file type
     if not allowed_file(file.filename):
-        logger.error(f"❌ Invalid file type: {file.filename}")
+        logger.error(f"[ERROR] Invalid file type: {file.filename}")
         return jsonify({
             "status": "error",
             "message": "Invalid file type. Only PDF and DOCX allowed"
         }), 400
     
-    logger.info(f"✅ File type validated: {file.filename}")
+    logger.info(f"[OK] File type validated: {file.filename}")
     
     # Generate unique filename to prevent conflicts
     original_filename = secure_filename(file.filename)
     # Ensure secure_filename produced a valid filename with an extension
     if not original_filename or "." not in original_filename:
-        logger.error(f"❌ Invalid filename after sanitization: {original_filename}")
+        logger.error(f"[ERROR] Invalid filename after sanitization: {original_filename}")
         return jsonify({
             "status": "error",
             "message": "Invalid filename after sanitization"
         }), 400
     unique_filename = f"{uuid.uuid4()}_{original_filename}"
     
-    logger.info(f"🔐 Generated unique filename: {unique_filename}")
+    logger.info(f"[SECURE] Generated unique filename: {unique_filename}")
     
     # Save file to uploads folder
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
     try:
-        logger.info(f"💾 Saving file to: {filepath}")
+        logger.info(f"[SAVE] Saving file to: {filepath}")
         file.save(filepath)
-        logger.info(f"✅ File saved successfully")
+        logger.info(f"[OK] File saved successfully")
     except OSError as e:
-        logger.error(f"❌ OSError saving file: {e}")
+        logger.error(f"[ERROR] OSError saving file: {e}")
         return jsonify({
             "status": "error",
             "message": "Failed to save uploaded file. Please try again later."
         }), 500
     except Exception as e:
-        logger.exception(f"❌ Unexpected error saving file: {e}")
+        logger.exception(f"[ERROR] Unexpected error saving file: {e}")
         return jsonify({
             "status": "error",
             "message": "An unexpected error occurred while saving the file."
@@ -223,7 +293,7 @@ def upload_resume():
     
     # Parse the resume to extract data
     try:
-        logger.info("🔍 Starting resume parsing...")
+        logger.info("[PARSE] Starting resume parsing...")
         # Optional: Define job description for matching (can be passed from frontend or config)
         job_description = {
             'skills': ['Python', 'Java', 'JavaScript', 'React', 'AWS'],  # Example JD
@@ -232,33 +302,33 @@ def upload_resume():
         
         # First try basic parsing as fallback data
         parsed_data = parse_resume(filepath, job_description)
-        logger.info(f"✅ Basic parsing completed - Skills: {len(parsed_data.get('skills', []))}, Experience: {parsed_data.get('experience', 0)} years")
+        logger.info(f"[OK] Basic parsing completed - Skills: {len(parsed_data.get('skills', []))}, Experience: {parsed_data.get('experience', 0)} years")
         
         # Extract resume text for AI analysis
-        logger.info("📖 Extracting resume text for AI analysis...")
+        logger.info("[AI] Extracting resume text for AI analysis...")
         with open(filepath, 'rb') as f:
             # Get raw text (simplified - you may want to use the same extraction as in resume_parser)
             if filepath.endswith('.pdf'):
                 from PyPDF2 import PdfReader
                 pdf = PdfReader(f)
                 resume_text = " ".join([page.extract_text() for page in pdf.pages])
-                logger.info(f"✅ Extracted {len(resume_text)} characters from PDF")
+                logger.info(f"[OK] Extracted {len(resume_text)} characters from PDF")
             else:
                 from docx import Document
                 doc = Document(f)
                 resume_text = " ".join([para.text for para in doc.paragraphs])
-                logger.info(f"✅ Extracted {len(resume_text)} characters from DOCX")
+                logger.info(f"[OK] Extracted {len(resume_text)} characters from DOCX")
         
         # Try AI extraction for better accuracy
         ai_extracted_data = None
         try:
             from resume_analyzer import ResumeAnalyzer
-            logger.info("🤖 Using AI to extract contact info and resume data...")
+            logger.info("[AI] Using AI to extract contact info and resume data...")
             analyzer = ResumeAnalyzer()
             ai_extracted_data = analyzer.extract_resume_data(resume_text)
             
             if ai_extracted_data:
-                logger.info(f"✅ AI extraction successful")
+                logger.info(f"[OK] AI extraction successful")
                 logger.info(f"   Name: {ai_extracted_data.get('name')}")
                 logger.info(f"   Email: {ai_extracted_data.get('email')}")
                 logger.info(f"   Phone: {ai_extracted_data.get('phone')}")
@@ -287,15 +357,15 @@ def upload_resume():
                     job_description.get('skills', []),
                     job_description.get('min_experience', 0)
                 )
-                logger.info(f"📊 Recalculated match score: {parsed_data['match_score']}%")
+                logger.info(f"[SCORE] Recalculated match score: {parsed_data['match_score']}%")
         except Exception as ai_extract_error:
-            logger.warning(f"⚠️ AI extraction failed: {ai_extract_error}. Using basic parsing.")
+            logger.warning(f"[WARNING] AI extraction failed: {ai_extract_error}. Using basic parsing.")
         
         # Generate AI-powered pros/cons analysis
         ai_analysis = None
         try:
-            logger.info("🤖 Sending resume to AI for pros/cons analysis...")
-            logger.info(f"📊 Resume text length: {len(resume_text)} chars, Parsed skills: {len(parsed_data.get('skills', []))}")
+            logger.info("[AI] Sending resume to AI for pros/cons analysis...")
+            logger.info(f"[INFO] Resume text length: {len(resume_text)} chars, Parsed skills: {len(parsed_data.get('skills', []))}")
             
             ai_analysis = analyze_resume(
                 resume_text=resume_text,
@@ -313,10 +383,10 @@ def upload_resume():
             if 'enhanced_match_score' in ai_analysis:
                 parsed_data['match_score'] = ai_analysis['enhanced_match_score']
                 parsed_data['original_match_score'] = parsed_data.get('match_score', 0)
-                logger.info(f"📈 Match score updated: {parsed_data['match_score']}")
+                logger.info(f"[SCORE] Match score updated: {parsed_data['match_score']}")
             
         except Exception as ai_error:
-            logger.warning(f"⚠️ AI analysis failed: {ai_error}. Proceeding with basic analysis.")
+            logger.warning(f"[WARNING] AI analysis failed: {ai_error}. Proceeding with basic analysis.")
             # Continue without AI - we'll still have parsed data
             ai_analysis = {
                 "pros": ["Resume uploaded successfully"],
@@ -327,7 +397,7 @@ def upload_resume():
             }
     
     except Exception as e:
-        logger.exception(f"❌ Error parsing resume: {e}")
+        logger.exception(f"[ERROR] Error parsing resume: {e}")
         parsed_data = {
             "error": "Failed to parse resume",
             "skills": [],
@@ -346,22 +416,48 @@ def upload_resume():
     name = manual_name or parsed_data.get('name')
     email = manual_email or parsed_data.get('email')
     phone = manual_phone or parsed_data.get('phone') or ""
+    
+    # Debug logging for name/email detection with source identification
+    logger.info(f"[DEBUG] Email detection - manual: '{manual_email}', parsed: '{parsed_data.get('email')}', final: '{email}'")
+    logger.info(f"[DEBUG] Name detection - manual: '{manual_name}', AI/parsed: '{parsed_data.get('name')}', final: '{name}'")
 
     if not email or not is_valid_email(email):
-        logger.error("❌ Unable to detect a valid email from resume or overrides")
+        logger.error(f"[ERROR] Unable to detect a valid email from resume or overrides")
+        logger.error(f"[ERROR] Failed email value: '{email}', is_valid: {is_valid_email(email) if email else 'N/A'}")
+        logger.error(f"[ERROR] Parsed data keys: {list(parsed_data.keys())}")
         return jsonify({
             "status": "error",
-            "message": "Could not detect a valid email in the resume. Please add an email override."
+            "message": "Could not detect a valid email in the resume. Please add an email field or ensure your resume contains a valid email address."
         }), 400
 
     if not name:
-        name = name_from_email(email) or "Candidate"
+        derived_name = name_from_email(email)
+        name = derived_name or "Candidate"
+        logger.info(f"[DEBUG] Name was empty, derived from email: '{derived_name}' -> final: '{name}'")
 
-    logger.info(f"👤 Candidate Info - Name: {name}, Email: {email}, Phone: {phone or 'N/A'}")
+    logger.info(f"[CANDIDATE] Candidate Info - Name: {name}, Email: {email}, Phone: {phone or 'N/A'}")
+
+    # Check if candidate already exists with this email
+    try:
+        existing_candidate = get_candidate_by_email(email)
+        if existing_candidate:
+            logger.info(f"[DUPLICATE] Candidate with email {email} already registered (ID: {existing_candidate['id']})")
+            return jsonify({
+                "status": "error",
+                "message": f"You have already registered with this email address ({email}). Please check your email for assessment instructions or contact the recruiter if you need assistance.",
+                "existing_candidate": {
+                    "name": existing_candidate['name'],
+                    "status": existing_candidate['status'],
+                    "registered_at": str(existing_candidate['created_at']) if existing_candidate['created_at'] else None
+                }
+            }), 409  # 409 Conflict
+    except Exception as e:
+        logger.warning(f"[WARNING] Could not check for existing candidate: {e}")
+        # Continue anyway - better to potentially create a duplicate than block registration
 
     # Save candidate to database with AI insights
     try:
-        logger.info("💾 Saving candidate to database...")
+        logger.info("[DB] Saving candidate to database...")
         # Prepare pros and cons for database
         pros_text = None
         cons_text = None
@@ -394,9 +490,9 @@ def upload_resume():
             cons=cons_text,
             status=status
         )
-        logger.info(f"✅ Candidate saved with ID: {candidate_id}")
+        logger.info(f"[OK] Candidate saved with ID: {candidate_id}")
     except Exception as e:
-        logger.exception(f"❌ Error saving candidate to database: {e}")
+        logger.exception(f"[ERROR] Error saving candidate to database: {e}")
         # Continue anyway - parsing was successful
         candidate_id = None
     
@@ -404,7 +500,7 @@ def upload_resume():
     # Use the configured upload folder name for consistency
     relative_path = os.path.join(os.path.basename(app.config['UPLOAD_FOLDER']), unique_filename)
     
-    logger.info("📦 Preparing response data...")
+    logger.info("[RESPONSE] Preparing response data...")
     # Prepare response data
     response_data = {
         "candidate_id": candidate_id,
@@ -433,7 +529,7 @@ def upload_resume():
             response_data["ai_analysis"]["enhanced_match_score"] = ai_analysis['enhanced_match_score']
     
     logger.info("="*80)
-    logger.info(f"✅ RESUME UPLOAD COMPLETED SUCCESSFULLY")
+    logger.info(f"[SUCCESS] RESUME UPLOAD COMPLETED SUCCESSFULLY")
     logger.info(f"   Candidate ID: {candidate_id}")
     logger.info(f"   Name: {name}")
     logger.info(f"   Email: {email}")
@@ -445,12 +541,6 @@ def upload_resume():
         "message": "Resume uploaded and analyzed successfully",
         "data": response_data
     }), 200
-    
-    return jsonify({
-        "status": "success",
-        "message": "Resume uploaded and analyzed successfully" if ai_analysis else "Resume uploaded and parsed successfully",
-        "data": response_data
-    }), 201
 
 
 @app.route('/api/assessment/start', methods=['POST'])
@@ -892,4 +982,7 @@ def update_shortlist(candidate_id):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Run with Socket.IO WSGI app
+    import eventlet.wsgi
+    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app_with_socketio)
+

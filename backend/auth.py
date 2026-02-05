@@ -13,8 +13,10 @@ from flask_jwt_extended import (
 import re
 import logging
 import time
+from functools import lru_cache
 from werkzeug.security import generate_password_hash, check_password_hash
 from db_helpers import create_user, get_user_by_email, get_user_by_id
+from db_config import return_connection
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -28,34 +30,45 @@ EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a
 # Valid roles
 VALID_ROLES = ['interviewer', 'admin', 'proctor']
 
+# Cache compiled regex pattern for validation (avoids recompiling on each request)
+_EMAIL_PATTERN_COMPILED = re.compile(EMAIL_PATTERN)
 
+
+@lru_cache(maxsize=128)
 def validate_email(email):
-    """Validate email format"""
+    """Validate email format with cached regex pattern"""
     if not email:
         return False
-    return re.match(EMAIL_PATTERN, email) is not None
+    return _EMAIL_PATTERN_COMPILED.match(email) is not None
 
 
 def hash_password(password):
     """Hash a password using bcrypt"""
-    logger.info(f"🔐 Hashing password (length: {len(password)} chars)")
+    logger.info(f"[HASH] Hashing password (length: {len(password)} chars)")
     hashed = generate_password_hash(password)
-    logger.info(f"✅ Password hashed successfully")
+    logger.info(f"[OK] Password hashed successfully")
     return hashed
 
 
 def verify_password(password, password_hash):
-    """Verify a password against its hash"""
-    logger.info("🔓 Verifying password...")
+    """Verify a password against its hash with optimized logging"""
+    logger.info("[AUTH] Verifying password...")
     try:
         result = check_password_hash(password_hash, password)
         if result:
-            logger.info("✅ Password verified successfully")
-        else:
-            logger.warning("❌ Password verification failed")
+            logger.info("[OK] Password verification successful")
         return result
     except Exception as e:
-        logger.warning("❌ Password verification error (invalid/legacy hash): %s", e)
+        logger.error(f"[ERROR] Password verification failed: {str(e)}")
+        return False
+        result = check_password_hash(password_hash, password)
+        if result:
+            logger.info("[OK] Password verified successfully")
+        else:
+            logger.warning("[FAIL] Password verification failed")
+        return result
+    except Exception as e:
+        logger.warning("[WARN] Password verification error (invalid/legacy hash): %s", e)
         return False
 
 
@@ -80,7 +93,7 @@ def register():
     """
     try:
         logger.info("="*80)
-        logger.info("📝 USER REGISTRATION REQUEST")
+        logger.info("[REG] USER REGISTRATION REQUEST")
         logger.info("="*80)
         
         # Get request data
@@ -90,7 +103,7 @@ def register():
         required_fields = ['email', 'password', 'role', 'name']
         for field in required_fields:
             if field not in data or not data[field]:
-                logger.error(f"❌ Missing required field: {field}")
+                logger.error(f"[ERROR] Missing required field: {field}")
                 return jsonify({
                     'status': 'error',
                     'message': f'Missing required field: {field}'
@@ -101,11 +114,11 @@ def register():
         role = data['role'].strip().lower()
         name = data['name'].strip()
         
-        logger.info(f"👤 Registration attempt - Email: {email}, Role: {role}, Name: {name}")
+        logger.info(f"[REG] Attempt - Email: {email}, Role: {role}, Name: {name}")
         
         # Validate email format
         if not validate_email(email):
-            logger.error(f"❌ Invalid email format: {email}")
+            logger.error(f"[ERROR] Invalid email format: {email}")
             return jsonify({
                 'status': 'error',
                 'message': 'Invalid email format'
@@ -113,7 +126,7 @@ def register():
         
         # Validate password length
         if len(password) < 8:
-            logger.error("❌ Password too short")
+            logger.error("[ERROR] Password too short")
             return jsonify({
                 'status': 'error',
                 'message': 'Password must be at least 8 characters long'
@@ -121,7 +134,7 @@ def register():
         
         # Validate role
         if role not in VALID_ROLES:
-            logger.error(f"❌ Invalid role: {role}")
+            logger.error(f"[ERROR] Invalid role: {role}")
             return jsonify({
                 'status': 'error',
                 'message': f'Invalid role. Must be one of: {", ".join(VALID_ROLES)}'
@@ -129,17 +142,17 @@ def register():
         
         # Validate name
         if len(name) < 2:
-            logger.error("❌ Name too short")
+            logger.error("[ERROR] Name too short")
             return jsonify({
                 'status': 'error',
                 'message': 'Name must be at least 2 characters long'
             }), 400
         
         # Check if user already exists
-        logger.info(f"🔍 Checking if user already exists: {email}")
+        logger.info(f"[CHECK] User exists: {email}")
         existing_user = get_user_by_email(email)
         if existing_user:
-            logger.warning(f"⚠️ User already exists: {email}")
+            logger.warning(f"[WARN] User exists: {email}")
             return jsonify({
                 'status': 'error',
                 'message': 'User with this email already exists'
@@ -149,10 +162,10 @@ def register():
         password_hash = hash_password(password)
         
         # Create user
-        logger.info(f"💾 Creating user in database...")
+        logger.info(f"[DB] Creating user in database...")
         user_id = create_user(email, password_hash, role, name)
         
-        logger.info(f"✅ User registered successfully - ID: {user_id}")
+        logger.info(f"[OK] User registered - ID: {user_id}")
         logger.info("="*80)
         
         return jsonify({
@@ -165,12 +178,12 @@ def register():
                 'name': name
             }
         }), 201
-        
+    
     except Exception as e:
-        logger.exception(f"❌ Registration failed: {e}")
+        logger.error(f"[ERROR] Registration error: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': f'Registration failed: {str(e)}'
+            'message': 'An error occurred during registration'
         }), 500
 
 
@@ -193,7 +206,7 @@ def login():
     """
     try:
         logger.info("="*80)
-        logger.info("🔑 USER LOGIN REQUEST")
+        logger.info("[LOGIN] USER LOGIN REQUEST")
         logger.info("="*80)
         
         # Get request data
@@ -201,7 +214,7 @@ def login():
         
         # Validate required fields
         if not data or 'email' not in data or 'password' not in data:
-            logger.error("❌ Missing email or password")
+            logger.error("[ERROR] Missing email or password")
             return jsonify({
                 'status': 'error',
                 'message': 'Email and password are required'
@@ -210,41 +223,41 @@ def login():
         email = data['email'].strip().lower()
         password = data['password']
         
-        logger.info(f"👤 Login attempt for: {email}")
+        logger.info(f"[LOGIN] Attempt: {email}")
         
-        # Get user from database
-        logger.info(f"🔍 Looking up user in database...")
+        # Get user from database (benefits from LRU cache in db_helpers)
+        logger.info(f"[DB] Looking up user...")
         user_lookup_start = time.perf_counter()
         user = get_user_by_email(email)
-        logger.info("🔍 User lookup finished in %.3fs (found=%s)", time.perf_counter() - user_lookup_start, bool(user))
+        logger.info("[DB] Lookup done in %.3fs (found=%s)", time.perf_counter() - user_lookup_start, bool(user))
         
         if not user:
-            logger.warning(f"⚠️ User not found: {email}")
+            logger.warning(f"[WARN] User not found: {email}")
             return jsonify({
                 'status': 'error',
                 'message': 'Invalid email or password'
             }), 401
         
-        logger.info(f"✅ User found - Role: {user.get('role')}")
+        logger.info(f"[OK] User found - Role: {user.get('role')}")
         
         # Verify password
         try:
             verify_start = time.perf_counter()
             is_valid = verify_password(password, user['password_hash'])
-            logger.info("🔒 Password verification finished in %.3fs (ok=%s)", time.perf_counter() - verify_start, is_valid)
+            logger.info("[AUTH] Verify done in %.3fs (ok=%s)", time.perf_counter() - verify_start, is_valid)
         except Exception:
-            logger.exception("❌ Password verification error")
+            logger.exception("[ERROR] Password verification error")
             return jsonify({'status': 'error', 'message': 'Authentication failed'}), 500
 
         if not is_valid:
-            logger.warning(f"⚠️ Invalid password for: {email}")
+            logger.warning(f"[WARN] Invalid password: {email}")
             return jsonify({
                 'status': 'error',
                 'message': 'Invalid email or password'
             }), 401
         
         # Create JWT token with user info
-        logger.info("🎫 Creating JWT access token...")
+        logger.info("[JWT] Creating token...")
         additional_claims = {
             'role': user['role'],
             'name': user['name']
@@ -255,8 +268,8 @@ def login():
             additional_claims=additional_claims
         )
         
-        logger.info(f"✅ JWT token created successfully")
-        logger.info(f"✅ LOGIN SUCCESSFUL - User: {email}, Role: {user['role']}")
+        logger.info(f"[OK] JWT token created successfully")
+        logger.info(f"[SUCCESS] LOGIN SUCCESSFUL - User: {email}, Role: {user['role']}")
         logger.info("="*80)
         
         return jsonify({

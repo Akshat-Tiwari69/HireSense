@@ -54,6 +54,11 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
     scheduled_time TIMESTAMP NOT NULL,
     status TEXT DEFAULT 'scheduled',
     assessment_id INTEGER,
+    access_token TEXT UNIQUE,
+    started_at TIMESTAMP,
+    is_streaming BOOLEAN DEFAULT false,
+    stream_started_at TIMESTAMP,
+    stream_ended_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
@@ -80,6 +85,8 @@ CREATE TABLE IF NOT EXISTS assessments (
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    questions_data JSONB,  -- Stores generated MCQ, coding, psychometric questions
+    time_elapsed_seconds INTEGER DEFAULT 0,  -- Tracks elapsed time for resume functionality
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
     FOREIGN KEY (job_id) REFERENCES job_descriptions(id) ON DELETE SET NULL
 );

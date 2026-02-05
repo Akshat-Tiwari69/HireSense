@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS assessments (
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    questions_data TEXT,  -- JSON: Stores generated MCQ, coding, psychometric questions for resume
+    time_elapsed_seconds INTEGER DEFAULT 0,  -- Tracks elapsed time for resume functionality
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
     FOREIGN KEY (job_id) REFERENCES job_descriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (scheduled_assessment_id) REFERENCES scheduled_assessments(id) ON DELETE SET NULL

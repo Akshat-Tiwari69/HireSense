@@ -9,6 +9,8 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from datetime import datetime
 import logging
+from functools import lru_cache
+from db_config import get_connection, return_connection
 from db_helpers import (
     get_all_candidates,
     get_candidate_by_id,
@@ -68,7 +70,7 @@ def get_candidates():
     """
     try:
         logger.info("="*80)
-        logger.info("📊 DASHBOARD: FETCHING CANDIDATES")
+        logger.info("[DASHBOARD] DASHBOARD: FETCHING CANDIDATES")
         logger.info("="*80)
         
         # Get filter and sort parameters
@@ -82,18 +84,18 @@ def get_candidates():
             order = 'desc'
         
         # Get all candidates
-        logger.info("🔍 Querying database for candidates...")
+        logger.info("[QUERY] Querying database for candidates...")
         candidates = get_all_candidates()
         
         if not candidates:
-            logger.info("ℹ️ No candidates found")
+            logger.info("[INFO] No candidates found")
             return jsonify({
                 'status': 'success',
                 'data': [],
                 'total': 0
             }), 200
         
-        logger.info(f"✅ Found {len(candidates)} candidates")
+        logger.info(f"[OK] Found {len(candidates)} candidates")
         
         # Filter by status if provided
         if status_filter:
@@ -119,7 +121,7 @@ def get_candidates():
         else:  # date
             candidates.sort(key=lambda x: x.get('created_at', ''), reverse=(order == 'desc'))
         
-        logger.info(f"✅ Returning {len(candidates)} candidates to dashboard")
+        logger.info(f"[OK] Returning {len(candidates)} candidates to dashboard")
         logger.info("="*80)
         
         return jsonify({
@@ -186,6 +188,46 @@ def get_candidate_details(candidate_id):
         return jsonify({
             'status': 'error',
             'message': f'Failed to fetch candidate details: {str(e)}'
+        }), 500
+
+
+@interviewer_bp.route('/candidates/<int:candidate_id>/resume', methods=['GET'])
+@jwt_required()
+@require_interviewer_role
+def download_resume(candidate_id):
+    """
+    Download resume file for a candidate
+    
+    Returns:
+        Resume file as attachment
+    """
+    from flask import send_file
+    import os
+    
+    try:
+        candidate = get_candidate_by_id(candidate_id)
+        
+        if not candidate:
+            return jsonify({
+                'status': 'error',
+                'message': 'Candidate not found'
+            }), 404
+        
+        resume_path = candidate.get('resume_path')
+        if not resume_path or not os.path.exists(resume_path):
+            return jsonify({
+                'status': 'error',
+                'message': 'Resume file not found'
+            }), 404
+        
+        # Send file with original filename
+        filename = os.path.basename(resume_path)
+        return send_file(resume_path, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to download resume: {str(e)}'
         }), 500
 
 
@@ -277,8 +319,13 @@ def schedule_assessment(candidate_id):
                 'message': 'scheduled_time is required'
             }), 400
         
-        scheduled_time = data['scheduled_time']
+        scheduled_time_input = data['scheduled_time']
         additional_info = data.get('additional_info', None)
+        
+        # Store the time as-is (local time) - no timezone conversion
+        # This ensures the time displayed matches what the user entered
+        scheduled_time = scheduled_time_input
+        print(f"[SCHEDULE] Using time as entered: {scheduled_time}", flush=True)
         
         # Get candidate info
         print(f"[SCHEDULE] Getting candidate info...", flush=True)
@@ -310,22 +357,41 @@ def schedule_assessment(candidate_id):
         set_assessment_token(scheduled_assessment_id, access_token)
         print(f"[SCHEDULE] Access token generated", flush=True)
         
-        # Generate assessment link with token - use FRONTEND_URL from env or default
-        frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
+        # Generate assessment link with token
+        # Priority: 1) FRONTEND_URL env var, 2) Origin header from request, 3) Referer header, 4) localhost fallback
+        frontend_url = os.environ.get('FRONTEND_URL')
+        if not frontend_url:
+            # Try to get from request origin
+            origin = request.headers.get('Origin')
+            if origin:
+                frontend_url = origin.rstrip('/')
+            else:
+                # Try referer as fallback
+                referer = request.headers.get('Referer')
+                if referer:
+                    # Extract base URL from referer (e.g., http://10.39.35.52:5173/some/path -> http://10.39.35.52:5173)
+                    from urllib.parse import urlparse
+                    parsed = urlparse(referer)
+                    frontend_url = f"{parsed.scheme}://{parsed.netloc}"
+                else:
+                    # Final fallback to localhost
+                    frontend_url = 'http://localhost:5173'
+        
         assessment_link = f"{frontend_url}/assessment/{access_token}"
+        print(f"[SCHEDULE] Frontend URL: {frontend_url}", flush=True)
         print(f"[SCHEDULE] Assessment link: {assessment_link}", flush=True)
         
         # Get interviewer name from JWT claims
         claims = get_jwt()
         interviewer_name = claims.get('name', 'The Hiring Team')
         
-        # Send invitation email
+        # Send invitation email (use original IST time for display)
         print(f"[SCHEDULE] Sending invitation email to {candidate['email']}...", flush=True)
         email_sent = send_assessment_invitation(
             candidate_email=candidate['email'],
             candidate_name=candidate['name'],
             assessment_link=assessment_link,
-            scheduled_time=scheduled_time,
+            scheduled_time=scheduled_time_input,  # Use original IST time for email
             interviewer_name=interviewer_name,
             additional_info=additional_info
         )
@@ -343,7 +409,8 @@ def schedule_assessment(candidate_id):
                 'candidate_id': candidate_id,
                 'candidate_name': candidate['name'],
                 'scheduled_assessment_id': scheduled_assessment_id,
-                'scheduled_time': scheduled_time,
+                'scheduled_time': scheduled_time_input,  # Return original IST time for frontend display
+                'scheduled_time_utc': scheduled_time,    # Also provide UTC time
                 'assessment_link': assessment_link,
                 'status': 'under_review',
                 'email_sent': email_sent
@@ -351,6 +418,9 @@ def schedule_assessment(candidate_id):
         }), 201
         
     except Exception as e:
+        print(f"[SCHEDULE] ERROR: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'status': 'error',
             'message': f'Failed to schedule assessment: {str(e)}'

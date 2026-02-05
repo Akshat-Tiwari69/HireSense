@@ -1,145 +1,83 @@
-# 🚀 CYGNUSA Elite-Hire - AI-Enabled HR Evaluation System
+# Cygnusa Elite Hire
 
-> **Team:** Akshat (Backend) | Shaivi (Frontend) | Prashanth (Database)
+**Cygnusa Elite Hire** is an advanced, AI-powered recruitment and proctoring platform designed to streamline the hiring process for specialized roles. It combines resume analysis, automated skill assessments, and intelligent proctoring into a unified solution.
 
----
+## 🚀 Features
 
-## 🎯 PROJECT STATUS: COMPLETE (v1.0) 🟢
+### 🤖 AI-Powered Recruitment
+- **Resume Parsing & Scoring**: Automatically extracts skills and experience from resumes to rank candidates against job descriptions using AI.
+- **Automated Question Generation**: Dynamically generates technical interview questions based on the candidate's specific skill set and experience level.
 
-We have successfully built and integrated the full **High-Fidelity Two-Sided Platform** for AI-enabled hiring.
+### 👁️ Intelligent Proctoring
+- **Real-time Monitoring**: Tracks candidate behavior during assessments including gaze detection and tab switching.
+- **Fullscreen Enforcement**: Ensures assessment integrity by mandating fullscreen mode.
+- **Automated Flagging**: Detects and logs suspicious activities for reviewer attention.
 
-### **Core Features Implemented:**
-- **🎨 Modern UI/UX**: Complete redesign with Tailwind CSS, Shadcn UI, and Lucide icons.
-- **🔐 Authentication**: Secure JWT-based login for interviewers.
-- **📊 Interviewer Dashboard**: Real-time tracking of candidates, AI match scores, and status updates.
-- **🤖 AI Integration**:
-    - **Resume Parsing**: Auto-extracts skills, experience, and education.
-    - **AI Analysis**: Generates Pros/Cons and Match Scores.
-    - **Recommendations**: Providing hiring recommendations based on assessment results.
-- **📝 Assessments**: Full flow for MCQ, Coding, and Psychometric tests.
-- **📧 Email System**: Automated notifications for applications, scheduling, and decisions.
+### 👥 Role-Based Portals
+- **Admin Dashboard**: Comprehensive system overview, user management, and global analytics.
+- **Interviewer Dashboard**: Manage candidates, schedule interviews, and review assessment scores.
+- **Proctor Dashboard**: Monitor live assessments and review flagged incidents.
+- **Candidate Portal**: Seamless experience for applicants to apply, take tests, and track status.
 
----
+## 🛠️ Tech Stack
 
-## 🏗️ SYSTEM ARCHITECTURE & FLOW
+- **Frontend**: React.js, Vite, Tailwind CSS
+- **Backend**: Python, Flask, Werkzeug
+- **Database**: PostgreSQL (via Supabase)
+- **Authentication**: JWT (JSON Web Tokens), Role-Based Access Control (RBAC)
+- **AI Integration**: OpenAI API (GPT-4/3.5)
+- **Infrastructure**: Supabase (Auth, Storage, Database)
 
-### **1. Candidate Flow (Interviewee)**
-1.  **Landing Page**: Users choose "I'm a Candidate".
-2.  **Apply**: Fill details and upload resume (PDF/DOCX).
-    -   *System*: Parses resume, runs AI analysis, saves to DB.
-3.  **Wait**: Receive acknowledgment email.
-4.  **Assessment**: If shortlisted, receive email with link.
-    -   *System*: Validates access time window.
-5.  **Take Test**: Complete MCQs, Coding Challenge, and Psychometric questions.
-6.  **Results**: Submit and wait for final decision.
+## 📂 Documentation
 
-### **2. Recruiter Flow (Interviewer)**
-1.  **Login**: Secure access via `/login`.
-2.  **Dashboard**: View all applicants with **AI Match Scores**.
-3.  **Review**: Click candidate to see detailed AI insights (Pros/Cons).
-4.  **Action**:
-    -   **Shortlist/Schedule**: Triggers assessment email.
-    -   **Reject**: Triggers rejection email.
-5.  **Decision**: View assessment results and make final Hire/No-Hire decision.
+Detailed documentation is available in the `docs/` directory:
 
----
+- [**System Architecture**](docs/ARCHITECTURE.md) - High-level design and data flow.
+- [**Setup & Installation**](docs/SETUP.md) - Instructions for local development setup.
+- [**API Reference**](docs/API.md) - Backend API endpoints and usage.
+- [**Database Schema**](docs/DATABASE.md) - Database structure and relationships.
 
-## 📊 Project Completion Report
-
-| Phase | Status | Completion |
-|-------|--------|------------|
-| 🏗️ Database Architecture | 🟢 COMPLETE | 100% |
-| 🔐 Backend Authentication | 🟢 COMPLETE | 100% |
-| 🤖 AI Resume Analyzer | 🟢 COMPLETE | 100% |
-| 📝 Assessment Engine | 🟢 COMPLETE | 100% |
-| 📧 Email Notification Service | 🟢 COMPLETE | 100% |
-| 🎨 Frontend UI (High Fidelity) | 🟢 COMPLETE | 100% |
-| 🔌 Frontend-Backend Integration | 🟢 COMPLETE | 100% |
-| 🚀 Deployment Ready | 🟢 COMPLETE | 100% |
-
----
-
-## 🔧 SETUP INSTRUCTIONS
+## ⚡ Quick Start
 
 ### Prerequisites
-- Python 3.8+
-- Node.js 16+
-- SQLite
+- Node.js (v16+)
+- Python (v3.9+)
+- PostgreSQL / Supabase Project
 
-### 1. Backend Setup
+### 1. Clone & Install
+```bash
+git clone <repo-url>
+cd cygnusa-elite-hire
+```
+
+### 2. Backend Setup
 ```bash
 cd backend
-# Install dependencies
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
 pip install -r requirements.txt
-
-# Initialize Database
-python init_db.py
-
-# Seed Database (Creates default Admin/Interviewer)
-python seed_db.py
-# Default User: interviewer@company.com / password123
-
-# Run Server
-python app.py
 ```
-*Server runs on http://localhost:5000*
 
-### 2. Frontend Setup
+### 3. Frontend Setup
 ```bash
 cd frontend
-# Install dependencies
 npm install
+```
 
-# Run Development Server
+### 4. Configuration
+Create a `.env` file in `backend/` consistent with `docs/SETUP.md`.
+
+### 5. Run
+**Backend**:
+```bash
+cd backend
+python app.py
+```
+**Frontend**:
+```bash
+cd frontend
 npm run dev
 ```
-*App runs on http://localhost:5173*
-
----
-
-## 🧪 TESTING THE FLOW
-
-1.  **Open Landing Page**: http://localhost:5173
-2.  **Apply**: Go to "Apply Now", upload a resume.
-3.  **Login as Recruiter**:
-    -   Go to `/login`
-    -   Creds: `interviewer@company.com` / `password123`
-4.  **Check Dashboard**: You should see the new candidate.
-5.  **View Details**: Check AI score and insights.
-
----
-
-## 📚 DOCUMENTATION
-
-Comprehensive documentation is available in the `docs/` folder:
-
-### 📖 Complete Index
-- **[Documentation Index](docs/DOCUMENTATION_INDEX.md)** - Start here for all documentation
-
-### 🏗️ Architecture & Design
-| Document | Description |
-|----------|-------------|
-| [Project Architecture](docs/PROJECT_ARCHITECTURE.md) | System design and data flow |
-| [Database Schema](docs/DATABASE_SCHEMA.md) | Complete database documentation |
-| [Backend File Reference](docs/BACKEND_FILE_REFERENCE.md) | All backend Python files documented |
-| [Frontend Guide](docs/FRONTEND_GUIDE.md) | React components and pages |
-
-### 🔌 API & Features
-| Document | Description |
-|----------|-------------|
-| [API Documentation](docs/API_DOCS.md) | Complete REST API reference with auth |
-| [Assessment System](docs/ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, Coding, Psychometric tests |
-| [Proctoring System](docs/PROCTOR_GUIDE.md) | Face detection and monitoring |
-| [Admin Dashboard](docs/ADMIN_DASHBOARD_GUIDE.md) | User and job management |
-
-### 🚀 Deployment & Configuration
-| Document | Description |
-|----------|-------------|
-| [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) | Production deployment |
-| [Environment Config](docs/ENVIRONMENT_CONFIG.md) | All environment variables |
-
----
 
 ## 📄 License
-MIT License
-
+Private and Confidential. © 2026 Cygnusa.

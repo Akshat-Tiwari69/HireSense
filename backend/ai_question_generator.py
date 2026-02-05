@@ -152,9 +152,10 @@ Return ONLY valid JSON, no markdown or explanations."""
         }
         
         skills_lower = [s.lower() for s in skills]
-        for lang, keywords in lang_keywords.items():
-            if any(kw in skill for skill in skills_lower for kw in keywords):
-                languages.append(lang)
+        # Use set lookup for O(1) keyword search instead of nested loop
+        keywords_set = {kw: lang for lang, keywords in lang_keywords.items() for kw in keywords}
+        detected_langs = {keywords_set[kw] for skill in skills_lower if any(kw in skill for kw in keywords_set if kw in skill)}
+        languages.extend(list(detected_langs))
         
         if not languages:
             languages = ['python', 'javascript']

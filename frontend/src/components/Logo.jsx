@@ -10,6 +10,11 @@ const Logo = ({ className = '', size = 'default', variant = 'full' }) => {
 
   const currentSize = sizes[size];
 
+  // Check if we need white text (for dark backgrounds like footer)
+  const isWhiteText = className.includes('text-white');
+  const textColor = isWhiteText ? 'text-white' : 'text-slate-900';
+  const strokeColor = isWhiteText ? '#ffffff' : '#4F46E5';
+
   const LogoIcon = () => (
     <svg
       width={currentSize.icon}
@@ -22,24 +27,24 @@ const Logo = ({ className = '', size = 'default', variant = 'full' }) => {
       {/* Layered hexagons representing filtering/selection */}
       <path
         d="M20 2L35 11V29L20 38L5 29V11L20 2Z"
-        fill="#4F46E5"
+        fill={isWhiteText ? '#ffffff' : '#4F46E5'}
         fillOpacity="0.1"
-        stroke="#4F46E5"
+        stroke={strokeColor}
         strokeWidth="1.5"
       />
       <path
         d="M20 8L30 14V26L20 32L10 26V14L20 8Z"
-        fill="#4F46E5"
+        fill={isWhiteText ? '#ffffff' : '#4F46E5'}
         fillOpacity="0.2"
-        stroke="#4F46E5"
+        stroke={strokeColor}
         strokeWidth="1.5"
       />
       <circle
         cx="20"
         cy="20"
         r="6"
-        fill="#4F46E5"
-        stroke="#6366F1"
+        fill={isWhiteText ? '#ffffff' : '#4F46E5'}
+        stroke={isWhiteText ? '#e5e7eb' : '#6366F1'}
         strokeWidth="2"
       />
       {/* AI pulse indicator */}
@@ -47,7 +52,7 @@ const Logo = ({ className = '', size = 'default', variant = 'full' }) => {
         cx="20"
         cy="20"
         r="3"
-        fill="#818CF8"
+        fill={isWhiteText ? '#e5e7eb' : '#818CF8'}
       />
     </svg>
   );
@@ -59,7 +64,7 @@ const Logo = ({ className = '', size = 'default', variant = 'full' }) => {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <LogoIcon />
-      <span className={`font-bold text-slate-900 ${currentSize.text}`}>
+      <span className={`font-bold ${textColor} ${currentSize.text}`}>
         HireSense
       </span>
     </div>

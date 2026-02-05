@@ -15,7 +15,9 @@ const ApplyPage = () => {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [candidateInfo, setCandidateInfo] = useState({ name: '', email: '' });
   const [errors, setErrors] = useState({});
+  const [uploadError, setUploadError] = useState('');
   const [dragActive, setDragActive] = useState(false);
 
   const validateForm = () => {
@@ -65,6 +67,7 @@ const ApplyPage = () => {
       }
       setFile(selectedFile);
       setErrors(prev => ({ ...prev, file: '' }));
+      setUploadError(''); // Clear any previous upload errors
     }
   };
 
@@ -73,6 +76,7 @@ const ApplyPage = () => {
     if (!validateForm()) return;
 
     setLoading(true);
+    setUploadError('');
     try {
       const form = new FormData();
       form.append('file', file);
@@ -80,6 +84,11 @@ const ApplyPage = () => {
       const res = await api.post('/api/resume/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+
+      // Store candidate info from response
+      const name = res.data?.candidate?.name || 'Candidate';
+      const email = res.data?.candidate?.email || '';
+      setCandidateInfo({ name, email });
 
       setSubmitted(true);
       toast({
@@ -89,6 +98,7 @@ const ApplyPage = () => {
       console.log('Upload response', res.data);
     } catch (err) {
       const message = err?.response?.data?.message || 'Upload failed';
+      setUploadError(message);
       toast({
         variant: 'destructive',
         title: 'Upload failed',
@@ -109,13 +119,25 @@ const ApplyPage = () => {
                 <CheckCircle className="w-12 h-12 text-emerald-600" />
               </div>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-4">Application Received!</h2>
-            <p className="text-slate-600 mb-8 text-base sm:text-lg">
-              Your resume is securely analyzed by AI. You'll hear from us soon.
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-4">
+              Thank You{candidateInfo.name ? `, ${candidateInfo.name}` : ''}!
+            </h2>
+            <p className="text-slate-600 mb-4 text-base sm:text-lg">
+              Your application has been successfully submitted.
             </p>
+            {candidateInfo.email && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <p className="text-sm text-blue-900">
+                  <strong>Contact Email:</strong> {candidateInfo.email}
+                </p>
+                <p className="text-xs text-blue-700 mt-2">
+                  You will be contacted on this email if selected for the next round.
+                </p>
+              </div>
+            )}
             <div className="bg-indigo-50 p-4 rounded-lg mb-6">
               <p className="text-sm text-indigo-800">
-                <strong>Next Steps:</strong> Our AI is evaluating your application. If selected, you'll receive an email with assessment details.
+                <strong>Next Steps:</strong> Our AI is evaluating your application. If selected, you'll receive an email with assessment details within 3-5 business days.
               </p>
             </div>
             <Button
@@ -154,13 +176,12 @@ const ApplyPage = () => {
               <div className="space-y-2">
                 <Label>Resume Upload *</Label>
                 <div
-                  className={`border-2 border-dashed rounded-lg p-6 sm:p-8 text-center transition-all duration-300 ${
-                    dragActive
-                      ? 'border-indigo-500 bg-indigo-50'
-                      : errors.file
+                  className={`border-2 border-dashed rounded-lg p-6 sm:p-8 text-center transition-all duration-300 ${dragActive
+                    ? 'border-indigo-500 bg-indigo-50'
+                    : errors.file
                       ? 'border-red-500'
                       : 'border-slate-300 hover:border-indigo-400'
-                  }`}
+                    }`}
                   onDragEnter={handleDrag}
                   onDragLeave={handleDrag}
                   onDragOver={handleDrag}
@@ -205,6 +226,17 @@ const ApplyPage = () => {
                 </div>
                 {errors.file && <p className="text-sm text-red-600">{errors.file}</p>}
               </div>
+
+              {uploadError && (
+                <div className="bg-red-50 border border-red-300 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-red-800 font-medium">
+                    <strong>Upload Failed:</strong> {uploadError}
+                  </p>
+                  <p className="text-xs text-red-600 mt-1">
+                    Please ensure your resume contains a valid email address or try a different file format.
+                  </p>
+                </div>
+              )}
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-blue-800">

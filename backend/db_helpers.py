@@ -4,8 +4,10 @@ Provides reusable functions for all database operations
 """
 
 import json
-import sqlite3
 from datetime import datetime
+from functools import lru_cache
+
+import psycopg2
 from db_config import get_connection
 
 
@@ -40,25 +42,27 @@ def create_user(email, password_hash, role, name):
         
         cursor.execute(
             """INSERT INTO users (email, password_hash, role, name)
-               VALUES (?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?) RETURNING id""",
             (email, password_hash, role, name)
         )
         
+        result = cursor.fetchone()
+        user_id = result[0] if result else None
         conn.commit()
-        user_id = cursor.lastrowid
         conn.close()
         
         return user_id
     
-    except sqlite3.IntegrityError as e:
+    except psycopg2.IntegrityError as e:
         raise DatabaseError(f"Email already exists: {str(e)}")
     except Exception as e:
         raise DatabaseError(f"Error creating user: {str(e)}")
 
 
+@lru_cache(maxsize=128)
 def get_user_by_email(email):
     """
-    Retrieve user by email address.
+    Retrieve user by email address. Results are cached for performance.
     
     Args:
         email (str): User's email address
@@ -99,9 +103,10 @@ def get_user_by_email(email):
         raise DatabaseError(f"Error retrieving user by email: {str(e)}")
 
 
+@lru_cache(maxsize=256)
 def get_user_by_id(user_id):
     """
-    Retrieve user by user ID.
+    Retrieve user by user ID. Results are cached for performance.
     
     Args:
         user_id (int): User's ID
@@ -145,6 +150,46 @@ def get_user_by_id(user_id):
 #                            CANDIDATE FUNCTIONS
 # ============================================================================
 
+def get_candidate_by_email(email):
+    """
+    Check if a candidate exists with the given email.
+    
+    Args:
+        email (str): Candidate's email address
+    
+    Returns:
+        dict: Candidate information if found, None otherwise
+    
+    Raises:
+        DatabaseError: If query fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, name, email, status, created_at
+            FROM candidates
+            WHERE LOWER(email) = LOWER(%s)
+        """, (email,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'name': row[1],
+                'email': row[2],
+                'status': row[3],
+                'created_at': row[4]
+            }
+        return None
+        
+    except Exception as e:
+        raise DatabaseError(f"Error checking candidate email: {str(e)}")
+
+
 def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending'):
     """
     Insert a new candidate into the database.
@@ -184,16 +229,17 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         cursor.execute("""
             INSERT INTO candidates 
             (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
         """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status))
         
+        result = cursor.fetchone()
+        candidate_id = result[0] if result else None
         conn.commit()
-        candidate_id = cursor.lastrowid
         conn.close()
         
         return candidate_id
         
-    except sqlite3.IntegrityError as e:
+    except psycopg2.IntegrityError as e:
         raise DatabaseError(f"Integrity error: {str(e)}")
     except Exception as e:
         raise DatabaseError(f"Error inserting candidate: {str(e)}")
@@ -273,9 +319,9 @@ def get_all_candidates():
         rows = cursor.fetchall()
         conn.close()
         
-        candidates = []
-        for row in rows:
-            candidate = {
+        # Use list comprehension for better performance
+        candidates = [
+            {
                 'id': row[0],
                 'name': row[1],
                 'email': row[2],
@@ -292,7 +338,8 @@ def get_all_candidates():
                 'created_at': row[13],
                 'updated_at': row[14]
             }
-            candidates.append(candidate)
+            for row in rows
+        ]
         
         return candidates
         
@@ -397,28 +444,15 @@ def create_assessment(candidate_id, job_id=None):
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Detect driver: sqlite uses "?" placeholders and lastrowid; Postgres needs %s and RETURNING id
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
-
-        if is_sqlite:
-            cursor.execute(
-                """
-                INSERT INTO assessments (candidate_id, job_id, status, started_at)
-                VALUES (?, ?, 'in_progress', CURRENT_TIMESTAMP)
-                """,
-                (candidate_id, job_id)
-            )
-            assessment_id = cursor.lastrowid
-        else:
-            cursor.execute(
-                """
-                INSERT INTO assessments (candidate_id, job_id, status, started_at)
-                VALUES (%s, %s, 'in_progress', CURRENT_TIMESTAMP)
-                RETURNING id
-                """,
-                (candidate_id, job_id)
-            )
-            assessment_id = cursor.fetchone()[0]
+        cursor.execute(
+            """
+            INSERT INTO assessments (candidate_id, job_id, status, started_at)
+            VALUES (%s, %s, 'in_progress', CURRENT_TIMESTAMP)
+            RETURNING id
+            """,
+            (candidate_id, job_id)
+        )
+        assessment_id = cursor.fetchone()[0]
         
         conn.commit()
         conn.close()
@@ -448,29 +482,18 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
-        
         # Calculate overall score as weighted average
         overall_score = (technical_score * 0.6) + (psychometric_score * 0.4)
         
-        if is_sqlite:
-            cursor.execute("""
-                UPDATE assessments 
-                SET technical_score = ?, psychometric_score = ?, overall_score = ?, 
-                    decision = ?, rationale = ?, status = 'completed', 
-                    completed_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
-        else:
-            # Postgres: explicit CAST for numeric types
-            cursor.execute("""
-                UPDATE assessments 
-                SET technical_score = CAST(%s AS NUMERIC), psychometric_score = CAST(%s AS NUMERIC), 
-                    overall_score = CAST(%s AS NUMERIC), 
-                    decision = %s, rationale = %s, status = 'completed', 
-                    completed_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
+        # PostgreSQL: explicit CAST for numeric types
+        cursor.execute("""
+            UPDATE assessments 
+            SET technical_score = CAST(%s AS NUMERIC), psychometric_score = CAST(%s AS NUMERIC), 
+                overall_score = CAST(%s AS NUMERIC), 
+                decision = %s, rationale = %s, status = 'completed', 
+                completed_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (technical_score, psychometric_score, overall_score, decision, rationale, assessment_id))
         
         conn.commit()
         rows_affected = cursor.rowcount
@@ -540,7 +563,7 @@ def get_assessment_by_id(assessment_id):
 
 def save_mcq_response(assessment_id, question_id, selected_answer, is_correct, time_spent):
     """
-    Save an MCQ response.
+    Save an MCQ response (upsert - update if exists, insert if not).
     
     Args:
         assessment_id (int): The ID of the assessment
@@ -555,18 +578,19 @@ def save_mcq_response(assessment_id, question_id, selected_answer, is_correct, t
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        if is_sqlite:
-            cursor.execute(
-                """
-                INSERT INTO mcq_responses 
-                (assessment_id, question_id, selected_answer, is_correct, time_spent)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (assessment_id, question_id, selected_answer, is_correct, time_spent)
-            )
-        else:
+        # First, try to update existing response
+        cursor.execute(
+            """
+            UPDATE mcq_responses 
+            SET selected_answer = %s, is_correct = %s, time_spent = %s
+            WHERE assessment_id = %s AND question_id = %s
+            """,
+            (selected_answer, is_correct, time_spent, assessment_id, question_id)
+        )
+        
+        # If no row was updated, insert new one
+        if cursor.rowcount == 0:
             cursor.execute(
                 """
                 INSERT INTO mcq_responses 
@@ -583,9 +607,129 @@ def save_mcq_response(assessment_id, question_id, selected_answer, is_correct, t
         raise DatabaseError(f"Error saving MCQ response: {str(e)}")
 
 
+def get_saved_mcq_answers(assessment_id):
+    """
+    Get all saved MCQ answers for an assessment.
+    Gets the most recent answer for each question.
+    
+    Args:
+        assessment_id (int): The ID of the assessment
+    
+    Returns:
+        dict: Dictionary mapping question_id to selected_answer
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        # Use DISTINCT ON to get only the latest answer per question (by id)
+        cursor.execute(
+            """
+            SELECT DISTINCT ON (question_id) question_id, selected_answer
+            FROM mcq_responses 
+            WHERE assessment_id = %s
+            ORDER BY question_id, id DESC
+            """,
+            (assessment_id,)
+        )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Return as dict: {question_id: selected_answer}
+        return {row[0]: row[1] for row in rows}
+        
+    except Exception as e:
+        raise DatabaseError(f"Error getting saved MCQ answers: {str(e)}")
+
+
+def get_saved_psychometric_answers(assessment_id):
+    """
+    Get all saved psychometric answers for an assessment.
+    Gets the most recent answer for each question.
+    
+    Args:
+        assessment_id (int): The ID of the assessment
+    
+    Returns:
+        dict: Dictionary mapping question_id to score (option index)
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        # Use DISTINCT ON to get only the latest answer per question (by id)
+        cursor.execute(
+            """
+            SELECT DISTINCT ON (question_id) question_id, score
+            FROM psychometric_responses 
+            WHERE assessment_id = %s
+            ORDER BY question_id, id DESC
+            """,
+            (assessment_id,)
+        )
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Return as dict: {question_id: score}
+        return {row[0]: row[1] for row in rows}
+        
+    except Exception as e:
+        raise DatabaseError(f"Error getting saved psychometric answers: {str(e)}")
+
+
+def get_saved_coding_submission(assessment_id):
+    """
+    Get the saved coding submission for an assessment.
+    
+    Args:
+        assessment_id (int): The ID of the assessment
+    
+    Returns:
+        dict: Dictionary with code, language, and test results or None if no submission
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT problem_id, language, code, test_cases_passed, total_test_cases
+            FROM coding_submissions 
+            WHERE assessment_id = %s
+            ORDER BY submitted_at DESC
+            LIMIT 1
+            """,
+            (assessment_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'problem_id': row[0],
+                'language': row[1],
+                'code': row[2],
+                'test_cases_passed': row[3],
+                'total_test_cases': row[4]
+            }
+        return None
+        
+    except Exception as e:
+        raise DatabaseError(f"Error getting saved coding submission: {str(e)}")
+
+
 def save_coding_submission(assessment_id, problem_id, language, code, test_cases_passed, total_test_cases):
     """
-    Save a coding submission.
+    Save a coding submission (upsert - update if exists, insert if not).
     
     Args:
         assessment_id (int): The ID of the assessment
@@ -601,18 +745,19 @@ def save_coding_submission(assessment_id, problem_id, language, code, test_cases
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        if is_sqlite:
-            cursor.execute(
-                """
-                INSERT INTO coding_submissions 
-                (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)
-            )
-        else:
+        # First, try to update existing submission
+        cursor.execute(
+            """
+            UPDATE coding_submissions 
+            SET language = %s, code = %s, test_cases_passed = %s, total_test_cases = %s, submitted_at = CURRENT_TIMESTAMP
+            WHERE assessment_id = %s AND problem_id = %s
+            """,
+            (language, code, test_cases_passed, total_test_cases, assessment_id, problem_id)
+        )
+        
+        # If no row was updated, insert new one
+        if cursor.rowcount == 0:
             cursor.execute(
                 """
                 INSERT INTO coding_submissions 
@@ -668,7 +813,7 @@ def log_proctoring_event(assessment_id, event_type, severity, details):
 
 def save_psychometric_response(assessment_id, question_id, trait, score, scenario_response=None):
     """
-    Save a psychometric response.
+    Save a psychometric response (upsert - update if exists, insert if not).
     
     Args:
         assessment_id (int): The ID of the assessment
@@ -683,18 +828,19 @@ def save_psychometric_response(assessment_id, question_id, trait, score, scenari
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
         
-        if is_sqlite:
-            cursor.execute(
-                """
-                INSERT INTO psychometric_responses 
-                (assessment_id, question_id, trait, score, scenario_response)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (assessment_id, question_id, trait, score, scenario_response)
-            )
-        else:
+        # First, try to update existing response
+        cursor.execute(
+            """
+            UPDATE psychometric_responses 
+            SET trait = %s, score = %s, scenario_response = %s
+            WHERE assessment_id = %s AND question_id = %s
+            """,
+            (trait, score, scenario_response, assessment_id, question_id)
+        )
+        
+        # If no row was updated, insert new one
+        if cursor.rowcount == 0:
             cursor.execute(
                 """
                 INSERT INTO psychometric_responses 
@@ -728,19 +874,11 @@ def get_mcq_score(assessment_id):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
-        
-        if is_sqlite:
-            cursor.execute("""
-                SELECT COUNT(*) as total, SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
-                FROM mcq_responses WHERE assessment_id = ?
-            """, (assessment_id,))
-        else:
-            # Postgres: explicit cast for boolean
-            cursor.execute("""
-                SELECT COUNT(*) as total, SUM(CASE WHEN is_correct = TRUE THEN 1 ELSE 0 END) as correct
-                FROM mcq_responses WHERE assessment_id = %s
-            """, (assessment_id,))
+        # PostgreSQL: explicit cast for boolean
+        cursor.execute("""
+            SELECT COUNT(*) as total, SUM(CASE WHEN is_correct = TRUE THEN 1 ELSE 0 END) as correct
+            FROM mcq_responses WHERE assessment_id = %s
+        """, (assessment_id,))
         
         result = cursor.fetchone()
         conn.close()
@@ -771,18 +909,10 @@ def get_coding_score(assessment_id):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
-        
-        if is_sqlite:
-            cursor.execute("""
-                SELECT SUM(test_cases_passed) as total_passed, SUM(total_test_cases) as total_tests
-                FROM coding_submissions WHERE assessment_id = ?
-            """, (assessment_id,))
-        else:
-            cursor.execute("""
-                SELECT SUM(test_cases_passed) as total_passed, SUM(total_test_cases) as total_tests
-                FROM coding_submissions WHERE assessment_id = %s
-            """, (assessment_id,))
+        cursor.execute("""
+            SELECT SUM(test_cases_passed) as total_passed, SUM(total_test_cases) as total_tests
+            FROM coding_submissions WHERE assessment_id = %s
+        """, (assessment_id,))
         
         result = cursor.fetchone()
         conn.close()
@@ -813,20 +943,11 @@ def get_psychometric_scores(assessment_id):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        is_sqlite = conn.__class__.__module__.startswith('sqlite3')
-        
-        if is_sqlite:
-            cursor.execute("""
-                SELECT trait, AVG(score) as avg_score
-                FROM psychometric_responses WHERE assessment_id = ?
-                GROUP BY trait
-            """, (assessment_id,))
-        else:
-            cursor.execute("""
-                SELECT trait, AVG(score) as avg_score
-                FROM psychometric_responses WHERE assessment_id = %s
-                GROUP BY trait
-            """, (assessment_id,))
+        cursor.execute("""
+            SELECT trait, AVG(score) as avg_score
+            FROM psychometric_responses WHERE assessment_id = %s
+            GROUP BY trait
+        """, (assessment_id,))
         
         rows = cursor.fetchall()
         conn.close()
@@ -864,34 +985,14 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        driver = detect_driver()
+        print(f"[DB] Executing INSERT with PostgreSQL...", flush=True)
         
-        print(f"[DB] Executing INSERT with driver={driver}...", flush=True)
-        
-        if driver == 'postgres':
-            # PostgreSQL supports proctoring_enabled column
-            cursor.execute(
-                """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, proctoring_enabled)
-                   VALUES (%s, %s, %s, 'scheduled', true) RETURNING id""",
-                (candidate_id, interviewer_id, scheduled_time)
-            )
-        else:
-            # SQLite - check if column exists, add if not
-            cursor.execute("PRAGMA table_info(scheduled_assessments)")
-            cols = {row[1] for row in cursor.fetchall()}
-            
-            if 'proctoring_enabled' in cols:
-                cursor.execute(
-                    """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, proctoring_enabled)
-                       VALUES (?, ?, ?, 'scheduled', 1) RETURNING id""",
-                    (candidate_id, interviewer_id, scheduled_time)
-                )
-            else:
-                cursor.execute(
-                    """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
-                       VALUES (?, ?, ?, 'scheduled') RETURNING id""",
-                    (candidate_id, interviewer_id, scheduled_time)
-                )
+        # PostgreSQL INSERT
+        cursor.execute(
+            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
+               VALUES (%s, %s, %s, 'scheduled') RETURNING id""",
+            (candidate_id, interviewer_id, scheduled_time)
+        )
         
         result = cursor.fetchone()
         scheduled_id = result[0] if result else None
@@ -936,11 +1037,19 @@ def get_scheduled_assessment(candidate_id):
         conn.close()
         
         if row:
+            # Format scheduled_time as ISO string (stored as local time)
+            scheduled_time_raw = row[3]
+            if isinstance(scheduled_time_raw, str):
+                scheduled_time = scheduled_time_raw.replace(' ', 'T')
+            else:
+                # datetime object from database
+                scheduled_time = scheduled_time_raw.strftime('%Y-%m-%dT%H:%M:%S') if scheduled_time_raw else None
+            
             return {
                 'id': row[0],
                 'candidate_id': row[1],
                 'interviewer_id': row[2],
-                'scheduled_time': row[3],
+                'scheduled_time': scheduled_time,
                 'status': row[4],
                 'assessment_id': row[5],
                 'created_at': row[6],
@@ -1096,12 +1205,13 @@ def log_email(recipient_email, recipient_name, email_type, subject, status='sent
         
         cursor.execute(
             """INSERT INTO email_logs (recipient_email, recipient_name, email_type, subject, status, error_message)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
             (recipient_email, recipient_name, email_type, subject, status, error_message)
         )
         
+        result = cursor.fetchone()
+        log_id = result[0] if result else None
         conn.commit()
-        log_id = cursor.lastrowid
         conn.close()
         
         return log_id
@@ -1296,12 +1406,19 @@ def check_assessment_time_valid(candidate_id, current_time, window_minutes=30):
         if not row:
             return (False, None, "No scheduled assessment found")
         
-        scheduled_time = row[0]
+        scheduled_time_raw = row[0]
         
-        # Parse times and check window
+        # Format scheduled_time as ISO string (stored as local time, no Z suffix)
+        if isinstance(scheduled_time_raw, str):
+            scheduled_time = scheduled_time_raw.replace(' ', 'T')
+        else:
+            # datetime object from database
+            scheduled_time = scheduled_time_raw.strftime('%Y-%m-%dT%H:%M:%S')
+        
+        # Parse times and check window - compare as naive datetimes (local time)
         from datetime import datetime, timedelta
-        scheduled_dt = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
-        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+        scheduled_dt = datetime.fromisoformat(scheduled_time.replace('Z', ''))
+        current_dt = datetime.now()  # Use local time for comparison
         
         time_diff = abs((current_dt - scheduled_dt).total_seconds() / 60)
         
@@ -1341,8 +1458,8 @@ def set_assessment_token(scheduled_assessment_id, token):
         
         cursor.execute(
             """UPDATE scheduled_assessments 
-               SET access_token = ?, updated_at = CURRENT_TIMESTAMP
-               WHERE id = ?""",
+               SET access_token = %s, updated_at = CURRENT_TIMESTAMP
+               WHERE id = %s""",
             (token, scheduled_assessment_id)
         )
         
@@ -1372,11 +1489,11 @@ def get_assessment_by_token(token):
         
         cursor.execute(
             """SELECT sa.id, sa.candidate_id, sa.interviewer_id, sa.scheduled_time, 
-                      sa.status, sa.assessment_id, sa.proctoring_enabled, sa.started_at,
+                      sa.status, sa.assessment_id, sa.started_at,
                       c.name as candidate_name, c.email as candidate_email
                FROM scheduled_assessments sa
                JOIN candidates c ON sa.candidate_id = c.id
-               WHERE sa.access_token = ?""",
+               WHERE sa.access_token = %s""",
             (token,)
         )
         
@@ -1391,10 +1508,10 @@ def get_assessment_by_token(token):
                 'scheduled_time': row[3],
                 'status': row[4],
                 'assessment_id': row[5],
-                'proctoring_enabled': row[6] if row[6] is not None else True,
-                'started_at': row[7],
-                'candidate_name': row[8],
-                'candidate_email': row[9]
+                'started_at': row[6],
+                'proctoring_enabled': True,  # Default to True
+                'candidate_name': row[7],
+                'candidate_email': row[8]
             }
         return None
     
@@ -1545,6 +1662,127 @@ def count_violations_for_assessment(assessment_id):
     
     except Exception as e:
         raise DatabaseError(f"Error counting violations: {str(e)}")
+
+
+def save_assessment_questions(assessment_id, questions_data):
+    """
+    Save generated questions to the assessment record.
+    
+    Args:
+        assessment_id: The assessment ID
+        questions_data: Dict containing mcq_questions, coding_problem, psychometric_scenarios
+    """
+    try:
+        import json
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """UPDATE assessments 
+               SET questions_data = %s
+               WHERE id = %s""",
+            (json.dumps(questions_data), assessment_id)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        raise DatabaseError(f"Error saving assessment questions: {str(e)}")
+
+
+def get_assessment_questions(assessment_id):
+    """
+    Retrieve stored questions for an assessment.
+    
+    Args:
+        assessment_id: The assessment ID
+        
+    Returns:
+        dict: Questions data or None if not found
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT questions_data FROM assessments WHERE id = %s""",
+            (assessment_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row and row[0]:
+            return row[0]  # JSONB is automatically parsed by psycopg2
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving assessment questions: {str(e)}")
+
+
+def update_assessment_time_elapsed(assessment_id, time_elapsed_seconds):
+    """
+    Update the elapsed time for an assessment (for resume functionality).
+    
+    Args:
+        assessment_id: The assessment ID
+        time_elapsed_seconds: Total seconds elapsed
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """UPDATE assessments 
+               SET time_elapsed_seconds = %s
+               WHERE id = %s""",
+            (time_elapsed_seconds, assessment_id)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        raise DatabaseError(f"Error updating assessment time: {str(e)}")
+
+
+def get_assessment_time_elapsed(assessment_id):
+    """
+    Get the elapsed time for an assessment by calculating from started_at.
+    
+    Args:
+        assessment_id: The assessment ID
+        
+    Returns:
+        int: Seconds elapsed since assessment started, or 0 if not started
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Calculate elapsed time from started_at timestamp
+        cursor.execute(
+            """
+            SELECT 
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - started_at))::INTEGER as elapsed_seconds,
+                started_at
+            FROM assessments 
+            WHERE id = %s AND started_at IS NOT NULL
+            """,
+            (assessment_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row and row[0] is not None:
+            elapsed = max(0, row[0])  # Ensure non-negative
+            return elapsed
+        return 0
+    
+    except Exception as e:
+        raise DatabaseError(f"Error getting assessment time: {str(e)}")
 
 
 if __name__ == "__main__":
