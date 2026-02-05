@@ -28,7 +28,7 @@ auth_bp = Blueprint('auth', __name__)
 EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
 
 # Valid roles
-VALID_ROLES = ['interviewer', 'admin', 'proctor']
+VALID_ROLES = ['super_admin', 'sector_admin', 'recruiter', 'interviewer', 'admin', 'proctor']
 
 # Cache compiled regex pattern for validation (avoids recompiling on each request)
 _EMAIL_PATTERN_COMPILED = re.compile(EMAIL_PATTERN)
@@ -113,8 +113,9 @@ def register():
         password = data['password']
         role = data['role'].strip().lower()
         name = data['name'].strip()
+        sector = data.get('sector', '').strip() if data.get('sector') else None
         
-        logger.info(f"[REG] Attempt - Email: {email}, Role: {role}, Name: {name}")
+        logger.info(f"[REG] Attempt - Email: {email}, Role: {role}, Name: {name}, Sector: {sector}")
         
         # Validate email format
         if not validate_email(email):
@@ -140,6 +141,14 @@ def register():
                 'message': f'Invalid role. Must be one of: {", ".join(VALID_ROLES)}'
             }), 400
         
+        # Validate sector requirement for sector-specific roles
+        if role in ['sector_admin', 'recruiter'] and not sector:
+            logger.error(f"[ERROR] Sector required for role: {role}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Sector is required for {role} role'
+            }), 400
+        
         # Validate name
         if len(name) < 2:
             logger.error("[ERROR] Name too short")
@@ -163,7 +172,7 @@ def register():
         
         # Create user
         logger.info(f"[DB] Creating user in database...")
-        user_id = create_user(email, password_hash, role, name)
+        user_id = create_user(email, password_hash, role, name, sector)
         
         logger.info(f"[OK] User registered - ID: {user_id}")
         logger.info("="*80)
@@ -175,7 +184,8 @@ def register():
                 'user_id': user_id,
                 'email': email,
                 'role': role,
-                'name': name
+                'name': name,
+                'sector': sector
             }
         }), 201
     
@@ -260,7 +270,8 @@ def login():
         logger.info("[JWT] Creating token...")
         additional_claims = {
             'role': user['role'],
-            'name': user['name']
+            'name': user['name'],
+            'sector': user.get('sector')
         }
         
         access_token = create_access_token(
@@ -281,7 +292,8 @@ def login():
                     'id': user['id'],
                     'email': user['email'],
                     'role': user['role'],
-                    'name': user['name']
+                    'name': user['name'],
+                    'sector': user.get('sector')
                 }
             }
         }), 200
@@ -332,6 +344,7 @@ def get_current_user():
                 'email': user['email'],
                 'role': user['role'],
                 'name': user['name'],
+                'sector': user.get('sector'),
                 'created_at': user['created_at']
             }
         }), 200
@@ -367,7 +380,8 @@ def verify_token():
             'data': {
                 'user_id': user_id,
                 'role': claims.get('role'),
-                'name': claims.get('name')
+                'name': claims.get('name'),
+                'sector': claims.get('sector')
             }
         }), 200
         

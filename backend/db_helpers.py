@@ -20,15 +20,16 @@ class DatabaseError(Exception):
 #                            USER FUNCTIONS (AUTHENTICATION)
 # ============================================================================
 
-def create_user(email, password_hash, role, name):
+def create_user(email, password_hash, role, name, sector=None):
     """
     Create a new user in the database.
     
     Args:
         email (str): User's email address (unique)
         password_hash (str): Hashed password
-        role (str): User role - "interviewer" or "admin"
+        role (str): User role - "super_admin", "sector_admin", "recruiter", "interviewer", "admin", "proctor"
         name (str): User's full name
+        sector (str, optional): Sector assignment for sector-specific roles
     
     Returns:
         int: User ID of the newly created user
@@ -41,9 +42,9 @@ def create_user(email, password_hash, role, name):
         cursor = conn.cursor()
         
         cursor.execute(
-            """INSERT INTO users (email, password_hash, role, name)
-               VALUES (?, ?, ?, ?) RETURNING id""",
-            (email, password_hash, role, name)
+            """INSERT INTO users (email, password_hash, role, name, sector)
+               VALUES (?, ?, ?, ?, ?) RETURNING id""",
+            (email, password_hash, role, name, sector)
         )
         
         result = cursor.fetchone()
@@ -68,7 +69,7 @@ def get_user_by_email(email):
         email (str): User's email address
     
     Returns:
-        dict: User data with keys (id, email, password_hash, role, name, created_at, updated_at)
+        dict: User data with keys (id, email, password_hash, role, name, sector, created_at, updated_at)
               or None if user not found
     
     Raises:
@@ -79,7 +80,7 @@ def get_user_by_email(email):
         cursor = conn.cursor()
         
         cursor.execute(
-            """SELECT id, email, password_hash, role, name, created_at, updated_at
+            """SELECT id, email, password_hash, role, name, sector, created_at, updated_at
                FROM users WHERE email = ?""",
             (email,)
         )
@@ -94,8 +95,9 @@ def get_user_by_email(email):
                 'password_hash': row[2],
                 'role': row[3],
                 'name': row[4],
-                'created_at': row[5],
-                'updated_at': row[6]
+                'sector': row[5],
+                'created_at': row[6],
+                'updated_at': row[7]
             }
         return None
     
@@ -1806,3 +1808,255 @@ def get_assessment_time_elapsed(assessment_id):
 if __name__ == "__main__":
     print("Database Helper Functions Module")
     print("Import this module to use database functions")
+
+
+# ============================================================================
+#                        AUDIT LOGGING FUNCTIONS
+# ============================================================================
+
+def log_audit(user_id, user_email, action, resource_type, resource_id=None, details=None, ip_address=None, user_agent=None):
+    """
+    Log an audit trail entry for user actions
+    
+    Args:
+        user_id (int): ID of the user performing the action
+        user_email (str): Email of the user
+        action (str): Action performed (e.g., 'create', 'update', 'delete', 'view')
+        resource_type (str): Type of resource (e.g., 'job', 'candidate', 'user')
+        resource_id (int, optional): ID of the resource affected
+        details (dict, optional): Additional details as JSON
+        ip_address (str, optional): IP address of the request
+        user_agent (str, optional): User agent string
+    
+    Returns:
+        int: Audit log ID
+    
+    Raises:
+        DatabaseError: If logging fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO audit_logs 
+               (user_id, user_email, action, resource_type, resource_id, details, ip_address, user_agent)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+               RETURNING id""",
+            (user_id, user_email, action, resource_type, resource_id, 
+             json.dumps(details) if details else None, ip_address, user_agent)
+        )
+        
+        audit_id = cursor.fetchone()[0]
+        conn.commit()
+        conn.close()
+        
+        return audit_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error logging audit: {str(e)}")
+
+
+def get_audit_logs(limit=100, user_id=None, action=None, resource_type=None):
+    """
+    Retrieve audit logs with optional filtering
+    
+    Args:
+        limit (int): Maximum number of logs to retrieve
+        user_id (int, optional): Filter by user ID
+        action (str, optional): Filter by action type
+        resource_type (str, optional): Filter by resource type
+    
+    Returns:
+        list: List of audit log dictionaries
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        query = "SELECT * FROM audit_logs WHERE 1=1"
+        params = []
+        
+        if user_id:
+            query += " AND user_id = %s"
+            params.append(user_id)
+        if action:
+            query += " AND action = %s"
+            params.append(action)
+        if resource_type:
+            query += " AND resource_type = %s"
+            params.append(resource_type)
+        
+        query += " ORDER BY timestamp DESC LIMIT %s"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(zip(columns, row)) for row in rows]
+    
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving audit logs: {str(e)}")
+
+
+# ============================================================================
+#                    SECTOR EMAIL CONFIGURATION FUNCTIONS
+# ============================================================================
+
+def get_sector_email_config(sector):
+    """
+    Get email configuration for a specific sector
+    
+    Args:
+        sector (str): Sector name
+    
+    Returns:
+        dict: Email configuration or None if not found
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, sector, email_address, display_name, is_active, created_at, updated_at
+               FROM sector_email_configs WHERE sector = %s AND is_active = true""",
+            (sector,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'id': row[0],
+                'sector': row[1],
+                'email_address': row[2],
+                'display_name': row[3],
+                'is_active': row[4],
+                'created_at': row[5],
+                'updated_at': row[6]
+            }
+        return None
+    
+    except Exception as e:
+        raise DatabaseError(f"Error getting sector email config: {str(e)}")
+
+
+def get_all_sector_email_configs():
+    """
+    Get all sector email configurations
+    
+    Returns:
+        list: List of email configuration dictionaries
+    
+    Raises:
+        DatabaseError: If retrieval fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT id, sector, email_address, display_name, is_active, created_at, updated_at
+               FROM sector_email_configs ORDER BY sector"""
+        )
+        
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(zip(columns, row)) for row in rows]
+    
+    except Exception as e:
+        raise DatabaseError(f"Error getting sector email configs: {str(e)}")
+
+
+def create_sector_email_config(sector, email_address, display_name):
+    """
+    Create a new sector email configuration
+    
+    Args:
+        sector (str): Sector name
+        email_address (str): Email address for the sector
+        display_name (str): Display name for the sector
+    
+    Returns:
+        int: Configuration ID
+    
+    Raises:
+        DatabaseError: If creation fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """INSERT INTO sector_email_configs (sector, email_address, display_name)
+               VALUES (%s, %s, %s)
+               RETURNING id""",
+            (sector, email_address, display_name)
+        )
+        
+        config_id = cursor.fetchone()[0]
+        conn.commit()
+        conn.close()
+        
+        return config_id
+    
+    except Exception as e:
+        raise DatabaseError(f"Error creating sector email config: {str(e)}")
+
+
+def update_sector_email_config(sector, email_address=None, display_name=None, is_active=None):
+    """
+    Update a sector email configuration
+    
+    Args:
+        sector (str): Sector name
+        email_address (str, optional): New email address
+        display_name (str, optional): New display name
+        is_active (bool, optional): Active status
+    
+    Raises:
+        DatabaseError: If update fails
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        updates = []
+        params = []
+        
+        if email_address is not None:
+            updates.append("email_address = %s")
+            params.append(email_address)
+        if display_name is not None:
+            updates.append("display_name = %s")
+            params.append(display_name)
+        if is_active is not None:
+            updates.append("is_active = %s")
+            params.append(is_active)
+        
+        if not updates:
+            return
+        
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(sector)
+        
+        query = f"UPDATE sector_email_configs SET {', '.join(updates)} WHERE sector = %s"
+        cursor.execute(query, params)
+        
+        conn.commit()
+        conn.close()
+    
+    except Exception as e:
+        raise DatabaseError(f"Error updating sector email config: {str(e)}")

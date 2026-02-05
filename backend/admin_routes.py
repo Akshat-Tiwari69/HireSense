@@ -649,8 +649,11 @@ def get_email_logs():
 @require_admin_role
 def get_job_postings():
     """
-    Get all job postings
+    Get all job postings (filtered by sector access)
     """
+    from flask_jwt_extended import get_jwt
+    from access_control import filter_by_sector_access
+    
     conn = None
     try:
         conn = get_connection()
@@ -667,6 +670,15 @@ def get_job_postings():
                 job['created_at'] = job['created_at'].isoformat()
             if job.get('updated_at'):
                 job['updated_at'] = job['updated_at'].isoformat()
+        
+        # Filter by sector access
+        claims = get_jwt()
+        user_role = claims.get('role')
+        user_sector = claims.get('sector')
+        
+        # Sector admins can only see jobs in their sector
+        if user_role == 'sector_admin':
+            jobs = [job for job in jobs if job.get('sector') == user_sector]
         
         return jsonify({
             'status': 'success',
@@ -685,34 +697,76 @@ def get_job_postings():
 @require_admin_role
 def create_job_posting():
     """
-    Create a new job posting
+    Create a new job posting with required and preferred skills
     """
+    from audit_middleware import audit_log
+    from access_control import filter_by_sector_access
+    from flask_jwt_extended import get_jwt
+    
     conn = None
     try:
         data = request.get_json()
         
+        # Validate required fields
         if not data or not data.get('title'):
             return jsonify({'status': 'error', 'message': 'Title is required'}), 400
+        
+        if not data.get('required_skills'):
+            return jsonify({'status': 'error', 'message': 'At least one required skill must be specified'}), 400
+        
+        # Get user info from JWT
+        claims = get_jwt()
+        user_role = claims.get('role')
+        user_sector = claims.get('sector')
+        
+        # Determine sector for the job
+        job_sector = data.get('sector', '')
+        
+        # Sector admins can only create jobs in their sector
+        if user_role == 'sector_admin' and job_sector != user_sector:
+            return jsonify({
+                'status': 'error',
+                'message': 'Sector admins can only create jobs in their assigned sector'
+            }), 403
         
         conn = get_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            INSERT INTO job_descriptions (title, description, required_skills, min_experience, department, location)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO job_descriptions 
+            (title, description, required_skills, preferred_skills, min_experience, department, location, sector)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             data['title'],
             data.get('description', ''),
             data.get('required_skills', ''),
+            data.get('preferred_skills', ''),
             data.get('min_experience', 0),
             data.get('department', ''),
-            data.get('location', '')
+            data.get('location', ''),
+            job_sector
         ))
         
         job_id = cursor.fetchone()[0]
         conn.commit()
         cursor.close()
+        
+        # Log audit trail
+        from flask_jwt_extended import get_jwt_identity
+        user_id = get_jwt_identity()
+        from db_helpers import log_audit, get_user_by_id
+        user = get_user_by_id(user_id)
+        log_audit(
+            user_id=int(user_id),
+            user_email=user.get('email') if user else 'unknown',
+            action='create',
+            resource_type='job',
+            resource_id=job_id,
+            details={'title': data['title'], 'sector': job_sector},
+            ip_address=request.headers.get('X-Forwarded-For', request.remote_addr),
+            user_agent=request.headers.get('User-Agent')
+        )
         
         return jsonify({
             'status': 'success',
@@ -830,3 +884,188 @@ def get_analytics():
     finally:
         if conn:
             conn.close()
+
+
+# ============================================================================
+#                    SECTOR EMAIL CONFIGURATION ROUTES
+# ============================================================================
+
+@admin_bp.route('/sector-emails', methods=['GET'])
+@jwt_required()
+@require_admin_role
+def get_sector_emails():
+    """
+    Get all sector email configurations
+    """
+    try:
+        from db_helpers import get_all_sector_email_configs
+        configs = get_all_sector_email_configs()
+        
+        # Format timestamps
+        for config in configs:
+            if config.get('created_at'):
+                config['created_at'] = config['created_at'].isoformat()
+            if config.get('updated_at'):
+                config['updated_at'] = config['updated_at'].isoformat()
+        
+        return jsonify({
+            'status': 'success',
+            'data': configs
+        })
+    except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to fetch sector emails: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@admin_bp.route('/sector-emails', methods=['POST'])
+@jwt_required()
+@require_admin_role
+def create_sector_email():
+    """
+    Create a new sector email configuration (Super Admin only)
+    """
+    from flask_jwt_extended import get_jwt, get_jwt_identity
+    from db_helpers import create_sector_email_config, log_audit, get_user_by_id
+    
+    try:
+        # Only super_admin can create sector email configs
+        claims = get_jwt()
+        if claims.get('role') != 'super_admin':
+            return jsonify({
+                'status': 'error',
+                'message': 'Only super admins can create sector email configurations'
+            }), 403
+        
+        data = request.get_json()
+        
+        if not all(k in data for k in ['sector', 'email_address', 'display_name']):
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing required fields: sector, email_address, display_name'
+            }), 400
+        
+        config_id = create_sector_email_config(
+            data['sector'],
+            data['email_address'],
+            data['display_name']
+        )
+        
+        # Log audit trail
+        user_id = get_jwt_identity()
+        user = get_user_by_id(user_id)
+        log_audit(
+            user_id=int(user_id),
+            user_email=user.get('email') if user else 'unknown',
+            action='create',
+            resource_type='sector_email_config',
+            resource_id=config_id,
+            details={'sector': data['sector']},
+            ip_address=request.headers.get('X-Forwarded-For', request.remote_addr),
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Sector email configuration created successfully',
+            'data': {'id': config_id}
+        }), 201
+    except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to create sector email: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@admin_bp.route('/sector-emails/<sector>', methods=['PUT'])
+@jwt_required()
+@require_admin_role
+def update_sector_email(sector):
+    """
+    Update a sector email configuration (Super Admin only)
+    """
+    from flask_jwt_extended import get_jwt, get_jwt_identity
+    from db_helpers import update_sector_email_config, log_audit, get_user_by_id
+    
+    try:
+        # Only super_admin can update sector email configs
+        claims = get_jwt()
+        if claims.get('role') != 'super_admin':
+            return jsonify({
+                'status': 'error',
+                'message': 'Only super admins can update sector email configurations'
+            }), 403
+        
+        data = request.get_json()
+        
+        update_sector_email_config(
+            sector=sector,
+            email_address=data.get('email_address'),
+            display_name=data.get('display_name'),
+            is_active=data.get('is_active')
+        )
+        
+        # Log audit trail
+        user_id = get_jwt_identity()
+        user = get_user_by_id(user_id)
+        log_audit(
+            user_id=int(user_id),
+            user_email=user.get('email') if user else 'unknown',
+            action='update',
+            resource_type='sector_email_config',
+            details={'sector': sector, 'changes': data},
+            ip_address=request.headers.get('X-Forwarded-For', request.remote_addr),
+            user_agent=request.headers.get('User-Agent')
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Sector email configuration updated successfully'
+        })
+    except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to update sector email: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ============================================================================
+#                          AUDIT LOG ROUTES
+# ============================================================================
+
+@admin_bp.route('/audit-logs', methods=['GET'])
+@jwt_required()
+@require_admin_role
+def get_audit_logs():
+    """
+    Get audit logs (filtered based on role)
+    Super Admin: All logs
+    Sector Admin: Only logs for their sector
+    """
+    from flask_jwt_extended import get_jwt
+    from db_helpers import get_audit_logs
+    
+    try:
+        claims = get_jwt()
+        user_role = claims.get('role')
+        user_sector = claims.get('sector')
+        
+        # Get query parameters
+        limit = request.args.get('limit', 100, type=int)
+        action = request.args.get('action')
+        resource_type = request.args.get('resource_type')
+        
+        logs = get_audit_logs(limit=limit, action=action, resource_type=resource_type)
+        
+        # Format timestamps
+        for log in logs:
+            if log.get('timestamp'):
+                log['timestamp'] = log['timestamp'].isoformat()
+        
+        # Filter by sector for sector admins
+        if user_role == 'sector_admin':
+            # Sector admins can only see logs from users in their sector
+            logs = [log for log in logs if log.get('details', {}).get('sector') == user_sector]
+        
+        return jsonify({
+            'status': 'success',
+            'data': logs
+        })
+    except Exception as e:
+        logger.error(f"[ADMIN ERROR] Failed to fetch audit logs: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
