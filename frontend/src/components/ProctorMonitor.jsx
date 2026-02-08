@@ -164,7 +164,7 @@ const ProctorMonitor = ({ assessmentId, onClose }) => {
                     <div className="video-container">
                         {error && !hasActiveStream && (
                             <div className="error-message">
-                                ⚠️ {error}
+                                 {error}
                             </div>
                         )}
 
@@ -186,10 +186,10 @@ const ProctorMonitor = ({ assessmentId, onClose }) => {
 
                     <div className="proctor-info">
                         <p className="info-text">
-                            📌 Monitor the candidate's camera feed during the assessment
+                             Monitor the candidate's camera feed during the assessment
                         </p>
                         <p className="info-text">
-                            🔒 This feed is secure and only visible to authorized interviewers
+                             This feed is secure and only visible to authorized interviewers
                         </p>
                     </div>
                 </div>

@@ -5,6 +5,7 @@ Protected routes requiring JWT authentication with 'interviewer' role
 """
 
 import os
+import json
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from datetime import datetime
@@ -131,7 +132,7 @@ def get_candidates():
         }), 200
         
     except Exception as e:
-        logger.exception(f"❌ Failed to fetch candidates: {e}")
+        logger.exception(f" Failed to fetch candidates: {e}")
         return jsonify({
             'status': 'error',
             'message': f'Failed to fetch candidates: {str(e)}'
@@ -250,7 +251,7 @@ def reject_candidate(candidate_id):
         reason = data.get('reason', '')
         
         # Get candidate info
-        print(f"[REJECT] Getting candidate info...", flush=True)
+        print("[REJECT] Getting candidate info...", flush=True)
         candidate = get_candidate_by_id(candidate_id)
         if not candidate:
             print(f"[REJECT] Candidate {candidate_id} not found", flush=True)
@@ -262,7 +263,7 @@ def reject_candidate(candidate_id):
         print(f"[REJECT] Found candidate: {candidate['name']}", flush=True)
         
         # Update status to rejected
-        print(f"[REJECT] Updating status to rejected...", flush=True)
+        print("[REJECT] Updating status to rejected...", flush=True)
         update_candidate_status(candidate_id, 'rejected', candidate.get('pros'), candidate.get('cons'))
         
         # Send rejection email
@@ -270,11 +271,11 @@ def reject_candidate(candidate_id):
         email_sent = send_rejection_email(
             candidate_email=candidate['email'],
             candidate_name=candidate['name'],
-            reason=reason if reason else None
+            reason=reason or None
         )
         print(f"[REJECT] Email result: {email_sent}", flush=True)
         
-        print(f"[REJECT] Done! Returning success.", flush=True)
+        print("[REJECT] Done! Returning success.", flush=True)
         return jsonify({
             'status': 'success',
             'message': 'Candidate rejected successfully',
@@ -298,10 +299,11 @@ def reject_candidate(candidate_id):
 @require_interviewer_role
 def schedule_assessment(candidate_id):
     """
-    Schedule assessment for a candidate
+    Schedule assessment for a candidate and generate questions immediately.
     
     Request Body:
         - scheduled_time: ISO datetime string or formatted time
+        - is_technical_role: Boolean (default True) - if False, no coding questions
         - additional_info: Optional custom instructions
     
     Returns:
@@ -313,7 +315,7 @@ def schedule_assessment(candidate_id):
         print(f"[SCHEDULE] Data received: {data}", flush=True)
         
         if not data or 'scheduled_time' not in data:
-            print(f"[SCHEDULE] Missing scheduled_time", flush=True)
+            print("[SCHEDULE] Missing scheduled_time", flush=True)
             return jsonify({
                 'status': 'error',
                 'message': 'scheduled_time is required'
@@ -321,14 +323,14 @@ def schedule_assessment(candidate_id):
         
         scheduled_time_input = data['scheduled_time']
         additional_info = data.get('additional_info', None)
+        is_technical_role = data.get('is_technical_role', True)  # Default to technical
         
         # Store the time as-is (local time) - no timezone conversion
-        # This ensures the time displayed matches what the user entered
         scheduled_time = scheduled_time_input
-        print(f"[SCHEDULE] Using time as entered: {scheduled_time}", flush=True)
+        print(f"[SCHEDULE] Using time as entered: {scheduled_time}, is_technical: {is_technical_role}", flush=True)
         
         # Get candidate info
-        print(f"[SCHEDULE] Getting candidate info...", flush=True)
+        print("[SCHEDULE] Getting candidate info...", flush=True)
         candidate = get_candidate_by_id(candidate_id)
         if not candidate:
             print(f"[SCHEDULE] Candidate {candidate_id} not found", flush=True)
@@ -339,43 +341,166 @@ def schedule_assessment(candidate_id):
         
         print(f"[SCHEDULE] Found candidate: {candidate['name']}", flush=True)
         
-        # Get interviewer ID from JWT (convert to int for database)
+        # Parse candidate skills (handle both 'skills' list and 'parsed_skills' JSON string)
+        candidate_skills = []
+        # Try 'skills' key first (already-parsed list from get_candidate_by_id)
+        if candidate.get('skills') and isinstance(candidate['skills'], list):
+            candidate_skills = [s.strip() for s in candidate['skills'] if isinstance(s, str) and s.strip()]
+        # Fallback: try 'parsed_skills' raw JSON string
+        elif candidate.get('parsed_skills'):
+            skills_raw = candidate['parsed_skills']
+            if isinstance(skills_raw, str):
+                try:
+                    parsed = json.loads(skills_raw)
+                    if isinstance(parsed, list):
+                        candidate_skills = [s.strip() for s in parsed if isinstance(s, str) and s.strip()]
+                    else:
+                        candidate_skills = [s.strip() for s in skills_raw.replace('\n', ',').split(',') if s.strip()]
+                except (json.JSONDecodeError, TypeError):
+                    candidate_skills = [s.strip() for s in skills_raw.replace('\n', ',').split(',') if s.strip()]
+            elif isinstance(skills_raw, list):
+                candidate_skills = [s.strip() for s in skills_raw if isinstance(s, str) and s.strip()]
+        print(f"[SCHEDULE] Parsed candidate_skills: {candidate_skills[:5]} (total: {len(candidate_skills)})", flush=True)
+        
+        # Fetch job details for better question generation
+        applied_job_title = ""
+        job_required_skills = []
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT jd.title, jd.required_skills 
+                FROM job_descriptions jd 
+                JOIN candidates c ON c.best_match_job_id = jd.id 
+                WHERE c.id = %s""",
+                (candidate_id,)
+            )
+            jrow = cursor.fetchone()
+            if jrow:
+                applied_job_title = jrow[0] or ""
+                if jrow[1]:
+                    job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
+            return_connection(conn)
+        except Exception as e:
+            logger.warning(f"Could not fetch job details: {e}")
+        
+        # Generate UNIQUE AI questions at schedule time (pre-cached for fast assessment start)
+        print("[SCHEDULE] Generating unique AI questions for candidate...", flush=True)
+        print(f"[SCHEDULE] candidate_skills ({len(candidate_skills)}): {candidate_skills[:5]}", flush=True)
+        print(f"[SCHEDULE] job_required_skills ({len(job_required_skills)}): {job_required_skills[:5]}", flush=True)
+        print(f"[SCHEDULE] applied_job_title: {applied_job_title}", flush=True)
+        questions_data = None
+        try:
+            from ai_question_generator import get_ai_question_generator
+            from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
+            
+            ai_generator = get_ai_question_generator()
+            
+            # Generate each question type independently so one failure doesn't kill the rest
+            mcq_questions = None
+            coding_problem = None
+            psychometric_scenarios = None
+            
+            has_skills = candidate_skills or job_required_skills
+            
+            # 1. MCQ Questions
+            try:
+                if has_skills:
+                    mcq_questions = ai_generator.generate_mcq_questions(
+                        candidate_skills,
+                        count=10,
+                        difficulty="mixed",
+                        job_title=applied_job_title,
+                        job_skills=job_required_skills
+                    )
+            except Exception as mcq_err:
+                print(f"[SCHEDULE] MCQ AI failed: {mcq_err}", flush=True)
+            if not mcq_questions:
+                mcq_questions = get_mcq_questions(count=10)
+                print("[SCHEDULE] MCQ: Using fallback questions", flush=True)
+            
+            # 2. Coding Problem (technical roles only)
+            try:
+                if is_technical_role and has_skills:
+                    coding_problem = ai_generator.generate_coding_problem(
+                        candidate_skills,
+                        difficulty="medium",
+                        job_title=applied_job_title,
+                        is_technical=True,
+                        job_skills=job_required_skills
+                    )
+            except Exception as code_err:
+                print(f"[SCHEDULE] Coding AI failed: {code_err}", flush=True)
+            if is_technical_role and not coding_problem:
+                coding_problem = get_coding_problem(difficulty="medium")
+                print("[SCHEDULE] Coding: Using fallback problem", flush=True)
+            
+            # 3. Psychometric Scenarios
+            try:
+                psychometric_scenarios = ai_generator.generate_psychometric_scenarios(
+                    job_role=applied_job_title or "Professional",
+                    count=3
+                )
+            except Exception as psych_err:
+                print(f"[SCHEDULE] Psychometric AI failed: {psych_err}", flush=True)
+            if not psychometric_scenarios:
+                psychometric_scenarios = get_psychometric_scenarios(count=3)
+                print("[SCHEDULE] Psychometric: Using fallback scenarios", flush=True)
+            
+            questions_data = {
+                'mcq_questions': mcq_questions,
+                'coding_problem': coding_problem,
+                'psychometric_scenarios': psychometric_scenarios,
+                'is_technical_role': is_technical_role
+            }
+            print(f"[SCHEDULE] Final: {len(mcq_questions)} MCQ, coding={'Yes' if coding_problem else 'No'}, {len(psychometric_scenarios)} psychometric", flush=True)
+            
+        except Exception as e:
+            logger.warning(f"AI question generation failed at schedule time: {str(e)}")
+            print(f"[SCHEDULE] TOTAL FAILURE: {e}", flush=True)
+            from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
+            questions_data = {
+                'mcq_questions': get_mcq_questions(count=10),
+                'coding_problem': get_coding_problem(difficulty="medium") if is_technical_role else None,
+                'psychometric_scenarios': get_psychometric_scenarios(count=3),
+                'is_technical_role': is_technical_role
+            }
+        
+        # Get interviewer ID from JWT
         interviewer_id = int(get_jwt_identity())
         print(f"[SCHEDULE] Interviewer ID: {interviewer_id}", flush=True)
         
-        # Create scheduled assessment
-        print(f"[SCHEDULE] Creating scheduled assessment...", flush=True)
+        # Create scheduled assessment with pre-generated questions
+        print("[SCHEDULE] Creating scheduled assessment with unique questions...", flush=True)
         scheduled_assessment_id = create_scheduled_assessment(
             candidate_id=candidate_id,
             interviewer_id=interviewer_id,
-            scheduled_time=scheduled_time
+            scheduled_time=scheduled_time,
+            is_technical_role=is_technical_role,
+            questions_data=questions_data
         )
         print(f"[SCHEDULE] Assessment ID: {scheduled_assessment_id}", flush=True)
         
         # Generate secure access token for this assessment
         access_token = generate_assessment_token()
         set_assessment_token(scheduled_assessment_id, access_token)
-        print(f"[SCHEDULE] Access token generated", flush=True)
+        print("[SCHEDULE] Access token generated", flush=True)
         
         # Generate assessment link with token
         # Priority: 1) FRONTEND_URL env var, 2) Origin header from request, 3) Referer header, 4) localhost fallback
         frontend_url = os.environ.get('FRONTEND_URL')
         if not frontend_url:
             # Try to get from request origin
-            origin = request.headers.get('Origin')
-            if origin:
+            if origin := request.headers.get('Origin'):
                 frontend_url = origin.rstrip('/')
+            elif referer := request.headers.get('Referer'):
+                # Extract base URL from referer (e.g., http://10.39.35.52:5173/some/path -> http://10.39.35.52:5173)
+                from urllib.parse import urlparse
+                parsed = urlparse(referer)
+                frontend_url = f"{parsed.scheme}://{parsed.netloc}"
             else:
-                # Try referer as fallback
-                referer = request.headers.get('Referer')
-                if referer:
-                    # Extract base URL from referer (e.g., http://10.39.35.52:5173/some/path -> http://10.39.35.52:5173)
-                    from urllib.parse import urlparse
-                    parsed = urlparse(referer)
-                    frontend_url = f"{parsed.scheme}://{parsed.netloc}"
-                else:
-                    # Final fallback to localhost
-                    frontend_url = 'http://localhost:5173'
+                # Final fallback to localhost
+                frontend_url = 'http://localhost:5173'
         
         assessment_link = f"{frontend_url}/assessment/{access_token}"
         print(f"[SCHEDULE] Frontend URL: {frontend_url}", flush=True)
@@ -398,10 +523,10 @@ def schedule_assessment(candidate_id):
         print(f"[SCHEDULE] Email result: {email_sent}", flush=True)
         
         # Update candidate status
-        print(f"[SCHEDULE] Updating candidate status...", flush=True)
+        print("[SCHEDULE] Updating candidate status...", flush=True)
         update_candidate_status(candidate_id, 'under_review', candidate.get('pros'), candidate.get('cons'))
         
-        print(f"[SCHEDULE] Done! Returning success.", flush=True)
+        print("[SCHEDULE] Done! Returning success.", flush=True)
         return jsonify({
             'status': 'success',
             'message': 'Assessment scheduled successfully',
@@ -515,7 +640,7 @@ def make_final_decision(assessment_id):
             assessment_id=assessment_id,
             technical_score=assessment.get('technical_score'),
             psychometric_score=assessment.get('psychometric_score'),
-            decision=f"Hire" if decision in ['hire', 'hired', 'selected'] else "No-Hire",
+            decision="Hire" if decision in ['hire', 'hired', 'selected'] else "No-Hire",
             rationale=rationale or assessment.get('rationale', 'Decision made after assessment review')
         )
         

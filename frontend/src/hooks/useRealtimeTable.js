@@ -21,7 +21,7 @@ export const useRealtimeTable = (tableName, initialData = [], options = {}) => {
     useEffect(() => {
         // Skip if supabase client is not configured
         if (!supabase) {
-            console.warn(`⚠️ Realtime not available for table: ${tableName}. Configure VITE_SUPABASE_ANON_KEY in .env.local`)
+            console.warn(` Realtime not available for table: ${tableName}. Configure VITE_SUPABASE_ANON_KEY in .env.local`)
             return
         }
 

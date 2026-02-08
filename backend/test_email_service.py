@@ -17,10 +17,10 @@ def test_email():
     test_email = input("\nEnter recipient email address: ").strip()
     
     if not test_email:
-        print("❌ No email address provided")
+        print(" No email address provided")
         return
     
-    print(f"\n📧 Sending test email to: {test_email}")
+    print(f"\n Sending test email to: {test_email}")
     print("=" * 60)
     
     # Initialize email service
@@ -45,17 +45,17 @@ def test_email():
     <body>
         <div class="container">
             <div class="header">
-                <h1>✅ Email Service Test</h1>
+                <h1> Email Service Test</h1>
                 <p>HireSense Platform</p>
             </div>
             <div class="content">
-                <p class="success">Success! 🎉</p>
+                <p class="success">Success! </p>
                 <p>If you're reading this, your email service is working correctly.</p>
                 <p><strong>Test Details:</strong></p>
                 <ul>
                     <li>Service: HireSense Email Service</li>
                     <li>Configuration: SMTP (Gmail)</li>
-                    <li>Status: ✅ Working</li>
+                    <li>Status:  Working</li>
                 </ul>
                 <p>You can now send assessment invitations, reminders, and results to candidates.</p>
             </div>
@@ -79,15 +79,15 @@ def test_email():
         )
         
         if success:
-            print("\n✅ TEST EMAIL SENT SUCCESSFULLY!")
+            print("\n TEST EMAIL SENT SUCCESSFULLY!")
             print(f"   Check inbox: {test_email}")
             print("   Email service is working correctly")
         else:
-            print("\n❌ FAILED TO SEND TEST EMAIL")
+            print("\n FAILED TO SEND TEST EMAIL")
             print("   Please check your email configuration")
             
     except Exception as e:
-        print(f"\n❌ ERROR: {e}")
+        print(f"\n ERROR: {e}")
         print("   Email service encountered an error")
 
 if __name__ == "__main__":

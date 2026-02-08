@@ -9,6 +9,7 @@ import InterviewerDashboardPage from "./pages/InterviewerDashboardPage";
 import AssessmentPage from "./pages/AssessmentPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import ProctorDashboardPage from "./pages/ProctorDashboardPage";
+import JobListingsPage from "./pages/JobListingsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { Toaster } from "./components/ui/sonner";
 
@@ -20,6 +21,7 @@ function App() {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/jobs" element={<JobListingsPage />} />
             <Route path="/apply" element={<ApplyPage />} />
             <Route path="/dashboard" element={<InterviewerDashboardPage />} />
             <Route path="/admin" element={<AdminDashboardPage />} />

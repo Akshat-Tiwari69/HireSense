@@ -1,13 +1,11 @@
 """
 AI Question Generator Module
 Generates personalized assessment questions based on candidate resume
-Uses OpenAI API to create MCQ, coding problems, and test cases
 """
 
 import os
 import json
 import random
-from openai import OpenAI
 import httpx
 from typing import Dict, List, Optional
 import logging
@@ -26,15 +24,16 @@ class AIQuestionGenerator:
         Initialize the AI Question Generator
         
         Args:
-            api_key: OpenAI API key (if not provided, reads from environment)
+            api_key: OpenAI API key (defaults to OPENAI_API_KEY environment variable)
         """
-        self.api_key = api_key or os.environ.get('OPENAI_API_KEY')
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.model = "gpt-4o-mini"
         
         if not self.api_key:
-            logger.warning("OpenAI API key not found. Will use fallback questions.")
             self.client = None
         else:
             try:
+                from openai import OpenAI
                 self.client = OpenAI(api_key=self.api_key)
             except TypeError as e:
                 if "proxies" in str(e):
@@ -45,33 +44,146 @@ class AIQuestionGenerator:
                         or os.environ.get("http_proxy")
                     )
                     http_client = httpx.Client(proxies=proxy) if proxy else httpx.Client()
+                    from openai import OpenAI
                     self.client = OpenAI(api_key=self.api_key, http_client=http_client)
                 else:
                     raise
-        
-        self.model = "gpt-4o-mini"
     
-    def generate_mcq_questions(self, skills: List[str], count: int = 10, difficulty: str = "mixed") -> List[Dict]:
+    def _parse_json_string(self, value):
+        """Parse JSON string or return as-is if already a dict/list"""
+        return json.loads(value) if isinstance(value, str) else value
+    
+    def _clean_markdown_json(self, content: str) -> str:
+        """Extract JSON from markdown code blocks"""
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return content.strip()
+    
+    def _inject_custom_questions_block(self, custom_qs: List[Dict]) -> str:
+        """Generate custom question block for prompt injection"""
+        relevant = [cq for cq in custom_qs if cq and cq.get('question') and len(cq['question']) > 10]
+        if not relevant:
+            return ""
+        
+        sample_size = min(5, len(relevant))
+        sampled = random.sample(relevant, sample_size)
+        custom_block = "\n".join(
+            f"  - {cq['question']}" + (f" (Options: {', '.join(cq['options'])})" if cq.get('options') else "")
+            for cq in sampled
+        )
+        print(f"[MCQ] Injecting {len(sampled)} custom questions from question bank", flush=True)
+        
+        return f"""
+
+**CUSTOM QUESTION BANK (from the interviewer):**
+The interviewer has uploaded the following reference questions. You SHOULD include 2-3 of these (adapted if needed to fit the role/skills) in your output alongside your own generated questions:
+{custom_block}
+
+If a custom question is relevant to the candidate's skills or the role, use it as-is or adapt it. If it already has options and a correct answer, preserve them. Blend them naturally with your generated questions."""
+    
+    def _call_openai_api(self, system_message: str, user_message: str, temperature: float = 0.7, max_tokens: int = 2000) -> str:
+        """Call OpenAI API with given parameters and return response content"""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message.content.strip()
+    
+    def _build_mcq_system_prompt(self, role_desc: str) -> str:
+        """Build system prompt for MCQ generation"""
+        return f"You are an expert interviewer creating unique assessment questions for the role of {role_desc} at an Indian company. Your goal is to verify that candidates truly possess the skills they claim on their resume while also testing job-specific knowledge. Generate completely fresh questions every time — never repeat patterns."
+    
+    def _build_coding_system_prompt(self, role_desc: str) -> str:
+        """Build system prompt for coding problem generation"""
+        return f"You are an expert at creating practical assessment challenges for {role_desc} roles at an Indian company. Generate role-appropriate problems with Indian context where applicable."
+    
+    def _generate_questions_from_api(self, role_desc: str, prompt: str) -> List[Dict]:
+        """Generate MCQ questions from OpenAI API"""
+        system_prompt = self._build_mcq_system_prompt(role_desc)
+        content = self._call_openai_api(system_prompt, prompt, temperature=0.9, max_tokens=4000)
+        content = self._clean_markdown_json(content)
+        return json.loads(content)
+    
+    def _generate_problem_from_api(self, role_desc: str, prompt: str) -> Dict:
+        """Generate coding problem from OpenAI API"""
+        system_prompt = self._build_coding_system_prompt(role_desc)
+        content = self._call_openai_api(system_prompt, prompt, temperature=0.7, max_tokens=3000)
+        content = self._clean_markdown_json(content)
+        return json.loads(content)
+    
+    def _get_custom_questions(self):
         """
-        Generate MCQ questions based on candidate skills
+        Fetch all active custom questions from the question bank.
+        Returns a list of question dicts.
+        """
+        try:
+            from db_config import get_connection, return_connection
+            conn = get_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT parsed_questions FROM custom_question_bank
+                WHERE is_active = true AND parsed_questions IS NOT NULL
+            """)
+            rows = cur.fetchall()
+            return_connection(conn)
+            
+            all_questions = []
+            for row in rows:
+                qs = self._parse_json_string(row[0])
+                if isinstance(qs, list):
+                    all_questions.extend(qs)
+            return all_questions
+        except Exception as e:
+            logger.warning(f"Could not fetch custom questions: {e}")
+            return []
+    
+    def generate_mcq_questions(self, skills: List[str], count: int = 10, difficulty: str = "mixed", job_title: str = "", job_skills: Optional[List[str]] = None) -> List[Dict]:
+        """
+        Generate MCQ questions based on candidate skills and job role
         
         Args:
             skills: List of skills from the candidate's resume
             count: Number of questions to generate
             difficulty: "easy", "medium", "hard", or "mixed"
+            job_title: The specific job title the candidate applied for
+            job_skills: Required skills from the job description
             
         Returns:
             List of MCQ question dictionaries
         """
-        if not self.client or not skills:
+        if not self.client or (not skills and not job_skills):
+            print(f"[MCQ] Falling back: client={'yes' if self.client else 'NO'}, skills={len(skills) if skills else 0}, job_skills={len(job_skills) if job_skills else 0}", flush=True)
             return self._get_fallback_mcq_questions(count)
         
-        skills_str = ", ".join(skills[:10])  # Limit to top 10 skills
+        print(f"[MCQ] Generating AI questions: skills={len(skills) if skills else 0}, job_skills={len(job_skills) if job_skills else 0}", flush=True)
         
-        prompt = f"""Generate {count} multiple choice questions to assess a software developer with these skills: {skills_str}
+        # Combine candidate skills with job-required skills (prioritize job skills)
+        skills_set = set(job_skills) if job_skills else set()
+        skills_set.update(skills or [])
+        all_skills = list(skills_set)
+        
+        skills_str = ", ".join(all_skills[:12])  # Limit to top 12 skills
+        role_desc = job_title or "a professional"
+        
+        prompt = f"""Generate {count} multiple choice questions to assess a candidate applying for the role of **{role_desc}** with these skills/qualifications: {skills_str}
+
+**IMPORTANT CONTEXT:**
+- The company is based in **India**. All questions must use Indian context, laws, regulations, standards, and examples where applicable.
+- For legal roles: use Indian Constitution, Indian Penal Code, Indian Contract Act, etc. — NOT US or UK law.
+- For finance: use Indian accounting standards (Ind AS), RBI regulations, SEBI guidelines, etc.
+- For medical: use Indian medical council guidelines, Indian pharmacopoeia, etc.
+- For technical roles: questions can be universal but prefer Indian industry examples where relevant.
+- Tailor questions to the SPECIFIC role of {role_desc} — do NOT ask generic software/coding questions unless the role requires it.
 
 Requirements:
-- Questions should test practical knowledge, not just theory
+- Questions should test practical knowledge relevant to {role_desc}
 - Include a mix of conceptual and problem-solving questions
 - Difficulty: {difficulty}
 - Each question should have exactly 4 options
@@ -92,26 +204,12 @@ Return a JSON array with this exact structure:
 
 Return ONLY valid JSON, no markdown or explanations."""
 
+        # Inject custom question bank if available
+        if custom_qs := self._get_custom_questions():
+            prompt += self._inject_custom_questions_block(custom_qs)
+
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert technical interviewer creating assessment questions."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=4000
-            )
-            
-            content = response.choices[0].message.content.strip()
-            # Clean up potential markdown formatting
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-            
-            questions = json.loads(content)
+            questions = self._generate_questions_from_api(role_desc, prompt)
             
             # Validate and fix IDs
             for i, q in enumerate(questions):
@@ -126,21 +224,35 @@ Return ONLY valid JSON, no markdown or explanations."""
             
         except Exception as e:
             logger.error(f"Error generating MCQ questions: {e}")
+            print(f"[MCQ] ERROR - falling back to static questions: {e}", flush=True)
             return self._get_fallback_mcq_questions(count)
     
-    def generate_coding_problem(self, skills: List[str], difficulty: str = "medium") -> Dict:
+    def generate_coding_problem(self, skills: List[str], difficulty: str = "medium", job_title: str = "", is_technical: Optional[bool] = None, job_skills: Optional[List[str]] = None) -> Dict:
         """
-        Generate a coding problem based on candidate skills
+        Generate a practical problem based on candidate skills and job role.
+        For technical roles: coding problem. For non-technical roles: case study / analytical problem.
         
         Args:
             skills: List of skills from the candidate's resume
             difficulty: "easy", "medium", or "hard"
+            job_title: The specific job title the candidate applied for
+            is_technical: Explicit flag from job description (overrides auto-detection)
+            job_skills: Required skills from the job description
             
         Returns:
-            Coding problem dictionary with test cases
+            Problem dictionary with test cases or evaluation criteria
         """
-        if not self.client or not skills:
+        if not self.client or (not skills and not job_skills):
+            print(f"[CODING] Falling back: client={'yes' if self.client else 'NO'}, skills={len(skills) if skills else 0}, job_skills={len(job_skills) if job_skills else 0}", flush=True)
             return self._get_fallback_coding_problem(difficulty)
+        
+        print(f"[CODING] Generating AI problem: skills={len(skills) if skills else 0}, job_skills={len(job_skills) if job_skills else 0}", flush=True)
+        
+        # Combine candidate skills with job-required skills
+        skills_set = set(skills or [])
+        if job_skills:
+            skills_set.update(job_skills)
+        all_skills = list(skills_set)
         
         # Identify programming languages from skills
         languages = []
@@ -151,25 +263,36 @@ Return ONLY valid JSON, no markdown or explanations."""
             'cpp': ['c++', 'cpp', 'c']
         }
         
-        skills_lower = [s.lower() for s in skills]
-        # Use set lookup for O(1) keyword search instead of nested loop
-        keywords_set = {kw: lang for lang, keywords in lang_keywords.items() for kw in keywords}
-        detected_langs = {keywords_set[kw] for skill in skills_lower if any(kw in skill for kw in keywords_set if kw in skill)}
-        languages.extend(list(detected_langs))
+        skills_lower = [s.lower() for s in all_skills]
+        languages_set = set()
+        # Detect programming languages from candidate skills
+        for skill in skills_lower:
+            for lang, keywords in lang_keywords.items():
+                if any(kw in skill for kw in keywords):
+                    languages_set.add(lang)
+        languages = list(languages_set)
+        
+        # Determine if this is a technical/coding role
+        # Priority: explicit is_technical flag > auto-detection from skills
+        is_technical_role = is_technical if is_technical is not None else bool(languages)
+        
+        role_desc = job_title or "a professional"
         
         if not languages:
             languages = ['python', 'javascript']
         
-        skills_str = ", ".join(skills[:8])
+        skills_str = ", ".join(skills[:8] if skills else [])
         
-        prompt = f"""Create a coding problem for a developer with these skills: {skills_str}
+        if is_technical_role:
+            prompt = f"""Create a coding problem for a candidate applying for **{role_desc}** with these skills: {skills_str}
 
 Difficulty: {difficulty}
 Target Languages: {', '.join(languages)}
+Context: The company is based in **India**.
 
 The problem should:
 - Be solvable in 20-30 minutes
-- Test practical coding skills relevant to the candidate's background
+- Test practical coding skills relevant to {role_desc}
 - Have clear input/output specifications
 - Include edge cases in test cases
 
@@ -198,26 +321,49 @@ Return JSON with this exact structure:
 }}
 
 Return ONLY valid JSON, no markdown."""
+        else:
+            # Non-technical role: generate a case study / analytical problem
+            prompt = f"""Create a professional case study problem for a candidate applying for **{role_desc}** with these qualifications: {skills_str}
+
+Difficulty: {difficulty}
+Context: The company is based in **India**. Use Indian laws, regulations, standards, and industry context where applicable.
+- For legal roles: use Indian Constitution, IPC, CrPC, Indian Contract Act, etc.
+- For finance roles: use Indian taxation, RBI, SEBI guidelines, Ind AS, etc.
+- For HR roles: use Indian labour laws, Shops & Establishments Act, etc.
+- For medical roles: use Indian medical regulations, MCI guidelines, etc.
+
+The problem should:
+- Be completable in 20-30 minutes
+- Present a realistic professional scenario relevant to {role_desc} in an Indian context
+- Test analytical thinking, domain knowledge, and decision-making
+- Have clear evaluation criteria
+
+Return JSON with this exact structure:
+{{
+    "id": 1,
+    "title": "Case Study Title",
+    "description": "Full scenario description with all relevant details and context",
+    "example": "Sample Approach:\\n1. Identify key issues\\n2. Apply relevant law/framework\\n3. Recommend action",
+    "difficulty": "{difficulty}",
+    "constraints": ["Time limit: 20 minutes", "Must reference applicable Indian laws/standards"],
+    "hints": ["Consider the relevant Indian regulation", "Think about practical implications"],
+    "starter_code": {{
+        "text": "## Your Analysis\\n\\n### Key Issues Identified:\\n1. \\n\\n### Applicable Laws/Frameworks:\\n1. \\n\\n### Recommended Course of Action:\\n1. \\n\\n### Justification:\\n"
+    }},
+    "test_cases": [
+        {{"input": "Key issue to identify", "expected": "Expected analysis point", "is_hidden": false}},
+        {{"input": "Applicable regulation", "expected": "Correct Indian law/standard", "is_hidden": false}},
+        {{"input": "Recommended action", "expected": "Expected professional recommendation", "is_hidden": true}}
+    ],
+    "solution_approach": "Brief explanation of the ideal approach to this case study",
+    "time_complexity": "N/A",
+    "space_complexity": "N/A"
+}}
+
+Return ONLY valid JSON, no markdown."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert at creating coding challenges for technical interviews."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=3000
-            )
-            
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-            
-            problem = json.loads(content)
+            problem = self._generate_problem_from_api(role_desc, prompt)
             problem['id'] = 1
             
             logger.info(f"Generated coding problem: {problem.get('title', 'Unknown')}")
@@ -258,23 +404,13 @@ Return JSON array:
 Return ONLY valid JSON."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert at creating comprehensive test cases."},
-                    {"role": "user", "content": prompt}
-                ],
+            content = self._call_openai_api(
+                system_message="You are an expert at creating comprehensive test cases.",
+                user_message=prompt,
                 temperature=0.5,
                 max_tokens=1500
             )
-            
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-            
+            content = self._clean_markdown_json(content)
             return json.loads(content)
             
         except Exception as e:
@@ -293,7 +429,10 @@ Return ONLY valid JSON."""
             List of scenario dictionaries
         """
         if not self.client:
+            print(f"[PSYCHOMETRIC] Falling back: client={'yes' if self.client else 'NO'}", flush=True)
             return self._get_fallback_psychometric_scenarios(count)
+        
+        print(f"[PSYCHOMETRIC] Generating AI scenarios for role: {job_role}", flush=True)
         
         prompt = f"""Create {count} workplace scenario questions for a {job_role} position.
 
@@ -322,23 +461,13 @@ The optimal_choice is the index (0-3) of the best response.
 Return ONLY valid JSON."""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert in workplace psychology and behavioral assessment."},
-                    {"role": "user", "content": prompt}
-                ],
+            content = self._call_openai_api(
+                system_message="You are an expert in workplace psychology and behavioral assessment.",
+                user_message=prompt,
                 temperature=0.7,
                 max_tokens=2000
             )
-            
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-            
+            content = self._clean_markdown_json(content)
             scenarios = json.loads(content)
             for i, s in enumerate(scenarios):
                 s['id'] = i + 1

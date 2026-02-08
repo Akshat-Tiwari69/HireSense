@@ -27,8 +27,8 @@ auth_bp = Blueprint('auth', __name__)
 # Email validation pattern
 EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
 
-# Valid roles
-VALID_ROLES = ['interviewer', 'admin', 'proctor']
+# Valid roles (expanded for RBAC)
+VALID_ROLES = ['interviewer', 'admin', 'proctor', 'super_admin', 'sector_admin', 'recruiter']
 
 # Cache compiled regex pattern for validation (avoids recompiling on each request)
 _EMAIL_PATTERN_COMPILED = re.compile(EMAIL_PATTERN)
@@ -57,13 +57,6 @@ def verify_password(password, password_hash):
         result = check_password_hash(password_hash, password)
         if result:
             logger.info("[OK] Password verification successful")
-        return result
-    except Exception as e:
-        logger.error(f"[ERROR] Password verification failed: {str(e)}")
-        return False
-        result = check_password_hash(password_hash, password)
-        if result:
-            logger.info("[OK] Password verified successfully")
         else:
             logger.warning("[FAIL] Password verification failed")
         return result
@@ -256,11 +249,12 @@ def login():
                 'message': 'Invalid email or password'
             }), 401
         
-        # Create JWT token with user info
+        # Create JWT token with user info (includes sector for RBAC)
         logger.info("[JWT] Creating token...")
         additional_claims = {
             'role': user['role'],
-            'name': user['name']
+            'name': user['name'],
+            'sector_id': user.get('sector_id')
         }
         
         access_token = create_access_token(
@@ -281,7 +275,8 @@ def login():
                     'id': user['id'],
                     'email': user['email'],
                     'role': user['role'],
-                    'name': user['name']
+                    'name': user['name'],
+                    'sector_id': user.get('sector_id')
                 }
             }
         }), 200
@@ -332,6 +327,7 @@ def get_current_user():
                 'email': user['email'],
                 'role': user['role'],
                 'name': user['name'],
+                'sector_id': user.get('sector_id'),
                 'created_at': user['created_at']
             }
         }), 200

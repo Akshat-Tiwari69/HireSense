@@ -20,46 +20,45 @@ def reset_database():
         conn = get_connection()
         cursor = conn.cursor()
         
-        print("🔄 Starting database reset...")
+        print(" Starting database reset...")
         
         # 1. Delete proctoring violations
         print("   Deleting proctoring violations...")
         cursor.execute("DELETE FROM proctoring_violations")
         deleted = cursor.rowcount
-        print(f"   ✓ Deleted {deleted} proctoring violations")
+        print(f"    Deleted {deleted} proctoring violations")
         
         # 2. Delete proctoring events
         print("   Deleting proctoring events...")
         cursor.execute("DELETE FROM proctoring_events")
         deleted = cursor.rowcount
-        print(f"   ✓ Deleted {deleted} proctoring events")
+        print(f"    Deleted {deleted} proctoring events")
         
         # 3. Delete psychometric responses
         print("   Deleting psychometric responses...")
         cursor.execute("DELETE FROM psychometric_responses")
         deleted = cursor.rowcount
-        print(f"   ✓ Deleted {deleted} psychometric responses")
+        print(f"    Deleted {deleted} psychometric responses")
         
         # 4. Delete coding submissions
         print("   Deleting coding submissions...")
         cursor.execute("DELETE FROM coding_submissions")
         deleted = cursor.rowcount
-        print(f"   ✓ Deleted {deleted} coding submissions")
+        print(f"    Deleted {deleted} coding submissions")
         
         # 5. Delete MCQ responses
         print("   Deleting MCQ responses...")
         cursor.execute("DELETE FROM mcq_responses")
         deleted = cursor.rowcount
-        print(f"   ✓ Deleted {deleted} MCQ responses")
+        print(f"    Deleted {deleted} MCQ responses")
         
-        # 6. Delete assessment questions (stored AI-generated questions)
         print("   Deleting assessment questions...")
         try:
             cursor.execute("DELETE FROM assessment_questions")
             deleted = cursor.rowcount
-            print(f"   ✓ Deleted {deleted} assessment question sets")
+            print(f"    Deleted {deleted} assessment question sets")
         except Exception as e:
-            print(f"   ⚠ Table assessment_questions does not exist, skipping...")
+            print("    Table assessment_questions does not exist, skipping...")
             conn.rollback()  # Rollback the failed transaction
             cursor = conn.cursor()  # Get a new cursor
         
@@ -67,13 +66,13 @@ def reset_database():
         print("   Deleting assessments...")
         cursor.execute("DELETE FROM assessments")
         deleted = cursor.rowcount
-        print(f"   ✓ Deleted {deleted} assessments")
+        print(f"    Deleted {deleted} assessments")
         
         # 8. Delete scheduled assessments
         print("   Deleting scheduled assessments...")
         cursor.execute("DELETE FROM scheduled_assessments")
         deleted = cursor.rowcount
-        print(f"   ✓ Deleted {deleted} scheduled assessments")
+        print(f"    Deleted {deleted} scheduled assessments")
         
         # 9. Update all candidates to 'applied' status
         print("   Resetting candidate statuses to 'applied'...")
@@ -83,7 +82,7 @@ def reset_database():
                 updated_at = CURRENT_TIMESTAMP
         """)
         updated = cursor.rowcount
-        print(f"   ✓ Reset {updated} candidates to 'applied' status")
+        print(f"    Reset {updated} candidates to 'applied' status")
         
         # 10. Reset auto-increment sequences
         print("   Resetting sequences...")
@@ -100,38 +99,39 @@ def reset_database():
         
         for seq in sequences:
             try:
-                cursor.execute(f"ALTER SEQUENCE IF EXISTS {seq} RESTART WITH 1")
-                print(f"   ✓ Reset {seq}")
+                from psycopg2 import sql
+                cursor.execute(sql.SQL("ALTER SEQUENCE IF EXISTS {} RESTART WITH 1").format(sql.Identifier(seq)))
+                print(f"    Reset {seq}")
             except Exception as e:
-                print(f"   ⚠ Could not reset {seq}: {e}")
+                print(f"    Could not reset {seq}: {e}")
         
         # Commit all changes
         conn.commit()
-        print("\n✅ Database reset complete!")
+        print("\n Database reset complete!")
         print("   All candidates are now 'applied' status")
         print("   All assessments and answers have been cleared")
         
         # Show summary
         cursor.execute("SELECT COUNT(*) FROM candidates")
         candidate_count = cursor.fetchone()[0]
-        print(f"\n📊 Database Summary:")
+        print("\n Database Summary:")
         print(f"   Candidates: {candidate_count}")
-        print(f"   Assessments: 0")
-        print(f"   Scheduled Assessments: 0")
-        print(f"   Answers: 0")
+        print("   Assessments: 0")
+        print("   Scheduled Assessments: 0")
+        print("   Answers: 0")
         
         cursor.close()
         conn.close()
         
     except Exception as e:
-        print(f"\n❌ Error during database reset: {e}")
+        print(f"\n Error during database reset: {e}")
         raise
 
 if __name__ == "__main__":
     print("=" * 60)
     print("DATABASE RESET SCRIPT")
     print("=" * 60)
-    print("⚠️  WARNING: This will:")
+    print("  WARNING: This will:")
     print("   - Reset ALL candidates to 'applied' status")
     print("   - DELETE all assessments")
     print("   - DELETE all answers (MCQ, coding, psychometric)")
@@ -144,4 +144,4 @@ if __name__ == "__main__":
     if confirm == "RESET":
         reset_database()
     else:
-        print("\n❌ Reset cancelled")
+        print("\n Reset cancelled")

@@ -29,8 +29,6 @@ CREATE TABLE IF NOT EXISTS candidates (
     education TEXT,
     match_score INTEGER,  -- 0-100
     shortlist_status TEXT,  -- "High Match", "Potential", "Reject"
-    pros TEXT,  -- JSON format: ["pro1", "pro2", "pro3"] - AI generated
-    cons TEXT,  -- JSON format: ["con1", "con2", "con3"] - AI generated
     status TEXT DEFAULT 'pending',  -- "pending", "shortlisted", "rejected", "assessment_scheduled", "assessment_completed"
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -88,11 +86,9 @@ CREATE TABLE IF NOT EXISTS assessments (
     psychometric_score REAL,  -- 0-100
     overall_score REAL,  -- weighted average
     decision TEXT,  -- "Hire", "No-Hire", "Maybe"
-    rationale TEXT,  -- AI-generated explanation
     proctoring_violations INTEGER DEFAULT 0,
     status TEXT DEFAULT 'in_progress',  -- 'in_progress', 'completed'
     scheduled_assessment_id INTEGER,  -- Link to scheduled_assessments table
-    hiring_recommendation TEXT,  -- AI-generated hiring recommendation with rationale
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -236,28 +236,82 @@ def start_assessment(candidate_id):
             assessment_id=assessment_id
         )
         
-        # Get candidate skills for AI-generated questions
         candidate = get_candidate_by_id(candidate_id)
         candidate_skills = []
-        if candidate and candidate.get('parsed_skills'):
-            skills_str = candidate['parsed_skills']
-            if isinstance(skills_str, str):
-                candidate_skills = [s.strip() for s in skills_str.replace('\n', ',').split(',') if s.strip()]
+        if candidate:
+            if candidate.get('skills') and isinstance(candidate['skills'], list):
+                candidate_skills = [s.strip() for s in candidate['skills'] if isinstance(s, str) and s.strip()]
+            elif candidate.get('parsed_skills'):
+                skills_raw = candidate['parsed_skills']
+                if isinstance(skills_raw, str):
+                    try:
+                        import json as _json
+                        parsed = _json.loads(skills_raw)
+                        if isinstance(parsed, list):
+                            candidate_skills = [s.strip() for s in parsed if isinstance(s, str) and s.strip()]
+                        else:
+                            candidate_skills = [s.strip() for s in skills_raw.replace('\n', ',').split(',') if s.strip()]
+                    except Exception:
+                        candidate_skills = [s.strip() for s in skills_raw.replace('\n', ',').split(',') if s.strip()]
+                elif isinstance(skills_raw, list):
+                    candidate_skills = [s.strip() for s in skills_raw if isinstance(s, str) and s.strip()]
         
-        logger.info(f"Generating AI questions for candidate {candidate_id} with skills: {candidate_skills[:10]}")
+        # Fetch the job details the candidate applied for
+        applied_job_title = ""
+        job_required_skills = []
+        is_technical_job = True  # Default to technical
+        try:
+            from db_config import get_connection, return_connection
+            jconn = get_connection()
+            jcur = jconn.cursor()
+            jcur.execute(
+                """SELECT jd.title, jd.required_skills, jd.is_technical 
+                FROM job_descriptions jd 
+                JOIN candidates c ON c.best_match_job_id = jd.id 
+                WHERE c.id = %s""",
+                (candidate_id,)
+            )
+            jrow = jcur.fetchone()
+            if jrow:
+                applied_job_title = jrow[0] or ""
+                # Parse required skills from job description
+                if jrow[1]:
+                    job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
+                # Get is_technical flag (default True if NULL)
+                is_technical_job = jrow[2] if jrow[2] is not None else True
+            return_connection(jconn)
+        except Exception as jtitle_err:
+            logger.warning(f"Could not fetch applied job details: {jtitle_err}")
         
-        # Generate AI-powered questions based on candidate's resume
+        logger.info(f"Generating AI questions for candidate {candidate_id} (role: {applied_job_title or 'unknown'}, technical: {is_technical_job}) with skills: {candidate_skills[:10]}, job skills: {job_required_skills[:5]}")
+        
+        # Generate AI-powered questions based on candidate's resume, job requirements, and role
         try:
             ai_generator = get_ai_question_generator()
             
-            if candidate_skills:
-                mcq_questions = ai_generator.generate_mcq_questions(candidate_skills, count=10, difficulty="mixed")
-                coding_problem = ai_generator.generate_coding_problem(candidate_skills, difficulty="medium")
+            if candidate_skills or job_required_skills:
+                mcq_questions = ai_generator.generate_mcq_questions(
+                    candidate_skills, 
+                    count=10, 
+                    difficulty="mixed", 
+                    job_title=applied_job_title,
+                    job_skills=job_required_skills
+                )
+                coding_problem = ai_generator.generate_coding_problem(
+                    candidate_skills, 
+                    difficulty="medium", 
+                    job_title=applied_job_title,
+                    is_technical=is_technical_job,
+                    job_skills=job_required_skills
+                )
             else:
                 mcq_questions = ai_generator._get_fallback_mcq_questions(10)
                 coding_problem = ai_generator._get_fallback_coding_problem("medium")
             
-            psychometric_scenarios = ai_generator.generate_psychometric_scenarios(count=3)
+            psychometric_scenarios = ai_generator.generate_psychometric_scenarios(
+                job_role=applied_job_title or "Professional",
+                count=3
+            )
         except Exception as e:
             logger.warning(f"AI question generation failed: {str(e)}")
             mcq_questions = get_mcq_questions(count=10)
@@ -340,7 +394,6 @@ def submit_answer(assessment_id):
             if not assessment:
                 return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
             
-            # First try to get questions from stored assessment questions (AI-generated)
             stored_questions = get_assessment_questions(assessment_id)
             questions = []
             if stored_questions and stored_questions.get('mcq_questions'):
@@ -364,16 +417,49 @@ def submit_answer(assessment_id):
                     correct_option_text = q.get('correct_answer')
                     logger.info(f"Found question {q_id}, correct_answer field: '{correct_option_text}'")
                     if correct_option_text:
-                        # Find which option letter matches the correct answer text (with normalization)
+                        # Method 1: Check if correct_answer is already a letter (A/B/C/D)
+                        if correct_option_text.strip().upper() in ['A', 'B', 'C', 'D']:
+                            correct_answer = correct_option_text.strip().upper()
+                            logger.info(f"[OK] correct_answer is a letter: {correct_answer}")
+                            break
+                        
+                        # Method 2: Check if correct_answer is an index (0-3)
+                        if correct_option_text.strip() in ['0', '1', '2', '3']:
+                            idx = int(correct_option_text.strip())
+                            correct_answer = ['A', 'B', 'C', 'D'][idx]
+                            logger.info(f"[OK] correct_answer is an index {idx}, mapped to {correct_answer}")
+                            break
+                        
+                        # Method 3: Exact text match after normalization  
                         correct_text_normalized = correct_option_text.strip().lower()
                         for idx, option in enumerate(q['options']):
                             option_normalized = option.strip().lower()
                             if option_normalized == correct_text_normalized:
                                 correct_answer = ['A', 'B', 'C', 'D'][idx]
-                                logger.info(f"[OK] Correct answer is option {correct_answer} (index {idx}): '{option}'")
+                                logger.info(f"[OK] Exact match: correct answer is option {correct_answer} (index {idx}): '{option}'")
                                 break
                         
-                        # If still not found after normalization, log all options for debugging
+                        # Method 4: Substring/contains match (handles AI adding extra text)
+                        if not correct_answer:
+                            for idx, option in enumerate(q['options']):
+                                opt_norm = option.strip().lower()
+                                ct_norm = correct_text_normalized
+                                if ct_norm in opt_norm or opt_norm in ct_norm:
+                                    correct_answer = ['A', 'B', 'C', 'D'][idx]
+                                    logger.info(f"[OK] Substring match: correct answer is option {correct_answer} (index {idx}): '{option}'")
+                                    break
+                        
+                        # Method 5: Startswith match (handles truncation)
+                        if not correct_answer:
+                            for idx, option in enumerate(q['options']):
+                                opt_norm = option.strip().lower()
+                                ct_norm = correct_text_normalized
+                                if opt_norm.startswith(ct_norm[:20]) or ct_norm.startswith(opt_norm[:20]):
+                                    correct_answer = ['A', 'B', 'C', 'D'][idx]
+                                    logger.info(f"[OK] Prefix match: correct answer is option {correct_answer} (index {idx}): '{option}'")
+                                    break
+                        
+                        # If still not found after all methods, log all options for debugging
                         if not correct_answer:
                             logger.error(f"[ERROR] Could not match correct_answer '{correct_option_text}' with any option. Options: {q['options']}")
                     break
@@ -429,7 +515,12 @@ def submit_answer(assessment_id):
             question_id = data.get('questionId')
             trait = data.get('trait')
             score = data.get('score')
+            selected_option = data.get('selectedOption', None)
             scenario_response = data.get('scenarioResponse', None)
+            
+            # Store selected option index in scenario_response for UI restoration
+            if selected_option is not None and not scenario_response:
+                scenario_response = str(selected_option)
             
             save_psychometric_response(
                 assessment_id=assessment_id,
@@ -489,19 +580,38 @@ def complete_assessment(assessment_id):
         candidate_id = assessment['candidate_id']
         logger.info(f"Assessment {assessment_id}: Candidate ID {candidate_id}")
         
+        # Check if this is a technical role assessment
+        is_technical_role = True  # Default
+        try:
+            scheduled = get_scheduled_assessment(candidate_id)
+            if scheduled:
+                is_technical_role = scheduled.get('is_technical_role', True)
+                if is_technical_role is None:
+                    is_technical_role = True
+        except Exception as e:
+            logger.warning(f"Could not determine is_technical_role: {e}")
+        
+        logger.info(f"Assessment {assessment_id}: is_technical_role = {is_technical_role}")
+        
         # Calculate scores
         mcq_score = get_mcq_score(assessment_id)
         logger.info(f"Assessment {assessment_id}: MCQ Score = {mcq_score}")
         
-        coding_score = get_coding_score(assessment_id)
+        coding_score = get_coding_score(assessment_id) if is_technical_role else 0
         logger.info(f"Assessment {assessment_id}: Coding Score = {coding_score}")
         
         psychometric_scores = get_psychometric_scores(assessment_id)
         logger.info(f"Assessment {assessment_id}: Psychometric Scores = {psychometric_scores}")
         
-        # Calculate technical score (60% MCQ, 40% Coding)
-        technical_score = (float(mcq_score) * 0.6) + (float(coding_score) * 0.4)
-        logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (MCQ: {mcq_score}, Coding: {coding_score})")
+        # Calculate technical score
+        # For technical roles: 60% MCQ, 40% Coding
+        # For non-technical roles: 100% MCQ
+        if is_technical_role:
+            technical_score = (float(mcq_score) * 0.6) + (float(coding_score) * 0.4)
+            logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (60% MCQ: {mcq_score}, 40% Coding: {coding_score})")
+        else:
+            technical_score = float(mcq_score)
+            logger.info(f"Assessment {assessment_id}: Technical Score = {technical_score} (100% MCQ - non-technical role)")
         
         # Calculate average psychometric score (convert Decimal to float for Postgres compatibility)
         if psychometric_scores:
@@ -752,38 +862,124 @@ def start_assessment_with_token(token):
             )
             stored_questions = None
         
-        # Generate questions only if not resuming with stored questions
-        if not is_resume or not stored_questions:
-            # Get candidate skills for AI-generated questions
+        # Load pre-generated questions from scheduled assessment (generated at schedule time)
+        is_technical_role = True  # Default
+        if not stored_questions:
+            try:
+                from db_config import get_connection, return_connection
+                pconn = get_connection()
+                pcur = pconn.cursor()
+                pcur.execute(
+                    """SELECT questions_data, is_technical_role 
+                    FROM scheduled_assessments 
+                    WHERE id = %s""",
+                    (assessment['id'],)
+                )
+                prow = pcur.fetchone()
+                if prow and prow[0]:
+                    import json
+                    pre_generated = json.loads(prow[0]) if isinstance(prow[0], str) else prow[0]
+                    if pre_generated:
+                        mcq_questions = pre_generated.get('mcq_questions', [])
+                        coding_problem = pre_generated.get('coding_problem')
+                        psychometric_scenarios = pre_generated.get('psychometric_scenarios', [])
+                        is_technical_role = pre_generated.get('is_technical_role', True)
+                        stored_questions = pre_generated
+                        logger.info(f"Using pre-generated questions from schedule time for assessment {assessment['id']}")
+                if prow:
+                    is_technical_role = prow[1] if prow[1] is not None else True
+                return_connection(pconn)
+            except Exception as pre_err:
+                logger.warning(f"Could not load pre-generated questions: {pre_err}")
+        
+        # Fallback: generate questions on-the-fly if none were pre-generated
+        if not stored_questions:
             candidate = get_candidate_by_id(assessment['candidate_id'])
             candidate_skills = []
-            if candidate and candidate.get('parsed_skills'):
-                skills_str = candidate['parsed_skills']
-                if isinstance(skills_str, str):
-                    # Parse skills from comma-separated or newline-separated string
-                    candidate_skills = [s.strip() for s in skills_str.replace('\n', ',').split(',') if s.strip()]
+            if candidate:
+                if candidate.get('skills') and isinstance(candidate['skills'], list):
+                    candidate_skills = [s.strip() for s in candidate['skills'] if isinstance(s, str) and s.strip()]
+                elif candidate.get('parsed_skills'):
+                    skills_raw = candidate['parsed_skills']
+                    if isinstance(skills_raw, str):
+                        try:
+                            import json as _json
+                            parsed = _json.loads(skills_raw)
+                            if isinstance(parsed, list):
+                                candidate_skills = [s.strip() for s in parsed if isinstance(s, str) and s.strip()]
+                            else:
+                                candidate_skills = [s.strip() for s in skills_raw.replace('\n', ',').split(',') if s.strip()]
+                        except Exception:
+                            candidate_skills = [s.strip() for s in skills_raw.replace('\n', ',').split(',') if s.strip()]
+                    elif isinstance(skills_raw, list):
+                        candidate_skills = [s.strip() for s in skills_raw if isinstance(s, str) and s.strip()]
             
-            logger.info(f"Generating AI questions for candidate skills: {candidate_skills[:10]}")
+            # Fetch the job details the candidate applied for
+            applied_job_title = ""
+            job_required_skills = []
+            try:
+                from db_config import get_connection, return_connection
+                jconn = get_connection()
+                jcur = jconn.cursor()
+                jcur.execute(
+                    """SELECT jd.title, jd.required_skills 
+                    FROM job_descriptions jd 
+                    JOIN candidates c ON c.best_match_job_id = jd.id 
+                    WHERE c.id = %s""",
+                    (assessment['candidate_id'],)
+                )
+                jrow = jcur.fetchone()
+                if jrow:
+                    applied_job_title = jrow[0] or ""
+                    # Parse required skills from job description
+                    if jrow[1]:
+                        job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
+                return_connection(jconn)
+            except Exception as jtitle_err:
+                logger.warning(f"Could not fetch applied job details: {jtitle_err}")
             
-            # Generate AI-powered questions based on candidate's resume
+            logger.info(f"Generating AI questions for candidate skills: {candidate_skills[:10]} (role: {applied_job_title or 'unknown'}, technical: {is_technical_role})")
+            
+            # Generate AI-powered questions based on candidate's resume, job requirements, and role
             try:
                 ai_generator = get_ai_question_generator()
                 logger.info(f"AI Generator initialized, client exists: {ai_generator.client is not None}")
                 
-                if candidate_skills:
-                    # Generate personalized questions based on skills
-                    logger.info(f"Generating personalized questions for skills: {candidate_skills[:5]}")
-                    mcq_questions = ai_generator.generate_mcq_questions(candidate_skills, count=10, difficulty="mixed")
+                if candidate_skills or job_required_skills:
+                    # Generate personalized questions based on skills and role
+                    logger.info(f"Generating personalized questions for skills: {candidate_skills[:5]} job skills: {job_required_skills[:5]} role: {applied_job_title}")
+                    mcq_questions = ai_generator.generate_mcq_questions(
+                        candidate_skills, 
+                        count=10, 
+                        difficulty="mixed", 
+                        job_title=applied_job_title,
+                        job_skills=job_required_skills
+                    )
                     logger.info(f"Generated {len(mcq_questions)} MCQ questions")
-                    coding_problem = ai_generator.generate_coding_problem(candidate_skills, difficulty="medium")
-                    logger.info(f"Generated coding problem: {coding_problem.get('title', 'Unknown')}")
+                    
+                    # Only generate coding problem for technical roles
+                    if is_technical_role:
+                        coding_problem = ai_generator.generate_coding_problem(
+                            candidate_skills, 
+                            difficulty="medium", 
+                            job_title=applied_job_title,
+                            is_technical=True,
+                            job_skills=job_required_skills
+                        )
+                        logger.info(f"Generated coding problem: {coding_problem.get('title', 'Unknown')}")
+                    else:
+                        coding_problem = None
+                        logger.info("Non-technical role - skipping coding problem")
                 else:
                     # Fallback to default questions
                     logger.info("No skills found, using fallback questions")
                     mcq_questions = ai_generator._get_fallback_mcq_questions(10)
-                    coding_problem = ai_generator._get_fallback_coding_problem("medium")
+                    coding_problem = ai_generator._get_fallback_coding_problem("medium") if is_technical_role else None
                 
-                psychometric_scenarios = ai_generator.generate_psychometric_scenarios(count=3)
+                psychometric_scenarios = ai_generator.generate_psychometric_scenarios(
+                    job_role=applied_job_title or "Professional",
+                    count=3
+                )
                 logger.info(f"Generated {len(psychometric_scenarios)} psychometric scenarios")
                 
                 logger.info(f"Successfully generated AI questions for assessment {assessment_id}")
@@ -791,14 +987,15 @@ def start_assessment_with_token(token):
                 logger.warning(f"AI question generation failed, using fallback: {str(e)}")
                 # Fallback to static questions
                 mcq_questions = get_mcq_questions(count=10)
-                coding_problem = get_coding_problem(difficulty="easy")
+                coding_problem = get_coding_problem(difficulty="easy") if is_technical_role else None
                 psychometric_scenarios = get_psychometric_scenarios(count=3)
             
             # Store questions for future resume
             save_assessment_questions(assessment_id, {
                 'mcq_questions': mcq_questions,
                 'coding_problem': coding_problem,
-                'psychometric_scenarios': psychometric_scenarios
+                'psychometric_scenarios': psychometric_scenarios,
+                'is_technical_role': is_technical_role
             })
             logger.info(f"Stored questions for assessment {assessment_id}")
         
@@ -832,6 +1029,21 @@ def start_assessment_with_token(token):
             except Exception as e:
                 logger.warning(f"Failed to load saved answers for assessment {assessment_id}: {str(e)}")
         
+        # Prepare coding problem for frontend (None for non-technical roles)
+        coding_for_frontend = None
+        if coding_problem:
+            coding_for_frontend = {
+                'id': coding_problem['id'],
+                'title': coding_problem['title'],
+                'description': coding_problem['description'],
+                'example': coding_problem.get('example', ''),
+                'difficulty': coding_problem['difficulty'],
+                'constraints': coding_problem.get('constraints', []),
+                'hints': coding_problem.get('hints', []),
+                'starter_code': coding_problem.get('starter_code', {}),
+                'test_cases': [tc for tc in coding_problem.get('test_cases', []) if not tc.get('is_hidden', False)]
+            }
+        
         return jsonify({
             'status': 'success',
             'message': 'Assessment resumed successfully' if is_resume else 'Assessment started successfully',
@@ -841,18 +1053,9 @@ def start_assessment_with_token(token):
                 'candidate_name': assessment['candidate_name'],
                 'proctoring_enabled': assessment['proctoring_enabled'],
                 'mcq_questions': mcq_for_frontend,
-                'coding_problem': {
-                    'id': coding_problem['id'],
-                    'title': coding_problem['title'],
-                    'description': coding_problem['description'],
-                    'example': coding_problem.get('example', ''),
-                    'difficulty': coding_problem['difficulty'],
-                    'constraints': coding_problem.get('constraints', []),
-                    'hints': coding_problem.get('hints', []),
-                    'starter_code': coding_problem.get('starter_code', {}),
-                    'test_cases': [tc for tc in coding_problem.get('test_cases', []) if not tc.get('is_hidden', False)]
-                },
+                'coding_problem': coding_for_frontend,
                 'psychometric_scenarios': psychometric_scenarios,
+                'is_technical_role': is_technical_role,
                 'duration_minutes': 60,
                 'remaining_seconds': remaining_seconds,
                 'is_resume': is_resume,

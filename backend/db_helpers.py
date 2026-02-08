@@ -42,7 +42,7 @@ def create_user(email, password_hash, role, name):
         
         cursor.execute(
             """INSERT INTO users (email, password_hash, role, name)
-               VALUES (?, ?, ?, ?) RETURNING id""",
+               VALUES (%s, %s, %s, %s) RETURNING id""",
             (email, password_hash, role, name)
         )
         
@@ -54,9 +54,9 @@ def create_user(email, password_hash, role, name):
         return user_id
     
     except psycopg2.IntegrityError as e:
-        raise DatabaseError(f"Email already exists: {str(e)}")
+        raise DatabaseError(f"Email already exists: {str(e)}") from e
     except Exception as e:
-        raise DatabaseError(f"Error creating user: {str(e)}")
+        raise DatabaseError(f"Error creating user: {str(e)}") from e
 
 
 @lru_cache(maxsize=128)
@@ -79,8 +79,8 @@ def get_user_by_email(email):
         cursor = conn.cursor()
         
         cursor.execute(
-            """SELECT id, email, password_hash, role, name, created_at, updated_at
-               FROM users WHERE email = ?""",
+            """SELECT id, email, password_hash, role, name, created_at, updated_at, sector_id
+               FROM users WHERE email = %s""",
             (email,)
         )
         
@@ -95,12 +95,13 @@ def get_user_by_email(email):
                 'role': row[3],
                 'name': row[4],
                 'created_at': row[5],
-                'updated_at': row[6]
+                'updated_at': row[6],
+                'sector_id': row[7]
             }
         return None
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving user by email: {str(e)}")
+        raise DatabaseError(f"Error retrieving user by email: {str(e)}") from e
 
 
 @lru_cache(maxsize=256)
@@ -124,7 +125,7 @@ def get_user_by_id(user_id):
         
         cursor.execute(
             """SELECT id, email, role, name, created_at, updated_at
-               FROM users WHERE id = ?""",
+               FROM users WHERE id = %s""",
             (user_id,)
         )
         
@@ -143,7 +144,7 @@ def get_user_by_id(user_id):
         return None
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving user by ID: {str(e)}")
+        raise DatabaseError(f"Error retrieving user by ID: {str(e)}") from e
 
 
 # ============================================================================
@@ -187,7 +188,7 @@ def get_candidate_by_email(email):
         return None
         
     except Exception as e:
-        raise DatabaseError(f"Error checking candidate email: {str(e)}")
+        raise DatabaseError(f"Error checking candidate email: {str(e)}") from e
 
 
 def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, cons=None, status='pending'):
@@ -200,8 +201,6 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         phone (str): Candidate's phone number
         resume_path (str): Path to the uploaded resume file
         parsed_data (dict): Parsed resume data with skills, experience, education, match_score
-        pros (list, optional): List of AI-generated pros about the candidate
-        cons (list, optional): List of AI-generated cons about the candidate
         status (str, optional): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
     
     Returns:
@@ -229,7 +228,7 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         cursor.execute("""
             INSERT INTO candidates 
             (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
         """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status))
         
         result = cursor.fetchone()
@@ -240,9 +239,9 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         return candidate_id
         
     except psycopg2.IntegrityError as e:
-        raise DatabaseError(f"Integrity error: {str(e)}")
+        raise DatabaseError(f"Integrity error: {str(e)}") from e
     except Exception as e:
-        raise DatabaseError(f"Error inserting candidate: {str(e)}")
+        raise DatabaseError(f"Error inserting candidate: {str(e)}") from e
 
 
 def get_candidate_by_id(candidate_id):
@@ -265,7 +264,7 @@ def get_candidate_by_id(candidate_id):
         cursor.execute("""
             SELECT id, name, email, phone, resume_path, parsed_skills, years_experience, 
                    education, match_score, shortlist_status, created_at, updated_at
-            FROM candidates WHERE id = ?
+            FROM candidates WHERE id = %s
         """, (candidate_id,))
         
         row = cursor.fetchone()
@@ -275,13 +274,22 @@ def get_candidate_by_id(candidate_id):
             return None
         
         # Convert to dictionary and parse JSON skills
-        candidate = {
+        raw_skills = row[5]  # parsed_skills column (JSON string or None)
+        skills_list = []
+        if raw_skills:
+            try:
+                skills_list = json.loads(raw_skills) if isinstance(raw_skills, str) else raw_skills
+            except (json.JSONDecodeError, TypeError):
+                skills_list = []
+        
+        return {
             'id': row[0],
             'name': row[1],
             'email': row[2],
             'phone': row[3],
             'resume_path': row[4],
-            'skills': json.loads(row[5]) if row[5] else [],
+            'skills': skills_list,
+            'parsed_skills': raw_skills,  # Raw DB value for schedule-time parsing
             'years_experience': row[6],
             'education': row[7],
             'match_score': row[8],
@@ -290,10 +298,8 @@ def get_candidate_by_id(candidate_id):
             'updated_at': row[11]
         }
         
-        return candidate
-        
     except Exception as e:
-        raise DatabaseError(f"Error retrieving candidate: {str(e)}")
+        raise DatabaseError(f"Error retrieving candidate: {str(e)}") from e
 
 
 def get_all_candidates():
@@ -320,7 +326,7 @@ def get_all_candidates():
         conn.close()
         
         # Use list comprehension for better performance
-        candidates = [
+        return [
             {
                 'id': row[0],
                 'name': row[1],
@@ -341,10 +347,8 @@ def get_all_candidates():
             for row in rows
         ]
         
-        return candidates
-        
     except Exception as e:
-        raise DatabaseError(f"Error retrieving candidates: {str(e)}")
+        raise DatabaseError(f"Error retrieving candidates: {str(e)}") from e
 
 
 def update_candidate_shortlist(candidate_id, status, score):
@@ -365,26 +369,23 @@ def update_candidate_shortlist(candidate_id, status, score):
         
         cursor.execute("""
             UPDATE candidates 
-            SET shortlist_status = ?, match_score = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            SET shortlist_status = %s, match_score = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
         """, (status, score, candidate_id))
         
         conn.commit()
         conn.close()
         
     except Exception as e:
-        raise DatabaseError(f"Error updating candidate shortlist: {str(e)}")
+        raise DatabaseError(f"Error updating candidate shortlist: {str(e)}") from e
 
 
 def update_candidate_status(candidate_id, status, pros=None, cons=None):
     """
-    Update candidate's status and optionally AI-generated pros/cons.
     
     Args:
         candidate_id (int): The ID of the candidate
         status (str): Candidate status - 'pending', 'shortlisted', 'rejected', 'assessment_scheduled', 'assessment_completed'
-        pros (list, optional): List of AI-generated pros about the candidate
-        cons (list, optional): List of AI-generated cons about the candidate
     
     Returns:
         bool: True if update successful, False if candidate not found
@@ -402,14 +403,14 @@ def update_candidate_status(candidate_id, status, pros=None, cons=None):
         if pros_json or cons_json:
             cursor.execute("""
                 UPDATE candidates 
-                SET status = ?, pros = COALESCE(?, pros), cons = COALESCE(?, cons), updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                SET status = %s, pros = COALESCE(%s, pros), cons = COALESCE(%s, cons), updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
             """, (status, pros_json, cons_json, candidate_id))
         else:
             cursor.execute("""
                 UPDATE candidates 
-                SET status = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                SET status = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
             """, (status, candidate_id))
         
         conn.commit()
@@ -419,7 +420,7 @@ def update_candidate_status(candidate_id, status, pros=None, cons=None):
         return success
         
     except Exception as e:
-        raise DatabaseError(f"Error updating candidate status: {str(e)}")
+        raise DatabaseError(f"Error updating candidate status: {str(e)}") from e
 
 
 # ============================================================================
@@ -460,7 +461,7 @@ def create_assessment(candidate_id, job_id=None):
         return assessment_id
         
     except Exception as e:
-        raise DatabaseError(f"Error creating assessment: {str(e)}")
+        raise DatabaseError(f"Error creating assessment: {str(e)}") from e
 
 
 def update_assessment_scores(assessment_id, technical_score, psychometric_score, decision, rationale, scheduled_assessment_id=None, hiring_recommendation=None):
@@ -472,9 +473,7 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
         technical_score (float): Technical score (0-100)
         psychometric_score (float): Psychometric score (0-100)
         decision (str): Hiring decision ("Hire", "No-Hire", "Maybe")
-        rationale (str): AI-generated explanation
         scheduled_assessment_id (int, optional): Link to scheduled assessment
-        hiring_recommendation (str, optional): AI-generated hiring recommendation
     
     Raises:
         DatabaseError: If update fails
@@ -503,7 +502,7 @@ def update_assessment_scores(assessment_id, technical_score, psychometric_score,
             raise DatabaseError(f"No assessment found with id {assessment_id}")
         
     except Exception as e:
-        raise DatabaseError(f"Error updating assessment scores: {str(e)}")
+        raise DatabaseError(f"Error updating assessment scores: {str(e)}") from e
 
 
 def get_assessment_by_id(assessment_id):
@@ -527,7 +526,7 @@ def get_assessment_by_id(assessment_id):
             SELECT id, candidate_id, job_id, technical_score, psychometric_score, 
                    overall_score, decision, rationale, proctoring_violations, status, 
                    started_at, completed_at
-            FROM assessments WHERE id = ?
+            FROM assessments WHERE id = %s
         """, (assessment_id,))
         
         row = cursor.fetchone()
@@ -536,7 +535,7 @@ def get_assessment_by_id(assessment_id):
         if not row:
             return None
         
-        assessment = {
+        return {
             'id': row[0],
             'candidate_id': row[1],
             'job_id': row[2],
@@ -551,10 +550,8 @@ def get_assessment_by_id(assessment_id):
             'completed_at': row[11]
         }
         
-        return assessment
-        
     except Exception as e:
-        raise DatabaseError(f"Error retrieving assessment: {str(e)}")
+        raise DatabaseError(f"Error retrieving assessment: {str(e)}") from e
 
 
 # ============================================================================
@@ -604,7 +601,7 @@ def save_mcq_response(assessment_id, question_id, selected_answer, is_correct, t
         conn.close()
         
     except Exception as e:
-        raise DatabaseError(f"Error saving MCQ response: {str(e)}")
+        raise DatabaseError(f"Error saving MCQ response: {str(e)}") from e
 
 
 def get_saved_mcq_answers(assessment_id):
@@ -642,7 +639,7 @@ def get_saved_mcq_answers(assessment_id):
         return {row[0]: row[1] for row in rows}
         
     except Exception as e:
-        raise DatabaseError(f"Error getting saved MCQ answers: {str(e)}")
+        raise DatabaseError(f"Error getting saved MCQ answers: {str(e)}") from e
 
 
 def get_saved_psychometric_answers(assessment_id):
@@ -654,7 +651,7 @@ def get_saved_psychometric_answers(assessment_id):
         assessment_id (int): The ID of the assessment
     
     Returns:
-        dict: Dictionary mapping question_id to score (option index)
+        dict: Dictionary mapping question_id to selected option index (from scenario_response)
     
     Raises:
         DatabaseError: If retrieval fails
@@ -665,7 +662,7 @@ def get_saved_psychometric_answers(assessment_id):
         # Use DISTINCT ON to get only the latest answer per question (by id)
         cursor.execute(
             """
-            SELECT DISTINCT ON (question_id) question_id, score
+            SELECT DISTINCT ON (question_id) question_id, score, scenario_response
             FROM psychometric_responses 
             WHERE assessment_id = %s
             ORDER BY question_id, id DESC
@@ -676,11 +673,21 @@ def get_saved_psychometric_answers(assessment_id):
         rows = cursor.fetchall()
         conn.close()
         
-        # Return as dict: {question_id: score}
-        return {row[0]: row[1] for row in rows}
+        # Return as dict: {question_id: selected_option_index}
+        # scenario_response stores the selected option index as a string
+        result = {}
+        for row in rows:
+            q_id = row[0]
+            scenario_response = row[2]
+            if scenario_response is not None and scenario_response.isdigit():
+                result[q_id] = int(scenario_response)
+            else:
+                # Fallback: use score to estimate index (legacy data)
+                result[q_id] = max(0, int(row[1]) - 1) if row[1] else 0
+        return result
         
     except Exception as e:
-        raise DatabaseError(f"Error getting saved psychometric answers: {str(e)}")
+        raise DatabaseError(f"Error getting saved psychometric answers: {str(e)}") from e
 
 
 def get_saved_coding_submission(assessment_id):
@@ -724,7 +731,7 @@ def get_saved_coding_submission(assessment_id):
         return None
         
     except Exception as e:
-        raise DatabaseError(f"Error getting saved coding submission: {str(e)}")
+        raise DatabaseError(f"Error getting saved coding submission: {str(e)}") from e
 
 
 def save_coding_submission(assessment_id, problem_id, language, code, test_cases_passed, total_test_cases):
@@ -771,7 +778,7 @@ def save_coding_submission(assessment_id, problem_id, language, code, test_cases
         conn.close()
         
     except Exception as e:
-        raise DatabaseError(f"Error saving coding submission: {str(e)}")
+        raise DatabaseError(f"Error saving coding submission: {str(e)}") from e
 
 
 def log_proctoring_event(assessment_id, event_type, severity, details):
@@ -794,21 +801,21 @@ def log_proctoring_event(assessment_id, event_type, severity, details):
         cursor.execute("""
             INSERT INTO proctoring_events 
             (assessment_id, event_type, severity, details)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
         """, (assessment_id, event_type, severity, details))
         
         # Increment proctoring violations count in assessments table
         cursor.execute("""
             UPDATE assessments 
             SET proctoring_violations = proctoring_violations + 1
-            WHERE id = ?
+            WHERE id = %s
         """, (assessment_id,))
         
         conn.commit()
         conn.close()
         
     except Exception as e:
-        raise DatabaseError(f"Error logging proctoring event: {str(e)}")
+        raise DatabaseError(f"Error logging proctoring event: {str(e)}") from e
 
 
 def save_psychometric_response(assessment_id, question_id, trait, score, scenario_response=None):
@@ -854,7 +861,7 @@ def save_psychometric_response(assessment_id, question_id, trait, score, scenari
         conn.close()
         
     except Exception as e:
-        raise DatabaseError(f"Error saving psychometric response: {str(e)}")
+        raise DatabaseError(f"Error saving psychometric response: {str(e)}") from e
 
 
 # ============================================================================
@@ -884,16 +891,12 @@ def get_mcq_score(assessment_id):
         conn.close()
         
         total = result[0]
-        correct = result[1] if result[1] else 0
+        correct = result[1] or 0
         
-        if total == 0:
-            return 0.0
-        
-        score = (correct / total) * 100
-        return round(score, 2)
+        return 0.0 if total == 0 else round((correct / total) * 100, 2)
         
     except Exception as e:
-        raise DatabaseError(f"Error calculating MCQ score: {str(e)}")
+        raise DatabaseError(f"Error calculating MCQ score: {str(e)}") from e
 
 
 def get_coding_score(assessment_id):
@@ -917,17 +920,13 @@ def get_coding_score(assessment_id):
         result = cursor.fetchone()
         conn.close()
         
-        total_passed = result[0] if result[0] else 0
-        total_tests = result[1] if result[1] else 0
+        total_passed = result[0] or 0
+        total_tests = result[1] or 0
         
-        if total_tests == 0:
-            return 0.0
-        
-        score = (total_passed / total_tests) * 100
-        return round(score, 2)
+        return 0.0 if total_tests == 0 else round((total_passed / total_tests) * 100, 2)
         
     except Exception as e:
-        raise DatabaseError(f"Error calculating coding score: {str(e)}")
+        raise DatabaseError(f"Error calculating coding score: {str(e)}") from e
 
 
 def get_psychometric_scores(assessment_id):
@@ -952,21 +951,17 @@ def get_psychometric_scores(assessment_id):
         rows = cursor.fetchall()
         conn.close()
         
-        scores = {}
-        for row in rows:
-            scores[row[0]] = round(row[1], 2)
-        
-        return scores
+        return {row[0]: round(row[1], 2) for row in rows}
         
     except Exception as e:
-        raise DatabaseError(f"Error calculating psychometric scores: {str(e)}")
+        raise DatabaseError(f"Error calculating psychometric scores: {str(e)}") from e
 
 
 # ============================================================================
 #                    ASSESSMENT SCHEDULING FUNCTIONS
 # ============================================================================
 
-def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
+def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time, is_technical_role=True, questions_data=None):
     """
     Create a new scheduled assessment session.
     
@@ -974,6 +969,8 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
         candidate_id (int): ID of the candidate
         interviewer_id (int): ID of the interviewer (user)
         scheduled_time (str): ISO format datetime string (e.g., '2026-01-25T10:30:00')
+        is_technical_role (bool): Whether this is a technical role requiring coding questions
+        questions_data (dict): Pre-generated questions to store
     
     Returns:
         int: Scheduled assessment ID
@@ -981,17 +978,18 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time):
     Raises:
         DatabaseError: If creation fails
     """
-    print(f"[DB] create_scheduled_assessment called: candidate={candidate_id}, interviewer={interviewer_id}, time={scheduled_time}", flush=True)
+    print(f"[DB] create_scheduled_assessment called: candidate={candidate_id}, interviewer={interviewer_id}, time={scheduled_time}, technical={is_technical_role}", flush=True)
     try:
+        import json
         conn = get_connection()
         cursor = conn.cursor()
-        print(f"[DB] Executing INSERT with PostgreSQL...", flush=True)
+        print("[DB] Executing INSERT with PostgreSQL...", flush=True)
         
-        # PostgreSQL INSERT
+        # PostgreSQL INSERT with is_technical_role and questions_data
         cursor.execute(
-            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status)
-               VALUES (%s, %s, %s, 'scheduled') RETURNING id""",
-            (candidate_id, interviewer_id, scheduled_time)
+            """INSERT INTO scheduled_assessments (candidate_id, interviewer_id, scheduled_time, status, is_technical_role, questions_data)
+               VALUES (%s, %s, %s, 'scheduled', %s, %s) RETURNING id""",
+            (candidate_id, interviewer_id, scheduled_time, is_technical_role, json.dumps(questions_data) if questions_data else None)
         )
         
         result = cursor.fetchone()
@@ -1017,7 +1015,7 @@ def get_scheduled_assessment(candidate_id):
         candidate_id (int): ID of the candidate
     
     Returns:
-        dict: Scheduled assessment data with keys (id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, created_at, updated_at)
+        dict: Scheduled assessment data with keys (id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, is_technical_role, questions_data, created_at, updated_at)
               or None if not found
     
     Raises:
@@ -1028,8 +1026,9 @@ def get_scheduled_assessment(candidate_id):
         cursor = conn.cursor()
         
         cursor.execute(
-            """SELECT id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, created_at, updated_at
-               FROM scheduled_assessments WHERE candidate_id = ?""",
+            """SELECT id, candidate_id, interviewer_id, scheduled_time, status, assessment_id, 
+                      is_technical_role, questions_data, created_at, updated_at
+               FROM scheduled_assessments WHERE candidate_id = %s""",
             (candidate_id,)
         )
         
@@ -1045,6 +1044,15 @@ def get_scheduled_assessment(candidate_id):
                 # datetime object from database
                 scheduled_time = scheduled_time_raw.strftime('%Y-%m-%dT%H:%M:%S') if scheduled_time_raw else None
             
+            # Parse questions_data if present
+            questions_data = row[7]
+            if isinstance(questions_data, str):
+                import json
+                try:
+                    questions_data = json.loads(questions_data)
+                except Exception:
+                    questions_data = None
+            
             return {
                 'id': row[0],
                 'candidate_id': row[1],
@@ -1052,13 +1060,15 @@ def get_scheduled_assessment(candidate_id):
                 'scheduled_time': scheduled_time,
                 'status': row[4],
                 'assessment_id': row[5],
-                'created_at': row[6],
-                'updated_at': row[7]
+                'is_technical_role': row[6] if row[6] is not None else True,
+                'questions_data': questions_data,
+                'created_at': row[8],
+                'updated_at': row[9]
             }
         return None
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving scheduled assessment: {str(e)}")
+        raise DatabaseError(f"Error retrieving scheduled assessment: {str(e)}") from e
 
 
 def update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id=None):
@@ -1083,15 +1093,15 @@ def update_scheduled_assessment_status(scheduled_assessment_id, status, assessme
         if assessment_id:
             cursor.execute(
                 """UPDATE scheduled_assessments 
-                   SET status = ?, assessment_id = ?, updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ?""",
+                   SET status = %s, assessment_id = %s, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = %s""",
                 (status, assessment_id, scheduled_assessment_id)
             )
         else:
             cursor.execute(
                 """UPDATE scheduled_assessments 
-                   SET status = ?, updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ?""",
+                   SET status = %s, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = %s""",
                 (status, scheduled_assessment_id)
             )
         
@@ -1102,7 +1112,7 @@ def update_scheduled_assessment_status(scheduled_assessment_id, status, assessme
         return success
     
     except Exception as e:
-        raise DatabaseError(f"Error updating scheduled assessment status: {str(e)}")
+        raise DatabaseError(f"Error updating scheduled assessment status: {str(e)}") from e
 
 
 def check_assessment_time_valid(candidate_id, current_time):
@@ -1129,7 +1139,7 @@ def check_assessment_time_valid(candidate_id, current_time):
         
         cursor.execute(
             """SELECT id, scheduled_time, status 
-               FROM scheduled_assessments WHERE candidate_id = ? AND status = 'scheduled'""",
+               FROM scheduled_assessments WHERE candidate_id = %s AND status = 'scheduled'""",
             (candidate_id,)
         )
         
@@ -1158,23 +1168,22 @@ def check_assessment_time_valid(candidate_id, current_time):
                 'scheduled_assessment_id': scheduled_id,
                 'message': 'Assessment can proceed'
             }
-        else:
-            minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
-            if minutes_until > 0:
-                return {
-                    'valid': False,
-                    'scheduled_assessment_id': None,
-                    'message': f'Assessment starts in {minutes_until} minutes. Come back at scheduled time.'
-                }
-            else:
-                return {
-                    'valid': False,
-                    'scheduled_assessment_id': None,
-                    'message': f'Assessment time has passed. Please contact the interviewer.'
-                }
+        
+        minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
+        return (
+            {
+                'valid': False,
+                'scheduled_assessment_id': None,
+                'message': f'Assessment starts in {minutes_until} minutes. Come back at scheduled time.'
+            } if minutes_until > 0 else {
+                'valid': False,
+                'scheduled_assessment_id': None,
+                'message': 'Assessment time has passed. Please contact the interviewer.'
+            }
+        )
     
     except Exception as e:
-        raise DatabaseError(f"Error checking assessment time validity: {str(e)}")
+        raise DatabaseError(f"Error checking assessment time validity: {str(e)}") from e
 
 
 # ============================================================================
@@ -1217,7 +1226,7 @@ def log_email(recipient_email, recipient_name, email_type, subject, status='sent
         return log_id
     
     except Exception as e:
-        raise DatabaseError(f"Error logging email: {str(e)}")
+        raise DatabaseError(f"Error logging email: {str(e)}") from e
 
 
 def get_candidate_emails(candidate_email):
@@ -1240,16 +1249,15 @@ def get_candidate_emails(candidate_email):
         
         cursor.execute(
             """SELECT id, recipient_email, recipient_name, email_type, subject, status, error_message, sent_at
-               FROM email_logs WHERE recipient_email = ? ORDER BY sent_at DESC""",
+               FROM email_logs WHERE recipient_email = %s ORDER BY sent_at DESC""",
             (candidate_email,)
         )
         
         rows = cursor.fetchall()
         conn.close()
         
-        emails = []
-        for row in rows:
-            emails.append({
+        return [
+            {
                 'id': row[0],
                 'recipient_email': row[1],
                 'recipient_name': row[2],
@@ -1258,12 +1266,12 @@ def get_candidate_emails(candidate_email):
                 'status': row[5],
                 'error_message': row[6],
                 'sent_at': row[7]
-            })
-        
-        return emails
+            }
+            for row in rows
+        ]
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving candidate emails: {str(e)}")
+        raise DatabaseError(f"Error retrieving candidate emails: {str(e)}") from e
 
 
 def get_assessment_by_candidate_id(candidate_id):
@@ -1298,7 +1306,7 @@ def get_assessment_by_candidate_id(candidate_id):
                 SELECT assessment_id, ROUND(test_cases_passed * 100.0 / test_cases_total, 2) as score
                 FROM coding_submissions GROUP BY assessment_id
             ) c ON a.id = c.assessment_id
-            WHERE a.candidate_id = ?
+            WHERE a.candidate_id = %s
             ORDER BY a.created_at DESC
             LIMIT 1
         """, (candidate_id,))
@@ -1327,7 +1335,7 @@ def get_assessment_by_candidate_id(candidate_id):
         }
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving assessment for candidate {candidate_id}: {str(e)}")
+        raise DatabaseError(f"Error retrieving assessment for candidate {candidate_id}: {str(e)}") from e
 
 
 # NOTE: create_scheduled_assessment is defined earlier in this file (line ~761)
@@ -1356,14 +1364,14 @@ def update_scheduled_assessment_status(scheduled_assessment_id, status, assessme
         if assessment_id:
             cursor.execute("""
                 UPDATE scheduled_assessments 
-                SET status = ?, assessment_id = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                SET status = %s, assessment_id = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
             """, (status, assessment_id, scheduled_assessment_id))
         else:
             cursor.execute("""
                 UPDATE scheduled_assessments 
-                SET status = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                SET status = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
             """, (status, scheduled_assessment_id))
         
         conn.commit()
@@ -1372,7 +1380,7 @@ def update_scheduled_assessment_status(scheduled_assessment_id, status, assessme
         return True
     
     except Exception as e:
-        raise DatabaseError(f"Error updating scheduled assessment: {str(e)}")
+        raise DatabaseError(f"Error updating scheduled assessment: {str(e)}") from e
 
 
 def check_assessment_time_valid(candidate_id, current_time, window_minutes=30):
@@ -1396,7 +1404,7 @@ def check_assessment_time_valid(candidate_id, current_time, window_minutes=30):
         
         cursor.execute("""
             SELECT scheduled_time FROM scheduled_assessments 
-            WHERE candidate_id = ? AND status = 'scheduled'
+            WHERE candidate_id = %s AND status = 'scheduled'
             ORDER BY created_at DESC LIMIT 1
         """, (candidate_id,))
         
@@ -1428,7 +1436,7 @@ def check_assessment_time_valid(candidate_id, current_time, window_minutes=30):
             return (False, scheduled_time, f"Assessment is {int(time_diff)} minutes away from scheduled time")
     
     except Exception as e:
-        raise DatabaseError(f"Error checking assessment time: {str(e)}")
+        raise DatabaseError(f"Error checking assessment time: {str(e)}") from e
 
 
 # ============================================================================
@@ -1470,7 +1478,7 @@ def set_assessment_token(scheduled_assessment_id, token):
         return success
     
     except Exception as e:
-        raise DatabaseError(f"Error setting assessment token: {str(e)}")
+        raise DatabaseError(f"Error setting assessment token: {str(e)}") from e
 
 
 def get_assessment_by_token(token):
@@ -1516,7 +1524,7 @@ def get_assessment_by_token(token):
         return None
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving assessment by token: {str(e)}")
+        raise DatabaseError(f"Error retrieving assessment by token: {str(e)}") from e
 
 
 def start_assessment_by_token(token):
@@ -1536,7 +1544,7 @@ def start_assessment_by_token(token):
         cursor.execute(
             """UPDATE scheduled_assessments 
                SET status = 'in_progress', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-               WHERE access_token = ? AND status = 'scheduled'""",
+               WHERE access_token = %s AND status = 'scheduled'""",
             (token,)
         )
         
@@ -1547,7 +1555,7 @@ def start_assessment_by_token(token):
         return success
     
     except Exception as e:
-        raise DatabaseError(f"Error starting assessment: {str(e)}")
+        raise DatabaseError(f"Error starting assessment: {str(e)}") from e
 
 
 # ============================================================================
@@ -1575,7 +1583,7 @@ def record_proctoring_violation(assessment_id, violation_type, description, seve
         cursor.execute(
             """INSERT INTO proctoring_violations 
                (assessment_id, violation_type, description, severity, screenshot_url)
-               VALUES (?, ?, ?, ?, ?) RETURNING id""",
+               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
             (assessment_id, violation_type, description, severity, screenshot_url)
         )
         
@@ -1588,7 +1596,7 @@ def record_proctoring_violation(assessment_id, violation_type, description, seve
         return violation_id
     
     except Exception as e:
-        raise DatabaseError(f"Error recording proctoring violation: {str(e)}")
+        raise DatabaseError(f"Error recording proctoring violation: {str(e)}") from e
 
 
 def get_violations_for_assessment(assessment_id):
@@ -1609,7 +1617,7 @@ def get_violations_for_assessment(assessment_id):
             """SELECT id, assessment_id, violation_type, description, severity, 
                       screenshot_url, timestamp, resolved
                FROM proctoring_violations 
-               WHERE assessment_id = ?
+               WHERE assessment_id = %s
                ORDER BY timestamp DESC""",
             (assessment_id,)
         )
@@ -1617,9 +1625,8 @@ def get_violations_for_assessment(assessment_id):
         rows = cursor.fetchall()
         conn.close()
         
-        violations = []
-        for row in rows:
-            violations.append({
+        return [
+            {
                 'id': row[0],
                 'assessment_id': row[1],
                 'violation_type': row[2],
@@ -1628,12 +1635,12 @@ def get_violations_for_assessment(assessment_id):
                 'screenshot_url': row[5],
                 'timestamp': row[6],
                 'resolved': row[7]
-            })
-        
-        return violations
+            }
+            for row in rows
+        ]
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving violations: {str(e)}")
+        raise DatabaseError(f"Error retrieving violations: {str(e)}") from e
 
 
 def count_violations_for_assessment(assessment_id):
@@ -1651,7 +1658,7 @@ def count_violations_for_assessment(assessment_id):
         cursor = conn.cursor()
         
         cursor.execute(
-            "SELECT COUNT(*) FROM proctoring_violations WHERE assessment_id = ?",
+            "SELECT COUNT(*) FROM proctoring_violations WHERE assessment_id = %s",
             (assessment_id,)
         )
         
@@ -1661,7 +1668,7 @@ def count_violations_for_assessment(assessment_id):
         return count
     
     except Exception as e:
-        raise DatabaseError(f"Error counting violations: {str(e)}")
+        raise DatabaseError(f"Error counting violations: {str(e)}") from e
 
 
 def save_assessment_questions(assessment_id, questions_data):
@@ -1688,7 +1695,7 @@ def save_assessment_questions(assessment_id, questions_data):
         conn.close()
         
     except Exception as e:
-        raise DatabaseError(f"Error saving assessment questions: {str(e)}")
+        raise DatabaseError(f"Error saving assessment questions: {str(e)}") from e
 
 
 def get_assessment_questions(assessment_id):
@@ -1713,12 +1720,10 @@ def get_assessment_questions(assessment_id):
         row = cursor.fetchone()
         conn.close()
         
-        if row and row[0]:
-            return row[0]  # JSONB is automatically parsed by psycopg2
-        return None
+        return row[0] if row and row[0] else None
     
     except Exception as e:
-        raise DatabaseError(f"Error retrieving assessment questions: {str(e)}")
+        raise DatabaseError(f"Error retrieving assessment questions: {str(e)}") from e
 
 
 def update_assessment_time_elapsed(assessment_id, time_elapsed_seconds):
@@ -1744,7 +1749,7 @@ def update_assessment_time_elapsed(assessment_id, time_elapsed_seconds):
         conn.close()
         
     except Exception as e:
-        raise DatabaseError(f"Error updating assessment time: {str(e)}")
+        raise DatabaseError(f"Error updating assessment time: {str(e)}") from e
 
 
 def get_assessment_time_elapsed(assessment_id):
@@ -1776,13 +1781,10 @@ def get_assessment_time_elapsed(assessment_id):
         row = cursor.fetchone()
         conn.close()
         
-        if row and row[0] is not None:
-            elapsed = max(0, row[0])  # Ensure non-negative
-            return elapsed
-        return 0
+        return max(0, row[0]) if row and row[0] is not None else 0
     
     except Exception as e:
-        raise DatabaseError(f"Error getting assessment time: {str(e)}")
+        raise DatabaseError(f"Error getting assessment time: {str(e)}") from e
 
 
 if __name__ == "__main__":

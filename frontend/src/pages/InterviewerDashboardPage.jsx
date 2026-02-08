@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
-import { Badge } from '../components/ui/Badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '../components/ui/Dialog';
-import { Label } from '../components/ui/Label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/Select';
-import { LogOut, Search, Filter, Calendar, CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown, Users, BarChart3, Settings, X, Plus, Download, LayoutDashboard, Shield, Eye, Loader, TrendingUp, Activity } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Badge } from '../components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '../components/ui/dialog';
+import { Label } from '../components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { LogOut, Search, Filter, Calendar, CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown, Users, BarChart3, Settings, X, Plus, Download, LayoutDashboard, Shield, Eye, Loader, TrendingUp, Activity, AlertCircle, Code, FileText, Upload, BookOpen } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import Logo from '../components/Logo';
 import { api } from '../services/api';
@@ -28,7 +28,7 @@ const InterviewerDashboardPage = () => {
   } = useRealtimeTable('candidates', [], {
     onUpdate: (newCandidate) => {
       toast({
-        title: "📝 Candidate Updated",
+        title: " Candidate Updated",
         description: `${newCandidate.name}'s status changed`,
         duration: 3000
       });
@@ -43,6 +43,9 @@ const InterviewerDashboardPage = () => {
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
+  const [isTechnicalRole, setIsTechnicalRole] = useState(true);
+  const [customQFile, setCustomQFile] = useState(null);
+  const [customQUploading, setCustomQUploading] = useState(false);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const [desiredSkills, setDesiredSkills] = useState([]);
   const [newSkill, setNewSkill] = useState('');
@@ -54,9 +57,11 @@ const InterviewerDashboardPage = () => {
 
   // Live monitoring state
   const [monitoringAssessmentId, setMonitoringAssessmentId] = useState(null);
-  
-  // Loading state
+
+  // Loading states
   const [isLoading, setIsLoading] = useState(true);
+  const [rejectingCandidateId, setRejectingCandidateId] = useState(null);
+  const [schedulingLoading, setSchedulingLoading] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -104,16 +109,21 @@ const InterviewerDashboardPage = () => {
         return statusMap[status?.toLowerCase()] || status || 'Pending';
       };
 
-      const mapped = list.map((c) => ({
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        status: normalizeStatus(c.status || c.shortlist_status),
-        aiMatchScore: c.match_score || 0,
-        assessmentScheduled: c.assessment_date || null,
-        pros: Array.isArray(c.pros) ? c.pros : (c.pros ? c.pros.split('\n') : []),
-        cons: Array.isArray(c.cons) ? c.cons : (c.cons ? c.cons.split('\n') : []),
-      }));
+      const mapped = list.map((c) => {
+        const normalizedStatus = normalizeStatus(c.status || c.shortlist_status);
+
+        return {
+          id: c.id,
+          name: c.name,
+          email: c.email,
+          status: normalizedStatus,
+          aiMatchScore: Math.round(Number(c.match_score) || 0),
+          assessmentDecision: c.assessment_decision,
+          assessmentScheduled: c.assessment_date || null,
+          pros: Array.isArray(c.pros) ? c.pros : (c.pros ? c.pros.split('\n') : []),
+          cons: Array.isArray(c.cons) ? c.cons : (c.cons ? c.cons.split('\n') : []),
+        };
+      });
 
       // Update realtime data
       setRealtimeCandidates(mapped);
@@ -206,6 +216,7 @@ const InterviewerDashboardPage = () => {
   }, [desiredSkills]);
 
   const handleReject = useCallback(async (candidateId) => {
+    setRejectingCandidateId(candidateId);
     try {
       await api.post(`/api/interviewer/candidates/${candidateId}/reject`, { reason: '' });
       setRealtimeCandidates(prev => prev.map(c =>
@@ -218,6 +229,8 @@ const InterviewerDashboardPage = () => {
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to reject candidate';
       toast({ variant: 'destructive', title: 'Action failed', description: message });
+    } finally {
+      setRejectingCandidateId(null);
     }
   }, [toast]);
 
@@ -231,14 +244,34 @@ const InterviewerDashboardPage = () => {
       return;
     }
 
+    setSchedulingLoading(true);
     const scheduledDateTime = `${scheduleDate}T${scheduleTime}:00`;
     try {
+      // If a custom question file was attached, upload it first
+      if (customQFile) {
+        setCustomQUploading(true);
+        const formData = new FormData();
+        formData.append('file', customQFile);
+        formData.append('description', `Uploaded during scheduling for ${selectedCandidate?.name}`);
+        formData.append('tags', 'schedule-upload');
+        try {
+          await api.post('/api/admin/question-bank/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+        } catch (qErr) {
+          console.warn('Custom question upload failed, proceeding with schedule:', qErr);
+        } finally {
+          setCustomQUploading(false);
+        }
+      }
+
       await api.post(`/api/interviewer/candidates/${selectedCandidate.id}/schedule`, {
         scheduled_time: scheduledDateTime,
+        is_technical_role: isTechnicalRole,
       });
       setRealtimeCandidates(prev => prev.map(c =>
         c.id === selectedCandidate.id
-          ? { ...c, status: 'Scheduled', assessmentScheduled: scheduledDateTime }
+          ? { ...c, status: 'Scheduled', assessmentScheduled: scheduledDateTime, isTechnicalRole }
           : c
       ));
       toast({
@@ -249,9 +282,12 @@ const InterviewerDashboardPage = () => {
       const message = err?.response?.data?.message || 'Failed to schedule assessment';
       toast({ variant: 'destructive', title: 'Schedule failed', description: message });
     } finally {
+      setSchedulingLoading(false);
       setScheduleModalOpen(false);
       setScheduleDate('');
       setScheduleTime('');
+      setIsTechnicalRole(true);
+      setCustomQFile(null);
       setSelectedCandidate(null);
     }
   }, [selectedCandidate, scheduleDate, scheduleTime, toast]);
@@ -333,38 +369,6 @@ const InterviewerDashboardPage = () => {
             )}
           </div>
           <div className="flex gap-2 items-center">
-            {localStorage.getItem('userRole') && (
-              <Select value="/dashboard">
-                <SelectTrigger className="w-[150px] bg-white shadow-md border-slate-300 text-slate-700 hover:border-indigo-300 transition-colors">
-                  <LayoutDashboard className="w-4 h-4 mr-2" />
-                  <SelectValue placeholder="Dashboards" />
-                </SelectTrigger>
-                <SelectContent className="bg-white shadow-md border-slate-200">
-                  <SelectItem value="/dashboard">
-                    <div className="flex items-center gap-2">
-                      <Users className="w-4 h-4" />
-                      Interviewer
-                    </div>
-                  </SelectItem>
-                  {localStorage.getItem('userRole') === 'admin' && (
-                    <>
-                      <SelectItem value="/proctor" onClick={() => navigate('/proctor')}>
-                        <div className="flex items-center gap-2">
-                          <Eye className="w-4 h-4" />
-                          Proctor
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="/admin" onClick={() => navigate('/admin')}>
-                        <div className="flex items-center gap-2">
-                          <Shield className="w-4 h-4" />
-                          Admin
-                        </div>
-                      </SelectItem>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            )}
             <Dialog open={skillsModalOpen} onOpenChange={setSkillsModalOpen}>
               <DialogTrigger asChild>
                 <Button
@@ -601,12 +605,15 @@ const InterviewerDashboardPage = () => {
                         <TableCell className="font-medium text-slate-900">{candidate.name}</TableCell>
                         <TableCell className="text-slate-600">{candidate.email}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={`${getScoreBadgeColor(candidate.aiMatchScore)} font-semibold`}>
+                          <Badge
+                            variant="outline"
+                            className={`${candidate.status === 'Completed' ? 'bg-indigo-600 text-white' : getScoreBadgeColor(candidate.aiMatchScore)} font-bold shadow-sm px-3 py-1`}
+                          >
                             {candidate.aiMatchScore}%
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={`${getStatusBadge(candidate.status)}`}>
+                          <Badge variant="outline" className={`${getStatusBadge(candidate.status)} font-medium w-fit`}>
                             {candidate.status}
                           </Badge>
                         </TableCell>
@@ -647,9 +654,14 @@ const InterviewerDashboardPage = () => {
                                   size="sm"
                                   variant="destructive"
                                   onClick={() => handleReject(candidate.id)}
-                                  className="transition-colors"
+                                  disabled={rejectingCandidateId === candidate.id}
+                                  className="transition-colors min-w-[70px]"
                                 >
-                                  Reject
+                                  {rejectingCandidateId === candidate.id ? (
+                                    <Loader className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    'Reject'
+                                  )}
                                 </Button>
                               </>
                             )}
@@ -667,41 +679,129 @@ const InterviewerDashboardPage = () => {
 
       {/* Schedule Modal */}
       <Dialog open={scheduleModalOpen} onOpenChange={setScheduleModalOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Schedule Assessment</DialogTitle>
-            <DialogDescription>
-              Choose date and time for {selectedCandidate?.name}'s assessment
+        <DialogContent className="sm:max-w-md">
+          <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-t-lg" />
+          <DialogHeader className="pt-4">
+            <DialogTitle className="flex items-center gap-3 text-xl">
+              <div className="p-2 bg-indigo-100 rounded-lg">
+                <Calendar className="w-5 h-5 text-indigo-600" />
+              </div>
+              Schedule Assessment
+            </DialogTitle>
+            <DialogDescription className="text-slate-600">
+              Choose date and time for <span className="font-semibold text-slate-800">{selectedCandidate?.name}</span>'s assessment
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 py-4">
             <div className="space-y-2">
-              <Label htmlFor="date">Date</Label>
+              <Label htmlFor="date" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-slate-500" />
+                Select Date
+              </Label>
               <Input
                 id="date"
                 type="date"
                 value={scheduleDate}
                 onChange={(e) => setScheduleDate(e.target.value)}
                 min={new Date().toISOString().split('T')[0]}
+                className="border-slate-200 focus:border-indigo-500 focus:ring-indigo-500"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="time">Time</Label>
+              <Label htmlFor="time" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-500" />
+                Select Time
+              </Label>
               <Input
                 id="time"
                 type="time"
                 value={scheduleTime}
                 onChange={(e) => setScheduleTime(e.target.value)}
+                className="border-slate-200 focus:border-indigo-500 focus:ring-indigo-500"
               />
             </div>
+
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100 hover:border-indigo-200 transition-colors cursor-pointer" onClick={() => setIsTechnicalRole(!isTechnicalRole)}>
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isTechnicalRole ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-500'}`}>
+                  <Code className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-slate-800">Technical Role</div>
+                  <div className="text-xs text-slate-500">{isTechnicalRole ? 'Includes Coding & MCQ' : 'MCQ Only (Non-Technical)'}</div>
+                </div>
+              </div>
+              <div className={`w-12 h-6 rounded-full transition-colors relative ${isTechnicalRole ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${isTechnicalRole ? 'left-7' : 'left-1'}`} />
+              </div>
+            </div>
+
+            {/* Optional Custom Questions Upload */}
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+              <div className="flex items-center gap-2 mb-2">
+                <BookOpen className="w-4 h-4 text-indigo-500" />
+                <span className="text-sm font-semibold text-slate-700">Custom Questions (Optional)</span>
+              </div>
+              <p className="text-xs text-slate-500 mb-2">Upload a PDF/DOCX with your own questions. AI will blend them into the assessment.</p>
+              <div
+                className={`border border-dashed rounded-md p-3 text-center cursor-pointer transition-colors ${customQFile ? 'border-indigo-400 bg-indigo-50' : 'border-slate-300 hover:border-indigo-300'}`}
+                onClick={() => document.getElementById('schedule-qb-file').click()}
+              >
+                <input
+                  id="schedule-qb-file"
+                  type="file"
+                  accept=".pdf,.docx"
+                  className="hidden"
+                  onChange={(e) => setCustomQFile(e.target.files[0] || null)}
+                />
+                {customQFile ? (
+                  <div className="flex items-center justify-center gap-2 text-sm text-indigo-700">
+                    <FileText className="w-4 h-4" />
+                    <span className="font-medium">{customQFile.name}</span>
+                    <button onClick={(e) => { e.stopPropagation(); setCustomQFile(null); }} className="ml-1 text-slate-400 hover:text-red-500">
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+                    <Upload className="w-4 h-4" />
+                    <span>Drop PDF/DOCX or click to browse</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {scheduleDate && scheduleTime && (
+              <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 text-indigo-600" />
+                <div className="text-sm">
+                  <span className="text-slate-600">Scheduled for: </span>
+                  <span className="font-semibold text-indigo-700">
+                    {new Date(`${scheduleDate}T${scheduleTime}`).toLocaleString('en-US', {
+                      weekday: 'long',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setScheduleModalOpen(false)}>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setScheduleModalOpen(false)} disabled={schedulingLoading} className="border-slate-200">
               Cancel
             </Button>
-            <Button onClick={handleSchedule} className="bg-indigo-600 hover:bg-indigo-700">
-              <Calendar className="mr-2 w-4 h-4" />
-              Confirm Schedule
+            <Button onClick={handleSchedule} className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 min-w-[150px] shadow-md" disabled={schedulingLoading}>
+              {schedulingLoading ? (
+                <Loader className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <Calendar className="mr-2 w-4 h-4" />
+                  Confirm Schedule
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -710,20 +810,39 @@ const InterviewerDashboardPage = () => {
       {/* Candidate Details Modal */}
       <Dialog open={viewDetailsModalOpen} onOpenChange={setViewDetailsModalOpen}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-2xl">{selectedCandidate?.name}</DialogTitle>
-            <DialogDescription className="flex items-center justify-between">
-              <span>{selectedCandidate?.email}</span>
+          <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-t-lg" />
+          <DialogHeader className="pt-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                  {selectedCandidate?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <DialogTitle className="text-2xl font-bold text-slate-800">{selectedCandidate?.name}</DialogTitle>
+                  <DialogDescription className="text-slate-600 flex items-center gap-2 mt-1">
+                    {selectedCandidate?.email}
+                    {selectedCandidate?.status && (
+                      <Badge variant="outline" className={`ml-2 ${selectedCandidate.status === 'Completed' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
+                        selectedCandidate.status === 'Hired' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                          selectedCandidate.status === 'Rejected' ? 'bg-red-100 text-red-700 border-red-200' :
+                            'bg-slate-100 text-slate-700 border-slate-200'
+                        }`}>
+                        {selectedCandidate.status}
+                      </Badge>
+                    )}
+                  </DialogDescription>
+                </div>
+              </div>
               <Button
                 size="sm"
                 variant="outline"
-                className="ml-4"
-                onClick={() => handleDownloadResume(selectedCandidate.id)}
+                className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                onClick={() => handleDownloadResume(selectedCandidate?.id)}
               >
                 <Download className="w-4 h-4 mr-1" />
                 Resume
               </Button>
-            </DialogDescription>
+            </div>
           </DialogHeader>
 
           {selectedCandidate && (
@@ -731,17 +850,19 @@ const InterviewerDashboardPage = () => {
               {/* AI Analysis Section */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                    <BarChart3 className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                    <div className="p-1.5 bg-indigo-100 rounded-lg">
+                      <BarChart3 className="w-4 h-4 text-indigo-600" />
+                    </div>
                     AI Match Score
                   </h3>
-                  <div className="bg-slate-50 p-4 rounded-lg">
-                    <div className="text-4xl font-bold text-indigo-600 mb-2">
+                  <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-5 rounded-xl border border-indigo-100 shadow-sm">
+                    <div className="text-5xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-3">
                       {selectedCandidate.aiMatchScore}%
                     </div>
-                    <div className="w-full bg-slate-200 rounded-full h-3">
+                    <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
                       <div
-                        className="bg-indigo-600 h-3 rounded-full transition-all duration-500"
+                        className="bg-gradient-to-r from-indigo-500 to-purple-500 h-3 rounded-full transition-all duration-500"
                         style={{ width: `${selectedCandidate.aiMatchScore}%` }}
                       />
                     </div>
@@ -751,86 +872,138 @@ const InterviewerDashboardPage = () => {
                 {/* Assessment Results Section - Only if Completed/Hired/Rejected */}
                 {assessmentDetails && (
                   <div>
-                    <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5 text-purple-600" />
+                    <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                      <div className="p-1.5 bg-purple-100 rounded-lg">
+                        <CheckCircle className="w-4 h-4 text-purple-600" />
+                      </div>
                       Assessment Results
                     </h3>
-                    <div className="bg-purple-50 p-4 rounded-lg border border-purple-100 space-y-2">
+                    {assessmentDetails.decision && (
+                      <div className={`mb-4 px-4 py-3 rounded-xl font-bold text-center shadow-sm ${assessmentDetails.decision.toLowerCase().includes('recommend')
+                        ? 'bg-gradient-to-r from-emerald-50 to-green-50 text-emerald-700 border border-emerald-200'
+                        : assessmentDetails.decision.toLowerCase().includes('consider')
+                          ? 'bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 border border-blue-200'
+                          : 'bg-gradient-to-r from-red-50 to-pink-50 text-red-700 border border-red-200'
+                        }`}>
+                        {assessmentDetails.decision}
+                      </div>
+                    )}
+                    <div className="bg-gradient-to-br from-purple-50 to-indigo-50 p-4 rounded-xl border border-purple-100 shadow-sm space-y-3">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-600">Technical Score:</span>
-                        <span className="font-bold text-purple-700">{assessmentDetails.technical_score || 0}%</span>
+                        <span className="text-slate-600 text-sm">Technical Score</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 bg-slate-200 rounded-full h-2">
+                            <div className="bg-purple-500 h-2 rounded-full transition-all" style={{ width: `${assessmentDetails.technical_score || 0}%` }} />
+                          </div>
+                          <span className="font-bold text-purple-700 w-12 text-right">{Math.round(assessmentDetails.technical_score) || 0}%</span>
+                        </div>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-600">Psychometric Score:</span>
-                        <span className="font-bold text-purple-700">{assessmentDetails.psychometric_score || 0}%</span>
+                        <span className="text-slate-600 text-sm">Psychometric Score</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 bg-slate-200 rounded-full h-2">
+                            <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${assessmentDetails.psychometric_score || 0}%` }} />
+                          </div>
+                          <span className="font-bold text-indigo-700 w-12 text-right">{Math.round(assessmentDetails.psychometric_score) || 0}%</span>
+                        </div>
                       </div>
-                      <div className="border-t border-purple-200 my-2 pt-2 flex justify-between items-center">
-                        <span className="text-slate-800 font-semibold">Overall Score:</span>
-                        <span className="font-bold text-xl text-purple-800">{assessmentDetails.overall_score || 0}%</span>
+                      <div className="border-t border-purple-200 pt-3 flex justify-between items-center">
+                        <span className="text-slate-800 font-semibold">Overall Score</span>
+                        <span className="font-bold text-2xl bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">{Math.round(assessmentDetails.overall_score) || 0}%</span>
                       </div>
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+              {/* Strengths Section */}
+              <div className="mt-2">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                  <div className="p-2 bg-emerald-100 rounded-lg">
                     <ThumbsUp className="w-5 h-5 text-emerald-600" />
-                    AI-Generated Strengths
-                  </h3>
-                  <ul className="space-y-2">
-                    {(selectedCandidate.pros || []).map((pro, idx) => (
-                      <li key={idx} className="flex items-start gap-2 bg-emerald-50 p-3 rounded-lg">
-                        <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-slate-700 text-sm">{pro}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                  </div>
+                </h3>
+                <ul className="space-y-3">
+                  {(selectedCandidate.pros || []).map((pro, idx) => (
+                    <li key={idx} className="flex items-start gap-3 bg-gradient-to-r from-emerald-50 to-green-50 p-4 rounded-xl border border-emerald-100 shadow-sm">
+                      <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                      <span className="text-slate-700">{pro}</span>
+                    </li>
+                  ))}
+                  {(selectedCandidate.pros || []).length === 0 && (
+                    <li className="text-slate-500 italic p-4 bg-slate-50 rounded-xl text-center">No strengths data available</li>
+                  )}
+                </ul>
+              </div>
 
-                <div>
-                  <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+              {/* Considerations Section */}
+              <div className="mt-6">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                  <div className="p-2 bg-amber-100 rounded-lg">
                     <ThumbsDown className="w-5 h-5 text-amber-600" />
-                    Areas for Consideration
-                  </h3>
-                  <ul className="space-y-2">
-                    {(selectedCandidate.cons || []).map((con, idx) => (
-                      <li key={idx} className="flex items-start gap-2 bg-amber-50 p-3 rounded-lg">
-                        <XCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                        <span className="text-slate-700 text-sm">{con}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                  </div>
+                  Areas for Consideration
+                </h3>
+                <ul className="space-y-3">
+                  {(selectedCandidate.cons || []).map((con, idx) => (
+                    <li key={idx} className="flex items-start gap-3 bg-gradient-to-r from-amber-50 to-orange-50 p-4 rounded-xl border border-amber-100 shadow-sm">
+                      <XCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <span className="text-slate-700">{con}</span>
+                    </li>
+                  ))}
+                  {(selectedCandidate.cons || []).length === 0 && (
+                    <li className="text-slate-500 italic p-4 bg-slate-50 rounded-xl text-center">No considerations data available</li>
+                  )}
+                </ul>
               </div>
 
               {/* Action Buttons for Final Decision */}
               {selectedCandidate.status === 'Completed' && assessmentDetails && (
-                <div className="border-t pt-6 mt-6">
-                  <h3 className="font-semibold text-lg mb-4 text-center">Final Hiring Decision</h3>
-                  <div className="flex justify-center gap-4">
-                    <Button
-                      size="lg"
-                      variant="destructive"
-                      className="w-32"
-                      onClick={() => handleFinalDecision('no-hire')}
-                      disabled={decisionLoading}
-                    >
-                      {decisionLoading ? '...' : 'No-Hire'}
-                    </Button>
-                    <Button
-                      size="lg"
-                      className="bg-green-600 hover:bg-green-700 w-32"
-                      onClick={() => handleFinalDecision('hire')}
-                      disabled={decisionLoading}
-                    >
-                      {decisionLoading ? '...' : 'Hire'}
-                    </Button>
+                <div className="border-t border-slate-200 pt-6 mt-6">
+                  <div className="bg-gradient-to-r from-slate-50 to-indigo-50 rounded-xl p-6 border border-slate-200">
+                    <h3 className="font-semibold text-lg mb-4 text-center flex items-center justify-center gap-2">
+                      <div className="p-1.5 bg-indigo-100 rounded-lg">
+                        <Users className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      Final Hiring Decision
+                    </h3>
+                    <div className="flex justify-center gap-4">
+                      <Button
+                        size="lg"
+                        className="w-36 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-md"
+                        onClick={() => handleFinalDecision('no-hire')}
+                        disabled={decisionLoading}
+                      >
+                        {decisionLoading ? (
+                          <Loader className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <XCircle className="w-4 h-4 mr-2" />
+                            No-Hire
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        size="lg"
+                        className="w-36 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-md"
+                        onClick={() => handleFinalDecision('hire')}
+                        disabled={decisionLoading}
+                      >
+                        {decisionLoading ? (
+                          <Loader className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Hire
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-center text-sm text-slate-500 mt-4 flex items-center justify-center gap-1">
+                      <AlertCircle className="w-4 h-4" />
+                      This will send a final status email to the candidate.
+                    </p>
                   </div>
-                  <p className="text-center text-sm text-slate-500 mt-2">
-                    This will send a final status email to the candidate.
-                  </p>
                 </div>
               )}
             </div>

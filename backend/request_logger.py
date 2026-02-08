@@ -36,11 +36,10 @@ def log_request(f):
         
         # Get user info if authenticated
         user_id = None
-        try:
+        import contextlib
+        with contextlib.suppress(Exception):
             verify_jwt_in_request(optional=True)
             user_id = get_jwt_identity()
-        except:
-            pass
         
         # Execute the route function
         response = f(*args, **kwargs)
@@ -81,11 +80,10 @@ def init_request_logging(app):
             
             # Get user info if available
             user_id = None
-            try:
+            import contextlib
+            with contextlib.suppress(Exception):
                 verify_jwt_in_request(optional=True)
                 user_id = get_jwt_identity()
-            except:
-                pass
             
             # Log the request
             logger.info(

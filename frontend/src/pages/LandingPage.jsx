@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight, CheckCircle, Shield, Zap, Target,
   Brain, Users, TrendingUp, Clock, Award, X, BarChart3, Star, LogIn,
-  Menu, X as XIcon, Sparkles
+  Menu, X as XIcon, Sparkles, Briefcase
 } from 'lucide-react';
-import { Button } from '../components/ui/Button';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/Card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/Dialog";
+import { Button } from '../components/ui/button';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import Logo from '../components/Logo';
 
 const LandingPage = () => {
@@ -24,6 +24,14 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
           <Logo size="default" />
           <div className="hidden sm:flex gap-4">
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/jobs')}
+              className="text-slate-700 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-200 font-medium px-4 py-2 rounded-lg flex items-center gap-2"
+            >
+              <Briefcase className="w-4 h-4" />
+              <span>Open Positions</span>
+            </Button>
             <Button
               variant="outline"
               onClick={() => navigate('/login')}
@@ -49,6 +57,18 @@ const LandingPage = () => {
         {mobileMenuOpen && (
           <div className="sm:hidden border-t bg-white animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="px-4 py-4 flex flex-col gap-3">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  navigate('/jobs');
+                  setMobileMenuOpen(false);
+                }}
+                className="text-slate-700 hover:text-indigo-600 hover:bg-indigo-50 w-full rounded-lg transition-all duration-200 flex items-center gap-2 justify-center"
+              >
+                <Briefcase className="w-4 h-4" />
+                Open Positions
+              </Button>
               <Button
                 size="sm"
                 onClick={() => {
@@ -103,6 +123,18 @@ const LandingPage = () => {
             >
               I'm a Candidate
               <ArrowRight className="ml-2 w-4 h-4 sm:w-5 sm:h-5" />
+            </Button>
+          </div>
+          <div className="flex justify-center mt-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-400 px-4 sm:px-0">
+            <Button
+              size="lg"
+              variant="ghost"
+              onClick={() => navigate('/jobs')}
+              className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-6 py-3 text-sm sm:text-base rounded-lg transition-all duration-300 font-medium flex items-center gap-2"
+            >
+              <Briefcase className="w-4 h-4" />
+              Browse Open Positions
+              <ArrowRight className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -203,7 +235,6 @@ const LandingPage = () => {
                 <span className="text-xl sm:text-2xl font-bold text-indigo-600">3</span>
               </div>
               <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2 sm:mb-3">Hire with Confidence</h3>
-              <p className="text-slate-600 text-sm sm:text-base">Make data-backed decisions with comprehensive AI-generated reports</p>
             </div>
           </div>
         </div>

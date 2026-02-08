@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { Button } from '../components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/Select';
-import { Badge } from '../components/ui/Badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/Dialog';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Badge } from '../components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
   LogOut, Eye, Users, Clock, CheckCircle, AlertTriangle, RefreshCw,
@@ -123,7 +122,7 @@ const ProctorDashboardPage = () => {
 
       toast({
         variant: 'destructive',
-        title: '⚠️ Violation Detected',
+        title: ' Violation Detected',
         description: `${candidateName}: ${violationType}`,
         duration: 5000,
       });
@@ -606,7 +605,7 @@ const ProctorDashboardPage = () => {
                                 }}
                               />
                               <div className="absolute inset-0 items-center justify-center bg-slate-100 text-xs text-slate-500 hidden">
-                                📷 Screenshot unavailable
+                                 Screenshot unavailable
                               </div>
                             </div>
                           ) : (

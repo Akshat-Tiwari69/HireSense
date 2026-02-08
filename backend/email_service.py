@@ -66,9 +66,9 @@ class EmailService:
         # Configure Resend if available
         if self.resend_api_key and RESEND_AVAILABLE:
             resend.api_key = self.resend_api_key
-            print(f"[EMAIL] ✅ Resend API configured (from: {self.resend_from_email})", flush=True)
+            print(f"[EMAIL]  Resend API configured (from: {self.resend_from_email})", flush=True)
         elif not self.smtp_user or not self.smtp_pass:
-            print("[EMAIL] ⚠️ No email service configured (set RESEND_API_KEY or SMTP_USER/SMTP_PASS)", flush=True)
+            print("[EMAIL]  No email service configured (set RESEND_API_KEY or SMTP_USER/SMTP_PASS)", flush=True)
     
     def _send_via_resend(
         self,
@@ -90,7 +90,7 @@ class EmailService:
             }
             
             response = resend.Emails.send(params)
-            print(f"[EMAIL] ✅ Resend success! ID: {response.get('id', 'unknown')}", flush=True)
+            print(f"[EMAIL]  Resend success! ID: {response.get('id', 'unknown')}", flush=True)
             
             log_email(
                 recipient_email=recipient_email,
@@ -103,7 +103,7 @@ class EmailService:
             return True
             
         except Exception as e:
-            print(f"[EMAIL] ❌ Resend failed: {e}", flush=True)
+            print(f"[EMAIL]  Resend failed: {e}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', str(e))
             return False
     
@@ -138,7 +138,7 @@ class EmailService:
         
         # Fall back to SMTP
         if not self.smtp_user or not self.smtp_pass:
-            print(f"[EMAIL] ⚠️ No email service configured, skipping email to {recipient_email}", flush=True)
+            print(f"[EMAIL]  No email service configured, skipping email to {recipient_email}", flush=True)
             return False
         
         try:
@@ -159,7 +159,7 @@ class EmailService:
             html_part = MIMEText(html_body, 'html')
             message.attach(html_part)
             
-            print(f"[EMAIL] Connecting to SMTP...", flush=True)
+            print("[EMAIL] Connecting to SMTP...", flush=True)
             
             # Connect to SMTP server and send (with 10 second timeout)
             try:
@@ -177,7 +177,7 @@ class EmailService:
                     server.send_message(message)
                     print("[EMAIL] SSL send succeeded!", flush=True)
             
-            print(f"[EMAIL] ✅ Email sent successfully to {recipient_email}!", flush=True)
+            print(f"[EMAIL]  Email sent successfully to {recipient_email}!", flush=True)
             
             log_email(
                 recipient_email=recipient_email,
@@ -191,20 +191,20 @@ class EmailService:
             
         except smtplib.SMTPAuthenticationError as e:
             error_msg = f"SMTP authentication failed: {str(e)}"
-            print(f"[EMAIL] ❌ {error_msg}", flush=True)
+            print(f"[EMAIL]  {error_msg}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except smtplib.SMTPException as e:
             error_msg = f"SMTP error: {str(e)}"
-            print(f"[EMAIL] ❌ {error_msg}", flush=True)
+            print(f"[EMAIL]  {error_msg}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            print(f"[EMAIL] ❌ {error_msg}", flush=True)
-            logger.exception(f"❌ {error_msg}")
+            print(f"[EMAIL]  {error_msg}", flush=True)
+            logger.exception(f" {error_msg}")
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
     
@@ -287,7 +287,7 @@ Thank you for your interest in joining our team and for taking the time to submi
 
 After careful review of your qualifications, we regret to inform you that we will not be moving forward with your application at this time.
 
-{'Feedback: ' + reason if reason else ''}
+{f'Feedback: {reason}' if reason else ''}
 
 We appreciate the effort you put into your application. We encourage you to apply for future opportunities that match your skills and experience.
 
@@ -363,7 +363,7 @@ This is an automated message. Please do not reply to this email.
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎉 Congratulations!</h1>
+            <h1> Congratulations!</h1>
         </div>
         <div class="content">
             <h2>Dear {candidate_name},</h2>
@@ -371,9 +371,9 @@ This is an automated message. Please do not reply to this email.
             <p>Great news! After reviewing your application, we are pleased to invite you to take our technical assessment.</p>
             
             <div class="highlight">
-                <p><strong>📅 Scheduled Time:</strong> {scheduled_time}</p>
+                <p><strong> Scheduled Time:</strong> {scheduled_time}</p>
                 <p><strong>⏰ Assessment Window:</strong> ±30 minutes from scheduled time</p>
-                <p><strong>⏱️ Duration:</strong> Approximately 60-90 minutes</p>
+                <p><strong>⏱ Duration:</strong> Approximately 60-90 minutes</p>
             </div>
             
             <div class="instructions">
@@ -419,24 +419,24 @@ This is an automated message. Please do not reply to this email.
         
         # Plain text version
         text_body = f"""
-🎉 Congratulations!
+ Congratulations!
 
 Dear {candidate_name},
 
 Great news! After reviewing your application, we are pleased to invite you to take our technical assessment.
 
-📅 Scheduled Time: {scheduled_time}
+ Scheduled Time: {scheduled_time}
 ⏰ Assessment Window: ±30 minutes from scheduled time
-⏱️ Duration: Approximately 60-90 minutes
+⏱ Duration: Approximately 60-90 minutes
 
 Assessment Components:
 - Multiple Choice Questions: 10 technical questions
 - Coding Challenge: 1 programming problem
 - Psychometric Assessment: 3 scenario-based questions
 
-{'Contact Person: ' + interviewer_name if interviewer_name else ''}
+{f'Contact Person: {interviewer_name}' if interviewer_name else ''}
 
-{additional_info if additional_info else ''}
+{additional_info or ''}
 
 Important: Please ensure you:
 - Have a stable internet connection
@@ -513,7 +513,7 @@ This is an automated message. Please do not reply to this email.
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎉 Congratulations!</h1>
+            <h1> Congratulations!</h1>
         </div>
         <div class="content">
             <h2>Dear {candidate_name},</h2>
@@ -595,7 +595,7 @@ This is an automated message. Please do not reply to this email.
         # Plain text version
         if is_hired:
             text_body = f"""
-🎉 Congratulations!
+ Congratulations!
 
 Dear {candidate_name},
 
@@ -603,12 +603,12 @@ We are delighted to offer you a position with CYGNUSA!
 
 We were impressed by your performance in the assessment and believe you will be a valuable addition to our team.
 
-{'Assessment Feedback: ' + rationale if rationale else ''}
+{f'Assessment Feedback: {rationale}' if rationale else ''}
 
-{self._format_scores_text(scores) if scores else ''}
+{self._format_scores_text(scores) or ''}
 
 Next Steps:
-{next_steps if next_steps else 'Our HR team will contact you within 2-3 business days with your offer letter and onboarding details.'}
+{next_steps or 'Our HR team will contact you within 2-3 business days with your offer letter and onboarding details.'}
 
 Welcome to the team! We look forward to working with you.
 
@@ -743,7 +743,7 @@ def test_email_service():
     print(f"  Pass: {'*' * 8 if service.smtp_pass else 'NOT SET'}")
     
     if not service.smtp_user or not service.smtp_pass:
-        print("\n⚠️  SMTP credentials not configured!")
+        print("\n  SMTP credentials not configured!")
         print("Set environment variables:")
         print("  SMTP_USER=your-email@gmail.com")
         print("  SMTP_PASS=your-app-password")
@@ -752,7 +752,7 @@ def test_email_service():
     test_email = input("\nEnter test email address (or press Enter to skip): ").strip()
     
     if not test_email:
-        print("\n✅ Configuration check passed. Skipping actual email send.")
+        print("\n Configuration check passed. Skipping actual email send.")
         return
     
     print(f"\nSending test emails to {test_email}...")
@@ -764,7 +764,7 @@ def test_email_service():
         candidate_name="Test Candidate",
         reason="Thank you for your application. After review, we found other candidates with more experience in our required tech stack."
     )
-    print(f"   Result: {'✅ Sent' if result1 else '❌ Failed'}")
+    print(f"   Result: {' Sent' if result1 else ' Failed'}")
     
     # Test 2: Assessment invitation
     print("\n2. Testing assessment invitation...")
@@ -775,7 +775,7 @@ def test_email_service():
         scheduled_time="January 25, 2026 at 10:00 AM EST",
         interviewer_name="Jane Doe"
     )
-    print(f"   Result: {'✅ Sent' if result2 else '❌ Failed'}")
+    print(f"   Result: {' Sent' if result2 else ' Failed'}")
     
     # Test 3: Final decision (hired)
     print("\n3. Testing final decision email (hired)...")
@@ -786,7 +786,7 @@ def test_email_service():
         rationale="Excellent performance across all assessment areas.",
         scores={"technical": 85, "psychometric": 90, "overall": 87}
     )
-    print(f"   Result: {'✅ Sent' if result3 else '❌ Failed'}")
+    print(f"   Result: {' Sent' if result3 else ' Failed'}")
     
     print("\n" + "=" * 60)
     print("Email service test completed!")

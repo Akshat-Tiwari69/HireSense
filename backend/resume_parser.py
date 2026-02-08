@@ -44,8 +44,8 @@ def calculate_match_score(parsed_data_or_skills, job_or_experience=None, require
     if not required:
         return 50  # Default neutral when JD unspecified
 
-    required_skills_set = set(s.lower() for s in required)
-    candidate_skills_set = set(s.lower() for s in skills)
+    required_skills_set = {s.lower() for s in required}
+    candidate_skills_set = {s.lower() for s in skills}
 
     if not required_skills_set:
         return 50

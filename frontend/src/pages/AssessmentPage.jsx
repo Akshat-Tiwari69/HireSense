@@ -39,6 +39,7 @@ const AssessmentPage = () => {
   const [assessmentData, setAssessmentData] = useState(null);
   const [assessmentId, setAssessmentId] = useState(null);
   const [candidateName, setCandidateName] = useState('');
+  const [isTechnicalRole, setIsTechnicalRole] = useState(true);
 
   // Section navigation
   const [currentSection, setCurrentSection] = useState(0);
@@ -51,7 +52,7 @@ const AssessmentPage = () => {
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [psychometricAnswers, setPsychometricAnswers] = useState({});
-  
+
   // Coding test results
   const [testsPassed, setTestsPassed] = useState(false);
   const [codeSaved, setCodeSaved] = useState(false);
@@ -111,7 +112,7 @@ const AssessmentPage = () => {
   // Auto-redirect after submission
   useEffect(() => {
     if (!submitted) return;
-    
+
     const timer = setTimeout(() => {
       console.log('Auto-redirecting to home after assessment submission');
       navigate('/');
@@ -140,14 +141,15 @@ const AssessmentPage = () => {
 
       setAssessmentData(data);
       setAssessmentId(data.assessment_id);
-      
+      setIsTechnicalRole(data.is_technical_role !== false); // Default to true if null/undefined
+
       // Use remaining_seconds if resuming, otherwise full duration
       const remainingTime = data.remaining_seconds ?? (data.duration_minutes * 60);
       setTimeRemaining(remainingTime);
-      
+
       if (data.is_resume) {
         console.log(`Resuming assessment, ${remainingTime} seconds remaining`);
-        
+
         // Load saved MCQ answers (convert letter A,B,C,D to index 0,1,2,3)
         if (data.saved_mcq_answers && Object.keys(data.saved_mcq_answers).length > 0) {
           const letterToIndex = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
@@ -158,17 +160,17 @@ const AssessmentPage = () => {
           console.log('Loading saved MCQ answers:', convertedMcqAnswers);
           setMcqAnswers(convertedMcqAnswers);
         }
-        
-        // Load saved psychometric answers (convert score 1-10 to index 0-9)
+
+        // Load saved psychometric answers (now returns selected option index directly)
         if (data.saved_psychometric_answers && Object.keys(data.saved_psychometric_answers).length > 0) {
           const convertedPsychAnswers = {};
-          for (const [qId, score] of Object.entries(data.saved_psychometric_answers)) {
-            convertedPsychAnswers[qId] = score - 1; // Convert 1-10 score to 0-9 index
+          for (const [qId, optionIndex] of Object.entries(data.saved_psychometric_answers)) {
+            convertedPsychAnswers[qId] = optionIndex; // Already the option index
           }
           console.log('Loading saved psychometric answers:', convertedPsychAnswers);
           setPsychometricAnswers(convertedPsychAnswers);
         }
-        
+
         // Load saved coding submission
         if (data.saved_coding) {
           console.log('Loading saved coding submission:', data.saved_coding);
@@ -197,7 +199,6 @@ const AssessmentPage = () => {
   };
 
   const getStarterCode = (problem, lang) => {
-    // Use AI-generated starter code if available
     if (problem.starter_code && problem.starter_code[lang]) {
       return problem.starter_code[lang];
     }
@@ -222,7 +223,7 @@ const AssessmentPage = () => {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        
+
         // Wait for video to be ready before starting face detection
         videoRef.current.onloadedmetadata = () => {
           console.log('Video metadata loaded, dimensions:', videoRef.current.videoWidth, videoRef.current.videoHeight);
@@ -257,16 +258,16 @@ const AssessmentPage = () => {
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      
+
       // Check video dimensions - use fallback if needed
       const videoWidth = video.videoWidth || 320;
       const videoHeight = video.videoHeight || 240;
-      
+
       if (video.readyState < 2) {
         console.log('Video not ready, readyState:', video.readyState);
         return;
       }
-      
+
       const ctx = canvas.getContext('2d');
       canvas.width = videoWidth;
       canvas.height = videoHeight;
@@ -275,7 +276,7 @@ const AssessmentPage = () => {
       try {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const detectionResult = detectFaces(imageData, canvas.width, canvas.height);
-        
+
         console.log('Face detection result:', detectionResult.count, 'faces detected');
         setFaceCount(detectionResult.count);
         setDetectionInitialized(true);
@@ -284,7 +285,7 @@ const AssessmentPage = () => {
           // No face detected
           noFaceCountRef.current++;
           multipleFaceCountRef.current = 0;
-          
+
           if (noFaceCountRef.current >= 2) { // 2 consecutive checks (6 seconds)
             setFaceDetected(false);
             if (lastViolationType !== 'no_face') {
@@ -297,7 +298,7 @@ const AssessmentPage = () => {
           // Multiple faces detected
           multipleFaceCountRef.current++;
           noFaceCountRef.current = 0;
-          
+
           if (multipleFaceCountRef.current >= 2) { // 2 consecutive checks
             setFaceDetected(true);
             if (lastViolationType !== 'multiple_faces') {
@@ -323,16 +324,16 @@ const AssessmentPage = () => {
     // Simplified face detection using vertical stripe analysis
     // Counts distinct skin-colored regions in horizontal bands
     const { data } = imageData;
-    
+
     // Divide image into vertical stripes and count skin pixels in each
     const numStripes = 30;
     const stripeWidth = Math.floor(width / numStripes);
     const skinPerStripe = new Array(numStripes).fill(0);
     const totalPerStripe = new Array(numStripes).fill(0);
-    
+
     // Only analyze upper 2/3 of image (where faces typically are)
     const analyzeHeight = Math.floor(height * 0.75);
-    
+
     for (let y = 0; y < analyzeHeight; y++) {
       for (let x = 0; x < width; x++) {
         const stripeIdx = Math.min(Math.floor(x / stripeWidth), numStripes - 1);
@@ -340,42 +341,42 @@ const AssessmentPage = () => {
         const r = data[idx];
         const g = data[idx + 1];
         const b = data[idx + 2];
-        
+
         totalPerStripe[stripeIdx]++;
         if (isSkinTone(r, g, b)) {
           skinPerStripe[stripeIdx]++;
         }
       }
     }
-    
+
     // Calculate skin density per stripe
-    const skinDensity = skinPerStripe.map((skin, i) => 
+    const skinDensity = skinPerStripe.map((skin, i) =>
       totalPerStripe[i] > 0 ? skin / totalPerStripe[i] : 0
     );
-    
+
     // Find peaks (local maxima) in skin density - these are likely faces
     const threshold = 0.08; // Minimum skin density to consider
     const peaks = [];
-    
+
     for (let i = 2; i < numStripes - 2; i++) {
       const current = skinDensity[i];
       if (current > threshold) {
         // Check if this is a local maximum (higher than neighbors)
-        const isLocalMax = current >= skinDensity[i-1] && 
-                          current >= skinDensity[i+1] &&
-                          current >= skinDensity[i-2] &&
-                          current >= skinDensity[i+2];
-        
+        const isLocalMax = current >= skinDensity[i - 1] &&
+          current >= skinDensity[i + 1] &&
+          current >= skinDensity[i - 2] &&
+          current >= skinDensity[i + 2];
+
         // Also check if it's significantly above the average nearby
-        const nearby = (skinDensity[i-2] + skinDensity[i-1] + skinDensity[i+1] + skinDensity[i+2]) / 4;
+        const nearby = (skinDensity[i - 2] + skinDensity[i - 1] + skinDensity[i + 1] + skinDensity[i + 2]) / 4;
         const isSignificant = current > nearby * 0.8 || current > threshold * 1.5;
-        
+
         if (isLocalMax && isSignificant) {
           peaks.push({ stripe: i, density: current });
         }
       }
     }
-    
+
     // Merge peaks that are too close together (same face)
     const mergedPeaks = [];
     for (const peak of peaks) {
@@ -389,16 +390,16 @@ const AssessmentPage = () => {
         mergedPeaks.push(peak);
       }
     }
-    
+
     // Calculate total skin coverage to determine if there's any face at all
     const totalSkinDensity = skinDensity.reduce((a, b) => a + b, 0) / numStripes;
-    
+
     console.log('Skin density per stripe:', skinDensity.map(d => d.toFixed(2)).join(', '));
     console.log('Peaks found:', mergedPeaks.length, 'Total avg density:', totalSkinDensity.toFixed(3));
-    
+
     // Determine face count
     let faceCount = 0;
-    
+
     if (totalSkinDensity < 0.02) {
       // Very little skin visible - no face
       faceCount = 0;
@@ -408,7 +409,7 @@ const AssessmentPage = () => {
     } else {
       faceCount = Math.max(mergedPeaks.length, totalSkinDensity > 0.03 ? 1 : 0);
     }
-    
+
     return {
       count: faceCount,
       peaks: mergedPeaks,
@@ -421,49 +422,48 @@ const AssessmentPage = () => {
     // Based on RGB color space rules
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
-    
+
     // Rule 1: General skin tone in uniform daylight
     const rule1 = r > 95 && g > 40 && b > 20 &&
-                  max - min > 15 && Math.abs(r - g) > 15 && r > g && r > b;
-    
+      max - min > 15 && Math.abs(r - g) > 15 && r > g && r > b;
+
     // Rule 2: Skin tone under flashlight or lateral illumination
     const rule2 = r > 220 && g > 210 && b > 170 &&
-                  Math.abs(r - g) <= 15 && r > b && g > b;
-    
+      Math.abs(r - g) <= 15 && r > b && g > b;
+
     // Rule 3: Darker skin tones
     const rule3 = r > 60 && g > 40 && b > 20 &&
-                  r > g && r > b && (r - g) > 10 && (r - b) > 10 &&
-                  max - min > 10 && max - min < 80;
+      r > g && r > b && (r - g) > 10 && (r - b) > 10 &&
+      max - min > 10 && max - min < 80;
 
     return rule1 || rule2 || rule3;
   };
 
   const captureScreenshot = async () => {
     if (!videoRef.current) return null;
-    
+
     try {
       const video = videoRef.current;
       const canvas = screenshotCanvasRef.current || document.createElement('canvas');
       if (!screenshotCanvasRef.current) {
         screenshotCanvasRef.current = canvas;
       }
-      
+
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 480;
-      
+
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0);
-      
+
       // Add timestamp watermark
       ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.fillRect(5, canvas.height - 25, 200, 20);
       ctx.fillStyle = '#000';
       ctx.font = '12px Arial';
       ctx.fillText(new Date().toLocaleString(), 10, canvas.height - 10);
-      
+
       // Convert to base64 data URL
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-      return dataUrl;
+      return canvas.toDataURL('image/jpeg', 0.7);
     } catch (err) {
       console.error('Failed to capture screenshot:', err);
       return null;
@@ -486,7 +486,7 @@ const AssessmentPage = () => {
         description: description,
         severity: severity
       };
-      
+
       // Include screenshot if provided
       if (screenshot) {
         payload.screenshot = screenshot;
@@ -495,7 +495,7 @@ const AssessmentPage = () => {
       const res = await api.post(`/api/interviewee/assessment/${assessmentId}/violation`, payload);
 
       setViolationCount(res.data.data.total_violations);
-      
+
       // Add to violations list for display
       const newViolation = {
         id: res.data.data.violation_id,
@@ -509,16 +509,16 @@ const AssessmentPage = () => {
       // Different toast styles based on severity
       const toastConfig = {
         variant: 'destructive',
-        title: severity === 'critical' ? '⚠️ Critical Violation' : 'Warning',
+        title: severity === 'critical' ? ' Critical Violation' : 'Warning',
         description: `Proctoring violation detected: ${description}`,
       };
-      
+
       if (type === 'multiple_faces') {
-        toastConfig.title = '👥 Multiple Faces Detected';
+        toastConfig.title = ' Multiple Faces Detected';
       } else if (type === 'no_face') {
-        toastConfig.title = '😶 No Face Detected';
+        toastConfig.title = ' No Face Detected';
       } else if (type === 'tab_switch') {
-        toastConfig.title = '🔀 Tab Switch Detected';
+        toastConfig.title = ' Tab Switch Detected';
       }
 
       toast(toastConfig);
@@ -563,7 +563,7 @@ const AssessmentPage = () => {
     if (loading || submitted || !assessmentId || !assessmentData) return;
 
     const totalDuration = (assessmentData.duration_minutes || 60) * 60;
-    
+
     const syncTimer = setInterval(() => {
       const elapsed = totalDuration - timeRemaining;
       if (elapsed > 0) {
@@ -702,18 +702,18 @@ const AssessmentPage = () => {
 
           if (isPassed) {
             passed++;
-            results.push(`✅ Test ${i + 1}: PASSED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}\n`);
+            results.push(` Test ${i + 1}: PASSED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}\n`);
           } else {
             failed++;
-            results.push(`❌ Test ${i + 1}: FAILED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}${stderr ? `\n   Error: ${stderr}` : ''}\n`);
+            results.push(` Test ${i + 1}: FAILED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}${stderr ? `\n   Error: ${stderr}` : ''}\n`);
           }
         } else {
           failed++;
-          results.push(`❌ Test ${i + 1}: ERROR\n   ${result.message || 'Execution failed'}\n`);
+          results.push(` Test ${i + 1}: ERROR\n   ${result.message || 'Execution failed'}\n`);
         }
       } catch (err) {
         failed++;
-        results.push(`❌ Test ${i + 1}: ERROR\n   ${err.message}\n`);
+        results.push(` Test ${i + 1}: ERROR\n   ${err.message}\n`);
       }
     }
 
@@ -721,8 +721,8 @@ const AssessmentPage = () => {
     setTestsPassed(allPassed);
     setTestsPassedCount(passed);
     setTotalTestsCount(visibleTests.length);
-    
-    const summary = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 Results: ${passed}/${visibleTests.length} tests passed\n${allPassed ? '🎉 All tests passed! Click "Submit Code" to save your solution.' : `⚠️ ${failed} test(s) failed`}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+    const summary = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n Results: ${passed}/${visibleTests.length} tests passed\n${allPassed ? ' All tests passed! Click "Submit Code" to save your solution.' : ` ${failed} test(s) failed`}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
 
     setOutput(results.join('\n') + summary);
     setIsRunning(false);
@@ -730,7 +730,7 @@ const AssessmentPage = () => {
 
   const handleSubmitCode = async () => {
     if (!assessmentId || !assessmentData?.coding_problem) return;
-    
+
     setIsRunning(true);
     try {
       const totalTests = assessmentData.coding_problem.test_cases?.filter(tc => !tc.is_hidden).length || 0;
@@ -742,7 +742,7 @@ const AssessmentPage = () => {
         testsPassed: testsPassedCount,
         totalTests: totalTests || totalTestsCount
       });
-      
+
       setCodeSaved(true);
       toast({
         title: "Code Submitted!",
@@ -790,11 +790,20 @@ const AssessmentPage = () => {
     try {
       const scenario = assessmentData?.psychometric_scenarios?.find(s => s.id === scenarioId);
       if (scenario) {
+        // Calculate score based on optimal_choice from scenario data
+        // optimal_choice is the index of the best answer (0-3)
+        const optimalChoice = scenario.optimal_choice ?? 0;
+        const distance = Math.abs(answerIndex - optimalChoice);
+        // Score mapping: exact match = 10, 1 away = 6, 2 away = 3, 3 away = 1
+        const scoreMap = { 0: 10, 1: 6, 2: 3, 3: 1 };
+        const calculatedScore = scoreMap[distance] ?? 1;
+
         await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
           type: 'psychometric',
           questionId: scenarioId,
           trait: scenario.trait,
-          score: answerIndex + 1, // Convert 0-9 index to 1-10 score
+          score: calculatedScore,
+          selectedOption: answerIndex,
         });
       }
     } catch (err) {
@@ -803,7 +812,8 @@ const AssessmentPage = () => {
   }, [assessmentId, assessmentData]);
 
   const handleNextSection = () => {
-    if (currentSection < 2) {
+    const maxSection = isTechnicalRole ? 2 : 1;
+    if (currentSection < maxSection) {
       setCurrentSection(prev => prev + 1);
       setCurrentQuestion(0);
     }
@@ -854,28 +864,28 @@ const AssessmentPage = () => {
       console.log('Response status:', response.data.status);
 
       if (response.data.status === 'success') {
-        console.log('✓ Assessment status is success');
-        console.log('✓ Current submitted state before setSubmitted:', submitted);
-        console.log('✓ About to call setSubmitted(true)');
+        console.log(' Assessment status is success');
+        console.log(' Current submitted state before setSubmitted:', submitted);
+        console.log(' About to call setSubmitted(true)');
 
         // Use a callback to verify state was set
         setSubmitted(true);
 
-        console.log('✓ Called setSubmitted(true)');
-        console.log('✓ Current submitted state in same block:', submitted); // Will still be false here (closure)
+        console.log(' Called setSubmitted(true)');
+        console.log(' Current submitted state in same block:', submitted); // Will still be false here (closure)
 
         toast({
           title: 'Assessment submitted!',
           description: 'Your responses have been recorded.',
         });
       } else {
-        console.error('❌ Assessment status is not success:', response.data.status);
+        console.error(' Assessment status is not success:', response.data.status);
         throw new Error(response.data.message || 'Unknown error');
       }
     } catch (err) {
-      console.error('❌ Submission error:', err);
-      console.error('❌ Error response:', err.response?.data);
-      console.error('❌ Error message:', err.message);
+      console.error(' Submission error:', err);
+      console.error(' Error response:', err.response?.data);
+      console.error(' Error message:', err.message);
       toast({
         variant: 'destructive',
         title: 'Submission Error',
@@ -886,9 +896,14 @@ const AssessmentPage = () => {
     }
   };
 
-  // Define sections and progress (needed by useMemo hooks)
-  const sections = ['MCQ', 'Coding', 'Psychometric'];
-  const progressPercentage = ((currentSection + 1) / 3) * 100;
+  // Define sections dynamic based on role type
+  const sections = useMemo(() => {
+    const base = ['MCQ'];
+    if (isTechnicalRole) base.push('Coding');
+    base.push('Psychometric');
+    return base;
+  }, [isTechnicalRole]);
+  const progressPercentage = ((currentSection + 1) / sections.length) * 100;
 
   const renderMCQSection = useMemo(() => () => {
     const questions = assessmentData?.mcq_questions || [];
@@ -957,15 +972,15 @@ const AssessmentPage = () => {
             <ChevronLeft className="w-4 h-4" /> Previous
           </Button>
           {currentQuestion < questions.length - 1 ? (
-            <Button 
-              onClick={() => setCurrentQuestion(prev => prev + 1)} 
+            <Button
+              onClick={() => setCurrentQuestion(prev => prev + 1)}
               className="bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 gap-2"
             >
               Next Question <ChevronRight className="w-4 h-4" />
             </Button>
           ) : (
-            <Button 
-              onClick={handleNextSection} 
+            <Button
+              onClick={handleNextSection}
               className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
             >
               Next Section <ChevronRight className="w-4 h-4" />
@@ -996,9 +1011,6 @@ const AssessmentPage = () => {
                 <Badge className={`${problem.difficulty === 'Easy' ? 'bg-emerald-600' : problem.difficulty === 'Medium' ? 'bg-amber-600' : 'bg-red-600'}`}>
                   {problem.difficulty}
                 </Badge>
-                {assessmentData?.ai_generated && (
-                  <Badge className="bg-purple-600 border-0">✨ AI Generated</Badge>
-                )}
               </div>
             </div>
           </CardHeader>
@@ -1150,7 +1162,7 @@ const AssessmentPage = () => {
                   className="bg-green-800 text-green-200 gap-2 font-semibold cursor-default"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  Code Saved ✓
+                  Code Saved 
                 </Button>
               )}
             </div>
@@ -1167,15 +1179,15 @@ const AssessmentPage = () => {
         </Card>
 
         <div className="flex justify-between gap-3 pt-4">
-          <Button 
-            variant="outline" 
-            onClick={handlePrevSection} 
+          <Button
+            variant="outline"
+            onClick={handlePrevSection}
             className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
           >
             <ChevronLeft className="w-4 h-4" /> Previous Section
           </Button>
-          <Button 
-            onClick={handleNextSection} 
+          <Button
+            onClick={handleNextSection}
             className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
           >
             Next Section <ChevronRight className="w-4 h-4" />
@@ -1250,16 +1262,16 @@ const AssessmentPage = () => {
 
         <div className="flex justify-between gap-3 pt-4">
           {currentQuestion > 0 ? (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setCurrentQuestion(prev => prev - 1)}
               className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
             >
               <ChevronLeft className="w-4 h-4" /> Previous Scenario
             </Button>
           ) : (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handlePrevSection}
               className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
             >
@@ -1267,7 +1279,7 @@ const AssessmentPage = () => {
             </Button>
           )}
           {currentQuestion < scenarios.length - 1 ? (
-            <Button 
+            <Button
               onClick={() => setCurrentQuestion(prev => prev + 1)}
               className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 gap-2"
             >
@@ -1443,23 +1455,20 @@ const AssessmentPage = () => {
                 )}
 
                 {/* Timer - More prominent when time is low */}
-                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg font-mono font-bold transition-all duration-300 ${
-                  timeRemaining < 300 
-                    ? 'bg-red-600/30 border-2 border-red-500 shadow-lg shadow-red-500/50' 
-                    : timeRemaining < 600
+                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg font-mono font-bold transition-all duration-300 ${timeRemaining < 300
+                  ? 'bg-red-600/30 border-2 border-red-500 shadow-lg shadow-red-500/50'
+                  : timeRemaining < 600
                     ? 'bg-amber-600/30 border-2 border-amber-500'
                     : 'bg-slate-700/50 border border-slate-600'
-                }`}>
-                  <Timer className={`w-5 h-5 ${
-                    timeRemaining < 300 ? 'text-red-400 animate-pulse' :
-                    timeRemaining < 600 ? 'text-amber-400' :
-                    'text-slate-300'
-                  }`} />
-                  <span className={`text-lg ${
-                    timeRemaining < 300 ? 'text-red-400' :
-                    timeRemaining < 600 ? 'text-amber-400' :
-                    'text-slate-200'
                   }`}>
+                  <Timer className={`w-5 h-5 ${timeRemaining < 300 ? 'text-red-400 animate-pulse' :
+                    timeRemaining < 600 ? 'text-amber-400' :
+                      'text-slate-300'
+                    }`} />
+                  <span className={`text-lg ${timeRemaining < 300 ? 'text-red-400' :
+                    timeRemaining < 600 ? 'text-amber-400' :
+                      'text-slate-200'
+                    }`}>
                     {formatTime(timeRemaining)}
                   </span>
                 </div>
@@ -1474,27 +1483,25 @@ const AssessmentPage = () => {
             <div className="flex items-center gap-6 mb-5">
               {sections.map((section, idx) => (
                 <div key={section} className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold transition-all duration-300 ${
-                    idx < currentSection 
-                      ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white' :
-                      idx === currentSection 
-                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-2 ring-indigo-400' 
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold transition-all duration-300 ${idx < currentSection
+                    ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white' :
+                    idx === currentSection
+                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-2 ring-indigo-400'
                       : 'bg-slate-600 text-slate-300'
-                  }`}>
+                    }`}>
                     {idx < currentSection ? (
                       <CheckCircle className="w-5 h-5" />
                     ) : (
                       <span>{idx + 1}</span>
                     )}
                   </div>
-                  <span className={`text-sm font-medium transition-colors ${
-                    idx === currentSection ? 'text-white font-bold' : 
-                    idx < currentSection ? 'text-emerald-400' : 
-                    'text-slate-400'
-                  }`}>
-                    {section}
+                  <span className={`text-sm font-medium transition-colors ${idx === currentSection ? 'text-white font-bold' :
+                    idx < currentSection ? 'text-emerald-400' :
+                      'text-slate-400'
+                    }`}>
+                    {sections[idx]}
                   </span>
-                  {idx < 2 && <div className="w-16 h-1 bg-gradient-to-r from-slate-600 to-transparent rounded-full" />}
+                  {idx < sections.length - 1 && <div className="w-16 h-1 bg-gradient-to-r from-slate-600 to-transparent rounded-full" />}
                 </div>
               ))}
             </div>
@@ -1510,8 +1517,16 @@ const AssessmentPage = () => {
           {/* Assessment Content */}
           <div className="lg:col-span-3">
             {currentSection === 0 && renderMCQSection()}
-            {currentSection === 1 && renderCodingSection()}
-            {currentSection === 2 && renderPsychometricSection()}
+            {isTechnicalRole ? (
+              <>
+                {currentSection === 1 && renderCodingSection()}
+                {currentSection === 2 && renderPsychometricSection()}
+              </>
+            ) : (
+              <>
+                {currentSection === 1 && renderPsychometricSection()}
+              </>
+            )}
             {submitted && renderSuccessScreen()}
           </div>
 
@@ -1567,7 +1582,7 @@ const AssessmentPage = () => {
                       <div className="absolute top-2 right-2">
                         <Badge className="bg-emerald-600 text-white border-0 gap-1">
                           <CheckCircle className="w-3 h-3" />
-                          ✓ 1 Face
+                           1 Face
                         </Badge>
                       </div>
                     )}
@@ -1598,28 +1613,26 @@ const AssessmentPage = () => {
                   <CardContent className="pt-3 max-h-60 overflow-y-auto">
                     <div className="space-y-2">
                       {violationsList.map((violation, idx) => (
-                        <div 
-                          key={violation.id || idx} 
-                          className={`p-2 rounded-lg border text-xs ${
-                            violation.severity === 'high' 
-                              ? 'bg-red-900/40 border-red-700 text-red-300' 
-                              : violation.severity === 'medium'
+                        <div
+                          key={violation.id || idx}
+                          className={`p-2 rounded-lg border text-xs ${violation.severity === 'high'
+                            ? 'bg-red-900/40 border-red-700 text-red-300'
+                            : violation.severity === 'medium'
                               ? 'bg-amber-900/40 border-amber-700 text-amber-300'
                               : 'bg-slate-800 border-slate-700 text-slate-300'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center justify-between mb-1">
-                            <Badge className={`text-[10px] px-1.5 py-0 ${
-                              violation.type === 'tab_switch' ? 'bg-blue-600' :
+                            <Badge className={`text-[10px] px-1.5 py-0 ${violation.type === 'tab_switch' ? 'bg-blue-600' :
                               violation.type === 'multiple_faces' ? 'bg-red-600' :
-                              violation.type === 'no_face' ? 'bg-amber-600' :
-                              violation.type === 'face_not_detected' ? 'bg-amber-600' :
-                              'bg-slate-600'
-                            }`}>
-                              {violation.type === 'tab_switch' ? '🔀 Tab' :
-                               violation.type === 'multiple_faces' ? '👥 Multi-Face' :
-                               violation.type === 'no_face' || violation.type === 'face_not_detected' ? '😶 No Face' :
-                               violation.type}
+                                violation.type === 'no_face' ? 'bg-amber-600' :
+                                  violation.type === 'face_not_detected' ? 'bg-amber-600' :
+                                    'bg-slate-600'
+                              }`}>
+                              {violation.type === 'tab_switch' ? ' Tab' :
+                                violation.type === 'multiple_faces' ? ' Multi-Face' :
+                                  violation.type === 'no_face' || violation.type === 'face_not_detected' ? ' No Face' :
+                                    violation.type}
                             </Badge>
                             <span className="text-[10px] text-slate-500">{violation.timestamp}</span>
                           </div>

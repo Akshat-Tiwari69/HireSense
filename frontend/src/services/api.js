@@ -6,28 +6,28 @@ import axios from "axios";
 const getApiBaseUrl = () => {
   // Check if there's an environment variable set
   if (import.meta.env.VITE_API_BASE_URL) {
-    console.log("🔧 Using VITE_API_BASE_URL:", import.meta.env.VITE_API_BASE_URL);
+    console.log(" Using VITE_API_BASE_URL:", import.meta.env.VITE_API_BASE_URL);
     return import.meta.env.VITE_API_BASE_URL;
   }
 
   // Get the current hostname (e.g., "localhost" or "10.39.35.52")
-  const hostname = window.location.hostname;
-  console.log("🌐 Detected hostname:", hostname);
+  const { hostname } = window.location;
+  console.log(" Detected hostname:", hostname);
 
   // If accessing via localhost, use localhost backend
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    console.log("✅ Using localhost backend: http://localhost:5000");
+    console.log(" Using localhost backend: http://localhost:5000");
     return "http://localhost:5000";
   }
 
   // If accessing via network IP, use the same IP for backend
   const networkUrl = `http://${hostname}:5000`;
-  console.log("✅ Using network backend:", networkUrl);
+  console.log(" Using network backend:", networkUrl);
   return networkUrl;
 };
 
 const API_BASE_URL = getApiBaseUrl();
-console.log("📡 API Base URL set to:", API_BASE_URL);
+console.log(" API Base URL set to:", API_BASE_URL);
 
 // Export for use in other components (e.g., Socket.IO connections)
 export { API_BASE_URL };

@@ -1,18 +1,15 @@
 """
 AI Resume Analyzer Module
-Uses OpenAI API to generate intelligent pros/cons analysis for candidate resumes
 """
 
 import os
 import json
-from openai import OpenAI
 import httpx
 from typing import Dict, List, Optional, Tuple
 
 
 class ResumeAnalyzer:
     """
-    AI-powered resume analyzer using OpenAI's GPT models
     Generates pros, cons, and enhanced match analysis
     """
     
@@ -21,19 +18,17 @@ class ResumeAnalyzer:
         Initialize the Resume Analyzer
         
         Args:
-            api_key: OpenAI API key (if not provided, reads from environment)
         """
-        self.api_key = api_key or os.environ.get('OPENAI_API_KEY')
         
         if not self.api_key:
             raise ValueError(
-                "OpenAI API key not found. Set OPENAI_API_KEY environment variable "
                 "or pass api_key parameter"
             )
         
-        # Instantiate OpenAI client; handle environments where proxies cause issues
         try:
-            self.client = OpenAI(api_key=self.api_key)
+            from openai import OpenAI
+            http_client = httpx.Client()
+            self.client = OpenAI(api_key=self.api_key, http_client=http_client)
         except TypeError as e:
             # Older/newer client versions may not accept implicit proxies; build httpx client explicitly
             if "proxies" in str(e):
@@ -44,6 +39,7 @@ class ResumeAnalyzer:
                     or os.environ.get("http_proxy")
                 )
                 http_client = httpx.Client(proxies=proxy) if proxy else httpx.Client()
+                from openai import OpenAI
                 self.client = OpenAI(api_key=self.api_key, http_client=http_client)
             else:
                 raise
@@ -75,15 +71,16 @@ class ResumeAnalyzer:
             # Build context-rich prompt
             prompt = self._build_analysis_prompt(resume_text, parsed_data, job_requirements)
             
-            # Call OpenAI API
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
                         "content": (
-                            "You are an expert HR analyst and technical recruiter with 15+ years of experience. "
-                            "Your role is to evaluate candidate resumes objectively and provide actionable insights. "
+                            "You are an expert HR analyst and recruiter with 15+ years of experience evaluating candidates across all industries and roles. "
+                            "The company is based in India. All evaluations should consider Indian industry standards, qualifications, and regulatory context. "
+                            "Your role is to evaluate candidate resumes objectively against the SPECIFIC job role they applied for. "
+                            "Do NOT penalize candidates for lacking skills irrelevant to their applied role (e.g., do not expect technical/coding skills from a lawyer). "
                             "Be honest but fair, focusing on both strengths and areas for improvement. "
                             "Provide responses in valid JSON format only."
                         )
@@ -127,17 +124,21 @@ class ResumeAnalyzer:
         
         required_skills = ", ".join(job_requirements.get('skills', []))
         min_experience = job_requirements.get('min_experience', 0)
+        job_title = job_requirements.get('title', 'the applied position')
+        department = job_requirements.get('department', '')
+        role_context = f"{job_title} ({department})" if department else job_title
         
-        prompt = f"""
-Analyze this candidate's resume for a technical position and provide a detailed evaluation.
+        return f"""
+Analyze this candidate's resume for the role of **{role_context}** and provide a detailed evaluation.
+The company is based in **India** — use Indian industry standards, laws, regulations, and qualifications as context.
 
 **Job Requirements:**
-- Required Skills: {required_skills}
+- Position: {role_context}
+- Required Skills/Qualifications: {required_skills}
 - Minimum Experience: {min_experience} years
-- Role Type: Software Engineering / Technical Position
 
 **Candidate Profile:**
-- Skills: {skills_str}
+- Skills/Qualifications: {skills_str}
 - Years of Experience: {experience_years}
 - Education: {education}
 - Match Score (calculated): {match_score}%
@@ -172,17 +173,17 @@ Provide a comprehensive analysis in the following JSON format:
 }}
 
 **Guidelines:**
-1. Pros: Focus on demonstrated skills, relevant experience, and strong qualifications (3-5 points)
-2. Cons: Be constructive, identify skill gaps or concerns (2-4 points, don't be overly negative)
-3. Overall Assessment: Balanced summary considering both strengths and weaknesses
-4. Recommendation: Base on overall fit for the role
+1. Pros: Focus on demonstrated skills, relevant experience, and strong qualifications for THIS SPECIFIC ROLE (3-5 points)
+2. Cons: Be constructive, identify skill gaps or concerns RELEVANT TO THE APPLIED ROLE (2-4 points, don't be overly negative)
+3. Overall Assessment: Balanced summary considering both strengths and weaknesses for this role
+4. Recommendation: Base on overall fit for the SPECIFIC role applied
 5. Confidence Score: Your confidence in this assessment (0-100)
 6. Be specific and evidence-based, avoid generic statements
-7. Consider technical skills, experience level, and cultural fit indicators
+7. ONLY evaluate skills relevant to the applied role — do NOT penalize for lacking unrelated skills (e.g., coding skills for a legal role)
+8. Consider Indian industry standards and qualifications where applicable
 
 Respond ONLY with valid JSON, no additional text.
 """
-        return prompt
     
     def _validate_and_format_response(
         self,
@@ -205,7 +206,7 @@ Respond ONLY with valid JSON, no additional text.
         # Ensure at least some pros and cons
         if not validated["pros"]:
             validated["pros"] = [
-                f"Possesses {len(parsed_data.get('skills', []))} technical skills",
+                f"Possesses {len(parsed_data.get('skills', []))} relevant skills/qualifications",
                 f"Has {parsed_data.get('experience', 0)} years of experience"
             ]
         
@@ -243,19 +244,19 @@ Respond ONLY with valid JSON, no additional text.
         education = parsed_data.get('education', 'Not Specified')
         match_score = parsed_data.get('match_score', 0)
         
-        required_skills = set(s.lower() for s in job_requirements.get('skills', []))
-        candidate_skills = set(s.lower() for s in skills)
+        required_skills = {s.lower() for s in job_requirements.get('skills', [])}
+        candidate_skills = {s.lower() for s in skills}
         matching_skills = required_skills.intersection(candidate_skills)
         missing_skills = required_skills - candidate_skills
         
         # Generate pros
         pros = []
         if len(skills) >= 10:
-            pros.append(f"Demonstrates broad technical expertise with {len(skills)} identified skills")
+            pros.append(f"Demonstrates broad expertise with {len(skills)} identified skills/qualifications")
         if experience >= job_requirements.get('min_experience', 0):
             pros.append(f"Meets experience requirement with {experience} years in the field")
         if matching_skills:
-            pros.append(f"Strong alignment with required skills: {', '.join(list(matching_skills)[:3])}")
+            pros.append(f"Strong alignment with required skills: {', '.join(sorted(matching_skills)[:3])}")
         if education and education != "Not Specified":
             pros.append(f"Educational background: {education}")
         if match_score >= 70:
@@ -266,11 +267,11 @@ Respond ONLY with valid JSON, no additional text.
         if experience < job_requirements.get('min_experience', 0):
             cons.append(f"Experience level ({experience} years) below requirement ({job_requirements.get('min_experience', 0)} years)")
         if missing_skills:
-            cons.append(f"Missing some required skills: {', '.join(list(missing_skills)[:3])}")
+            cons.append(f"Missing some required skills: {', '.join(sorted(missing_skills)[:3])}")
         if match_score < 50:
             cons.append("Match score suggests significant skill gaps that need to be addressed")
         if not cons:
-            cons.append("Further assessment recommended in technical interview")
+            cons.append("Further assessment recommended in interview")
         
         # Determine recommendation
         if match_score >= 80 and experience >= job_requirements.get('min_experience', 0):
@@ -290,7 +291,6 @@ Respond ONLY with valid JSON, no additional text.
             "confidence_score": 65,  # Lower confidence for fallback
             "key_highlights": pros[:2],
             "areas_for_improvement": cons[:2],
-            "fallback_mode": True  # Indicate this was generated without AI
         }
     
     def extract_resume_data(
@@ -382,10 +382,12 @@ Respond ONLY with valid JSON, no additional text.
         """
         try:
             prompt = f"""
-Evaluate this candidate's match for a technical role and provide a match score.
+Evaluate this candidate's match for the role of **{job_requirements.get('title', 'the applied position')}** and provide a match score.
+The company is based in **India** — consider Indian industry standards.
 
 **Job Requirements:**
-- Skills: {', '.join(job_requirements.get('skills', []))}
+- Position: {job_requirements.get('title', 'the applied position')}
+- Skills/Qualifications: {', '.join(job_requirements.get('skills', []))}
 - Experience: {job_requirements.get('min_experience', 0)}+ years
 
 **Candidate:**
@@ -397,10 +399,12 @@ Evaluate this candidate's match for a technical role and provide a match score.
 {resume_text[:400]}
 
 Provide a match score (0-100) considering:
-1. Technical skill alignment (40%)
+1. Skill/qualification alignment with the SPECIFIC role (40%)
 2. Experience level match (30%)
 3. Implicit qualifications from resume context (20%)
-4. Education and certifications (10%)
+4. Education and certifications relevant to the role (10%)
+
+IMPORTANT: Only evaluate skills relevant to the applied role. Do NOT penalize for lacking unrelated skills.
 
 Respond ONLY with valid JSON:
 {{
@@ -412,7 +416,7 @@ Respond ONLY with valid JSON:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert technical recruiter. Respond only in JSON format."},
+                    {"role": "system", "content": "You are an expert recruiter based in India evaluating candidates for specific roles. Respond only in JSON format."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.5,
@@ -447,7 +451,6 @@ def analyze_resume(
         resume_text: Raw text from resume
         parsed_data: Structured data from parser
         job_requirements: Job requirements dict
-        api_key: OpenAI API key (optional, reads from env if not provided)
         enhance_score: Whether to use AI to enhance the match score
     
     Returns:
@@ -503,31 +506,29 @@ def test_analyzer():
             sample_job_requirements
         )
         
-        print("\n📊 Analysis Results:")
-        print(f"\n✅ Pros ({len(result['pros'])}):")
+        print("\n Analysis Results:")
+        print(f"\n Pros ({len(result['pros'])}):")
         for i, pro in enumerate(result['pros'], 1):
             print(f"  {i}. {pro}")
         
-        print(f"\n⚠️ Cons ({len(result['cons'])}):")
+        print(f"\n Cons ({len(result['cons'])}):")
         for i, con in enumerate(result['cons'], 1):
             print(f"  {i}. {con}")
         
-        print(f"\n📝 Overall Assessment:")
+        print(f"\n Overall Assessment:")
         print(f"  {result['overall_assessment']}")
         
-        print(f"\n🎯 Recommendation: {result['recommendation']}")
-        print(f"💯 Confidence Score: {result['confidence_score']}%")
+        print(f"\n Recommendation: {result['recommendation']}")
+        print(f" Confidence Score: {result['confidence_score']}%")
         
         if 'enhanced_match_score' in result:
-            print(f"📈 Enhanced Match Score: {result['enhanced_match_score']}%")
+            print(f" Enhanced Match Score: {result['enhanced_match_score']}%")
         
         print("\n" + "=" * 60)
-        print("✅ Test completed successfully!")
+        print(" Test completed successfully!")
         
     except Exception as e:
-        print(f"\n❌ Test failed: {e}")
-        print("\nMake sure to set OPENAI_API_KEY environment variable:")
-        print("  export OPENAI_API_KEY='your-api-key-here'")
+        print(f"\n Test failed: {e}")
 
 
 if __name__ == "__main__":

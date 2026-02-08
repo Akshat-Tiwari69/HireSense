@@ -4,8 +4,8 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ezykqdzqholcpo
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 if (!supabaseAnonKey) {
-    console.warn('⚠️ VITE_SUPABASE_ANON_KEY is not set. Realtime features will not work.')
-    console.warn('📝 Get your key from: https://supabase.com/dashboard/project/ezykqdzqholcporflgmq/settings/api')
+    console.warn(' VITE_SUPABASE_ANON_KEY is not set. Realtime features will not work.')
+    console.warn(' Get your key from: https://supabase.com/dashboard/project/ezykqdzqholcporflgmq/settings/api')
 }
 
 export const supabase = supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey, {
@@ -24,9 +24,9 @@ export const supabase = supabaseAnonKey ? createClient(supabaseUrl, supabaseAnon
 if (supabase) {
     supabase.channel('test').subscribe((status) => {
         if (status === 'SUBSCRIBED') {
-            console.log('✅ Supabase Realtime connected')
+            console.log(' Supabase Realtime connected')
         } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Supabase Realtime connection failed - check your anon key')
+            console.error(' Supabase Realtime connection failed - check your anon key')
         }
     })
 }

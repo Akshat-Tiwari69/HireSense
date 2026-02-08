@@ -12,6 +12,7 @@ import os
 import uuid
 import re
 import logging
+import contextlib
 from pathlib import Path
 
 # Load environment variables
@@ -21,11 +22,11 @@ from pathlib import Path
 local_env_path = Path(__file__).parent / 'local.env'
 if local_env_path.exists():
     load_dotenv(local_env_path)
-    print(f"[CONFIG] Loaded local.env for local development")
+    print("[CONFIG] Loaded local.env for local development")
 else:
     # Fall back to .env
     load_dotenv()
-    print(f"[CONFIG] Loaded .env")
+    print("[CONFIG] Loaded .env")
 # Trigger reload for updated SMTP credentials
 from request_logger import init_request_logging
 from security_headers import add_security_headers
@@ -46,6 +47,7 @@ from interviewer_routes import interviewer_bp
 from interviewee_routes import interviewee_bp
 from admin_routes import admin_bp
 from proctor_routes import proctor_bp
+from job_routes import jobs_bp
 import time
 
 # Initialize Flask app
@@ -70,7 +72,7 @@ jwt = JWTManager(app)
 # JWT error handlers
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
-    logger.warning(f"[WARNING] JWT token expired")
+    logger.warning("[WARNING] JWT token expired")
     return jsonify({
         'status': 'error',
         'message': 'Token has expired. Please login again.'
@@ -86,7 +88,7 @@ def invalid_token_callback(error):
 
 @jwt.unauthorized_loader
 def unauthorized_callback(error):
-    logger.error(f"❌ Missing JWT token: {error}")
+    logger.error(f" Missing JWT token: {error}")
     return jsonify({
         'status': 'error',
         'message': 'Authorization token is missing. Please login.'
@@ -102,7 +104,11 @@ CORS(app, resources={
             "http://10.39.35.52:5173",
             "http://10.39.35.52:5174",
             "http://10.39.150.52:5173",
-            "http://10.39.150.52:5174"
+            "http://10.39.150.52:5174",
+            "http://10.9.199.182:5173",
+            "http://10.9.199.182:5174",
+            "http://10.9.200.2:5173",
+            "http://10.9.200.2:5174"
         ],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
         "allow_headers": ["Content-Type", "Authorization"],
@@ -137,6 +143,9 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 
 # Register proctor routes blueprint
 app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
+
+# Register job postings & sectors routes blueprint
+app.register_blueprint(jobs_bp, url_prefix='/api/jobs')
 
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -183,9 +192,47 @@ def name_from_email(email):
     local = email.split('@', 1)[0]
     parts = re.split(r'[._-]+', local)
     parts = [p for p in parts if p]
-    if not parts:
-        return None
-    return " ".join([p.capitalize() for p in parts])
+    return " ".join(p.capitalize() for p in parts) if parts else None
+
+
+def _get_job_description_for_id(job_id):
+    """
+    Fetch a specific job posting by ID and return its requirements dict.
+    Returns (job_dict, job_row) tuple — job_row includes title/department for response.
+    """
+    try:
+        from db_config import get_connection, return_connection
+        import json as _json
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, title, department, required_skills, preferred_skills, min_experience "
+            "FROM job_descriptions WHERE id = %s AND status = 'active'",
+            (int(job_id),)
+        )
+        row = cursor.fetchone()
+        return_connection(conn)
+
+        if row:
+            skills = set()
+            for skills_val in (row[3], row[4]):
+                if skills_val:
+                    with contextlib.suppress(ValueError, TypeError):
+                        parsed = _json.loads(skills_val)
+                        if isinstance(parsed, list):
+                            skills.update(s.strip() for s in parsed if s.strip())
+                            continue
+                    skills.update(s.strip() for s in str(skills_val).split(',') if s.strip())
+            min_exp = row[5] or 0
+            job_info = {'id': row[0], 'title': row[1], 'department': row[2]}
+            return {'skills': list(skills), 'min_experience': min_exp, 'title': row[1], 'department': row[2]}, job_info
+    except Exception as e:
+        logger.warning(f"[MATCH] Could not load job posting {job_id}: {e}")
+    return None, None
+
+
+
+
 
 
 @app.route('/', methods=['GET'])
@@ -277,7 +324,7 @@ def upload_resume():
     try:
         logger.info(f"[SAVE] Saving file to: {filepath}")
         file.save(filepath)
-        logger.info(f"[OK] File saved successfully")
+        logger.info("[OK] File saved successfully")
     except OSError as e:
         logger.error(f"[ERROR] OSError saving file: {e}")
         return jsonify({
@@ -291,14 +338,30 @@ def upload_resume():
             "message": "An unexpected error occurred while saving the file."
         }), 500
     
+    # Candidate must select a specific job — AI scores only against that role
+    selected_job_id = request.form.get('job_id')
+    selected_job_info = None
+    job_description = None
+
+    if not selected_job_id:
+        return jsonify({
+            "status": "error",
+            "message": "Please select a job position to apply for."
+        }), 400
+
+    job_description, selected_job_info = _get_job_description_for_id(selected_job_id)
+    if not job_description:
+        return jsonify({
+            "status": "error",
+            "message": "The selected job position is no longer active. Please choose another."
+        }), 400
+
+    logger.info(f"[MATCH] Scoring against selected job: {selected_job_info['title']} (ID: {selected_job_id})")
+    logger.info(f"[MATCH] Job skills: {job_description.get('skills', [])}, Min exp: {job_description.get('min_experience', 0)}")
+
     # Parse the resume to extract data
     try:
         logger.info("[PARSE] Starting resume parsing...")
-        # Optional: Define job description for matching (can be passed from frontend or config)
-        job_description = {
-            'skills': ['Python', 'Java', 'JavaScript', 'React', 'AWS'],  # Example JD
-            'min_experience': 2  # Example requirement
-        }
         
         # First try basic parsing as fallback data
         parsed_data = parse_resume(filepath, job_description)
@@ -325,10 +388,9 @@ def upload_resume():
             from resume_analyzer import ResumeAnalyzer
             logger.info("[AI] Using AI to extract contact info and resume data...")
             analyzer = ResumeAnalyzer()
-            ai_extracted_data = analyzer.extract_resume_data(resume_text)
             
-            if ai_extracted_data:
-                logger.info(f"[OK] AI extraction successful")
+            if ai_extracted_data := analyzer.extract_resume_data(resume_text):
+                logger.info("[OK] AI extraction successful")
                 logger.info(f"   Name: {ai_extracted_data.get('name')}")
                 logger.info(f"   Email: {ai_extracted_data.get('email')}")
                 logger.info(f"   Phone: {ai_extracted_data.get('phone')}")
@@ -373,7 +435,7 @@ def upload_resume():
                 job_requirements=job_description,
                 enhance_score=True
             )
-            logger.info(f"✅ AI analysis completed")
+            logger.info(" AI analysis completed")
             logger.info(f"   Recommendation: {ai_analysis['recommendation']}")
             logger.info(f"   Confidence: {ai_analysis.get('confidence_score', 0)}")
             logger.info(f"   Pros: {len(ai_analysis.get('pros', []))} points")
@@ -422,7 +484,7 @@ def upload_resume():
     logger.info(f"[DEBUG] Name detection - manual: '{manual_name}', AI/parsed: '{parsed_data.get('name')}', final: '{name}'")
 
     if not email or not is_valid_email(email):
-        logger.error(f"[ERROR] Unable to detect a valid email from resume or overrides")
+        logger.error("[ERROR] Unable to detect a valid email from resume or overrides")
         logger.error(f"[ERROR] Failed email value: '{email}', is_valid: {is_valid_email(email) if email else 'N/A'}")
         logger.error(f"[ERROR] Parsed data keys: {list(parsed_data.keys())}")
         return jsonify({
@@ -438,9 +500,8 @@ def upload_resume():
     logger.info(f"[CANDIDATE] Candidate Info - Name: {name}, Email: {email}, Phone: {phone or 'N/A'}")
 
     # Check if candidate already exists with this email
-    try:
-        existing_candidate = get_candidate_by_email(email)
-        if existing_candidate:
+    with contextlib.suppress(Exception):
+        if existing_candidate := get_candidate_by_email(email):
             logger.info(f"[DUPLICATE] Candidate with email {email} already registered (ID: {existing_candidate['id']})")
             return jsonify({
                 "status": "error",
@@ -451,9 +512,6 @@ def upload_resume():
                     "registered_at": str(existing_candidate['created_at']) if existing_candidate['created_at'] else None
                 }
             }), 409  # 409 Conflict
-    except Exception as e:
-        logger.warning(f"[WARNING] Could not check for existing candidate: {e}")
-        # Continue anyway - better to potentially create a duplicate than block registration
 
     # Save candidate to database with AI insights
     try:
@@ -471,13 +529,7 @@ def upload_resume():
             logger.info(f"   Cons: {len(ai_analysis.get('cons', []))} items")
             
             # Set initial status based on recommendation
-            recommendation = ai_analysis.get('recommendation', 'Moderate Match')
-            if recommendation == "Strong Match":
-                status = "Applied"
-            elif recommendation in ["Good Match", "Moderate Match"]:
-                status = "Applied"
-            else:
-                status = "Applied"
+            status = "Applied"
             logger.info(f"   Status set to: {status}")
         
         candidate_id = insert_candidate(
@@ -491,6 +543,32 @@ def upload_resume():
             status=status
         )
         logger.info(f"[OK] Candidate saved with ID: {candidate_id}")
+
+        # Save match for the selected job
+        if candidate_id and selected_job_info:
+            try:
+                from db_config import get_connection, return_connection
+                match_conn = get_connection()
+                match_cur = match_conn.cursor()
+                match_score = parsed_data.get('match_score', 0)
+                ai_reasoning = ai_analysis.get('overall_assessment', '') if ai_analysis else ''
+                match_cur.execute("""
+                    INSERT INTO candidate_job_matches
+                    (candidate_id, job_id, match_score, ai_reasoning)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (candidate_id, job_id)
+                    DO UPDATE SET match_score = EXCLUDED.match_score,
+                                 ai_reasoning = EXCLUDED.ai_reasoning,
+                                 matched_at = NOW()
+                """, (candidate_id, int(selected_job_id), match_score, ai_reasoning))
+                match_cur.execute("""
+                    UPDATE candidates SET best_match_job_id = %s, match_score = %s WHERE id = %s
+                """, (int(selected_job_id), match_score, candidate_id))
+                match_conn.commit()
+                return_connection(match_conn)
+                logger.info(f"[MATCH] Saved candidate {candidate_id} -> Job #{selected_job_id} ({selected_job_info['title']}) score={match_score}")
+            except Exception as match_err:
+                logger.warning(f"[MATCH] Could not save job match: {match_err}")
     except Exception as e:
         logger.exception(f"[ERROR] Error saving candidate to database: {e}")
         # Continue anyway - parsing was successful
@@ -527,9 +605,19 @@ def upload_resume():
         }
         if 'enhanced_match_score' in ai_analysis:
             response_data["ai_analysis"]["enhanced_match_score"] = ai_analysis['enhanced_match_score']
+
+    # Include selected job info so frontend knows which job was scored against
+    if selected_job_info:
+        response_data["selected_job"] = {
+            "id": selected_job_info['id'],
+            "title": selected_job_info['title'],
+            "department": selected_job_info.get('department'),
+            "required_skills": job_description.get('skills', []),
+            "min_experience": job_description.get('min_experience', 0)
+        }
     
     logger.info("="*80)
-    logger.info(f"[SUCCESS] RESUME UPLOAD COMPLETED SUCCESSFULLY")
+    logger.info("[SUCCESS] RESUME UPLOAD COMPLETED SUCCESSFULLY")
     logger.info(f"   Candidate ID: {candidate_id}")
     logger.info(f"   Name: {name}")
     logger.info(f"   Email: {email}")
@@ -577,16 +665,14 @@ def start_assessment():
         psychometric_scenarios = get_psychometric_scenarios(count=3)
         
         # Remove correct answers from MCQ questions before sending
-        mcq_for_frontend = []
-        for q in mcq_questions:
-            mcq_for_frontend.append({
-                "id": q["id"],
-                "question": q["question"],
-                "options": q["options"],
-                "time_limit": q["time_limit"],
-                "category": q["category"],
-                "difficulty": q["difficulty"]
-            })
+        mcq_for_frontend = [{
+            "id": q["id"],
+            "question": q["question"],
+            "options": q["options"],
+            "time_limit": q["time_limit"],
+            "category": q["category"],
+            "difficulty": q["difficulty"]
+        } for q in mcq_questions]
         
         return jsonify({
             "status": "success",
@@ -616,46 +702,52 @@ def start_assessment():
 @app.route('/api/assessment/mcq/submit', methods=['POST'])
 def submit_mcq():
     """
-    Submit MCQ answer
-    
-    Expects JSON:
-        - assessment_id: ID of the assessment
-        - question_id: ID of the question
-        - answer: Selected answer index (0-3)
-        - time_taken: Time taken in seconds
-    
-    Returns:
-        - is_correct: Boolean
-        - correct_answer: The correct answer index
+    DEPRECATED: Use /api/interviewee/assessment/<id>/submit-answer instead.
+    This endpoint is kept for backward compatibility but redirects to the proper handler.
     """
     data = request.get_json()
+    if not data:
+        return jsonify({"status": "error", "message": "Missing request body"}), 400
     
-    required_fields = ['assessment_id', 'question_id', 'answer', 'time_taken']
-    if not data or not all(field in data for field in required_fields):
-        return jsonify({
-            "status": "error",
-            "message": f"Missing required fields: {', '.join(required_fields)}"
-        }), 400
+    assessment_id = data.get('assessment_id')
+    if not assessment_id:
+        return jsonify({"status": "error", "message": "assessment_id is required"}), 400
+    
+    # Forward to the proper interviewee route handler
+    question_id = data.get('question_id')
+    answer = data.get('answer')
+    time_taken = data.get('time_taken', 0)
+    
+    # Convert numeric answer index to letter if needed
+    if isinstance(answer, int) and 0 <= answer <= 3:
+        answer = ['A', 'B', 'C', 'D'][answer]
     
     try:
-        assessment_id = data['assessment_id']
-        question_id = data['question_id']
-        answer = data['answer']
-        time_taken = data['time_taken']
+        from interviewee_routes import interviewee_bp
+        # Use the proper submit-answer logic
+        from db_helpers import get_assessment_questions, get_assessment_by_id, save_mcq_response
+        from questions_bank import get_mcq_questions
         
-        # Find the question to check correct answer
-        from questions_bank import MCQ_QUESTIONS
-        question = next((q for q in MCQ_QUESTIONS if q['id'] == question_id), None)
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
         
-        if not question:
-            return jsonify({
-                "status": "error",
-                "message": "Invalid question_id"
-            }), 400
+        stored_questions = get_assessment_questions(assessment_id)
+        questions = stored_questions.get('mcq_questions', []) if stored_questions else get_mcq_questions(count=20)
         
-        is_correct = (answer == question['correct_answer'])
+        correct_answer = None
+        for q in questions:
+            q_id = int(q['id']) if isinstance(q['id'], str) else q['id']
+            if q_id == question_id:
+                correct_text = q.get('correct_answer', '')
+                for idx, option in enumerate(q['options']):
+                    if option.strip().lower() == correct_text.strip().lower():
+                        correct_answer = ['A', 'B', 'C', 'D'][idx]
+                        break
+                break
         
-        # Save response to database
+        is_correct = (answer == correct_answer) if correct_answer else None
+        
         save_mcq_response(
             assessment_id=assessment_id,
             question_id=question_id,
@@ -666,40 +758,24 @@ def submit_mcq():
         
         return jsonify({
             "status": "success",
-            "data": {
-                "is_correct": is_correct,
-                "correct_answer": question['correct_answer']
-            }
+            "data": {"is_correct": is_correct}
         }), 200
         
     except Exception as e:
         app.logger.exception("Error submitting MCQ answer")
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to submit answer: {str(e)}"
-        }), 500
+        return jsonify({"status": "error", "message": f"Failed to submit answer: {str(e)}"}), 500
 
 
 @app.route('/api/assessment/code/submit', methods=['POST'])
 def submit_code():
     """
-    Submit coding solution
-    
-    Expects JSON:
-        - assessment_id: ID of the assessment
-        - problem_id: ID of the problem
-        - code: Source code submitted
-        - language: Programming language
-    
-    Returns:
-        - test_results: Results of test cases
-        - passed_count: Number of passed test cases
-        - total_count: Total test cases
+    DEPRECATED: Use /api/interviewee/assessment/<id>/submit-answer instead.
+    Kept for backward compatibility.
     """
     data = request.get_json()
     
     required_fields = ['assessment_id', 'problem_id', 'code', 'language']
-    if not data or not all(field in data for field in required_fields):
+    if not data or any(field not in data for field in required_fields):
         return jsonify({
             "status": "error",
             "message": f"Missing required fields: {', '.join(required_fields)}"
@@ -710,36 +786,25 @@ def submit_code():
         problem_id = data['problem_id']
         code = data['code']
         language = data['language']
+        tests_passed = data.get('testsPassed', 0)
+        total_tests = data.get('totalTests', 0)
         
-        # For now, we'll do basic validation without actual execution
-        # In production, you'd use grading_engine.py with proper sandboxing
-        
-        # Simulate test case execution (placeholder)
-        passed = 2
-        total = 3
-        test_results = [
-            {"test_case": 1, "passed": True, "message": "Correct output"},
-            {"test_case": 2, "passed": True, "message": "Correct output"},
-            {"test_case": 3, "passed": False, "message": "Expected [0,1] but got [1,0]"}
-        ]
-        
-        # Save submission to database
+        # Save submission to database with actual test results from client
         save_coding_submission(
             assessment_id=assessment_id,
             problem_id=problem_id,
             language=language,
             code=code,
-            test_cases_passed=passed,
-            total_test_cases=total
+            test_cases_passed=tests_passed,
+            total_test_cases=total_tests
         )
         
         return jsonify({
             "status": "success",
             "data": {
-                "test_results": test_results,
-                "passed_count": passed,
-                "total_count": total,
-                "score": round((passed / total) * 100, 2)
+                "passed_count": tests_passed,
+                "total_count": total_tests,
+                "score": round((tests_passed / max(total_tests, 1)) * 100, 2)
             }
         }), 200
         
@@ -768,7 +833,7 @@ def submit_psychometric():
     data = request.get_json()
     
     required_fields = ['assessment_id', 'scenario_id', 'trait_scores']
-    if not data or not all(field in data for field in required_fields):
+    if not data or any(field not in data for field in required_fields):
         return jsonify({
             "status": "error",
             "message": f"Missing required fields: {', '.join(required_fields)}"

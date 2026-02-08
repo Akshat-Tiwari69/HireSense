@@ -9,7 +9,6 @@
 -- (Change password after first login!)
 
 -- Password hash for 'Proctor@123' using bcrypt (cost factor 12)
--- Generated with: bcrypt.hashpw('Proctor@123'.encode('utf-8'), bcrypt.gensalt(12))
 
 INSERT INTO users (email, password_hash, role, name, created_at, updated_at)
 VALUES (
