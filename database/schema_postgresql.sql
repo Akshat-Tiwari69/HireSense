@@ -1,4 +1,4 @@
--- CYGNUSA Elite-Hire Database Schema
+-- HireSense Database Schema
 -- PostgreSQL version for Supabase Migration
 -- All tables for the AI-enabled HR evaluation system
 

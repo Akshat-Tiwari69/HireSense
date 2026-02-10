@@ -60,7 +60,7 @@ def test_email():
                 <p>You can now send assessment invitations, reminders, and results to candidates.</p>
             </div>
             <div class="footer">
-                <p>This is a test email from HireSense Elite-Hire Platform</p>
+                <p>This is a test email from the HireSense Platform</p>
                 <p>© 2026 HireSense. All rights reserved.</p>
             </div>
         </div>

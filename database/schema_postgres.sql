@@ -1,4 +1,5 @@
--- CYGNUSA Elite-Hire Database Schema (PostgreSQL)
+
+-- HireSense Database Schema (PostgreSQL)
 -- Updated to match actual Supabase database structure
 
 -- Scheduled Assessments

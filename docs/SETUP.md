@@ -1,6 +1,6 @@
 # Setup and installation guide
 
-This guide walks you through setting up the Cygnusa Elite Hire development
+This guide walks you through setting up the HireSense development
 environment on your local machine.
 
 ## Prerequisites

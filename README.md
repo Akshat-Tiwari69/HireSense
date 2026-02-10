@@ -1,4 +1,4 @@
-# Cygnusa Elite Hire
+# HireSense
 
 An AI-powered recruitment and assessment platform that automates hiring
 workflows — from resume intake and job matching to live-proctored technical
@@ -15,7 +15,7 @@ assessments with real-time video monitoring.
 
 ## Overview
 
-Cygnusa Elite Hire is a full-stack recruitment platform built for companies
+HireSense is a full-stack recruitment platform built for companies
 that need a structured, secure, and intelligent hiring pipeline. It combines
 AI-driven candidate evaluation with a multi-role dashboard system and a
 live-proctored assessment engine.
@@ -113,7 +113,7 @@ live-proctored assessment engine.
 ## Project structure
 
 ```
-cygnusa-elite-hire/
+hiresense/
 ├── backend/
 │   ├── app.py                  # Application entry point
 │   ├── auth.py                 # Authentication endpoints

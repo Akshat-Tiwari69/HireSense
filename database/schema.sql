@@ -1,4 +1,5 @@
--- CYGNUSA Elite-Hire Database Schema
+
+-- HireSense Database Schema
 -- All tables for the AI-enabled HR evaluation system
 
 -- Users table: Store authentication data for interviewers and admins

@@ -1,7 +1,7 @@
 # Database schema
 
-This document describes the PostgreSQL database schema used by Cygnusa
-Elite Hire, including all tables, relationships, indexes, and migrations.
+This document describes the PostgreSQL database schema used by HireSense,
+including all tables, relationships, indexes, and migrations.
 
 ## Entity-relationship diagram
 

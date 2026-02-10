@@ -1,5 +1,5 @@
 /**
- * Cygnusa Elite-Hire Theme Configuration
+ * HireSense Theme Configuration
  * Based on Landing Page Design
  * 
  * Color Palette: Indigo primary with complementary accent colors

@@ -1,11 +1,11 @@
 # System architecture
 
 This document describes the architecture, design decisions, and key
-components of the Cygnusa Elite Hire platform.
+components of the HireSense platform.
 
 ## High-level design
 
-Cygnusa Elite Hire uses a decoupled architecture separating the user
+HireSense uses a decoupled architecture separating the user
 interface (React SPA) from the data and logic layer (Flask REST API +
 PostgreSQL). Real-time proctoring uses Socket.IO for WebRTC signaling
 alongside the REST API.

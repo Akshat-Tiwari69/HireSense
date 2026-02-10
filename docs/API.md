@@ -1,6 +1,6 @@
 # API reference
 
-This document provides a complete reference for the Cygnusa Elite Hire
+This document provides a complete reference for the HireSense
 REST API and WebSocket events.
 
 ## Conventions

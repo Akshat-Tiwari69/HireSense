@@ -61,7 +61,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.info("="*80)
-logger.info("CYGNUSA Elite-Hire Backend Starting...")
+logger.info("HireSense Backend Starting...")
 logger.info("="*80)
 
 # Configure JWT
@@ -240,7 +240,7 @@ def root():
     """Root endpoint - API information"""
     return jsonify({
         "status": "success",
-        "service": "Cygnusa Elite-Hire API",
+        "service": "HireSense API",
         "version": "1.0.0",
         "health": "/api/health"
     }), 200
