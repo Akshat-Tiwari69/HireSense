@@ -95,8 +95,9 @@ class ResumeAnalyzer:
                         "content": prompt
                     }
                 ],
-                temperature=0.7,  # Balanced creativity and consistency
+                temperature=0.1,  # Low temperature for consistent, deterministic scoring
                 max_tokens=1000,
+                seed=42,  # Fixed seed for reproducibility
                 response_format={"type": "json_object"}  # Ensure JSON response
             )
             
@@ -350,8 +351,9 @@ Respond ONLY with valid JSON, no additional text.
                     {"role": "system", "content": "You are an expert resume parser. Extract information accurately and respond only in JSON format."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,  # Lower temperature for more consistent extraction
+                temperature=0.1,  # Low temperature for consistent extraction
                 max_tokens=800,
+                seed=42,  # Fixed seed for reproducibility
                 response_format={"type": "json_object"}
             )
             
@@ -424,8 +426,9 @@ Respond ONLY with valid JSON:
                     {"role": "system", "content": "You are an expert recruiter based in India evaluating candidates for specific roles. Respond only in JSON format."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.5,
+                temperature=0.1,  # Low temperature for consistent scoring
                 max_tokens=150,
+                seed=42,  # Fixed seed for reproducibility
                 response_format={"type": "json_object"}
             )
             

@@ -260,8 +260,9 @@ Respond ONLY with valid JSON array, no extra text."""
                 {"role": "system", "content": "You are an expert recruiter. Respond only with valid JSON."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.4,
+            temperature=0.1,  # Low temperature for consistent matching
             max_tokens=800,
+            seed=42,  # Fixed seed for reproducibility
             response_format={"type": "json_object"},
         )
 
