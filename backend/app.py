@@ -48,6 +48,7 @@ from interviewee_routes import interviewee_bp
 from admin_routes import admin_bp
 from proctor_routes import proctor_bp
 from job_routes import jobs_bp
+from werkzeug.security import check_password_hash
 import time
 
 # Initialize Flask app
@@ -546,6 +547,7 @@ def upload_resume():
 
         # Save match for the selected job
         if candidate_id and selected_job_info:
+            match_conn = None
             try:
                 from db_config import get_connection, return_connection
                 match_conn = get_connection()
@@ -565,10 +567,16 @@ def upload_resume():
                     UPDATE candidates SET best_match_job_id = %s, match_score = %s WHERE id = %s
                 """, (int(selected_job_id), match_score, candidate_id))
                 match_conn.commit()
-                return_connection(match_conn)
                 logger.info(f"[MATCH] Saved candidate {candidate_id} -> Job #{selected_job_id} ({selected_job_info['title']}) score={match_score}")
             except Exception as match_err:
                 logger.warning(f"[MATCH] Could not save job match: {match_err}")
+                if match_conn:
+                    with contextlib.suppress(Exception):
+                        match_conn.rollback()
+            finally:
+                if match_conn:
+                    with contextlib.suppress(Exception):
+                        return_connection(match_conn)
     except Exception as e:
         logger.exception(f"[ERROR] Error saving candidate to database: {e}")
         # Continue anyway - parsing was successful

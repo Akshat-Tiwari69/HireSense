@@ -281,6 +281,7 @@ def get_proctor_stats():
 @proctor_bp.route('/violations', methods=['POST'])
 def record_violation():
     """Record a proctoring violation (called from candidate's browser)"""
+    conn = None
     try:
         data = request.get_json()
         
@@ -315,7 +316,6 @@ def record_violation():
         """, (assessment_id,))
         
         conn.commit()
-        conn.close()
         
         print(f"[PROCTOR] Violation recorded: {violation_type} for assessment {assessment_id}", flush=True)
         
@@ -325,5 +325,12 @@ def record_violation():
             'data': {'violation_id': violation_id}
         }), 201
     except Exception as e:
+        if conn:
+            import contextlib
+            with contextlib.suppress(Exception):
+                conn.rollback()
         print(f"[PROCTOR] Error recording violation: {e}", flush=True)
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if conn:
+            return_connection(conn)

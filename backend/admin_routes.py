@@ -902,9 +902,14 @@ def _save_candidate_job_match(candidate_id, job_id, match_score, ai_reasoning):
             UPDATE candidates SET best_match_job_id = %s, match_score = %s WHERE id = %s
         """, (int(job_id), match_score, candidate_id))
         match_conn.commit()
-        return_connection(match_conn)
     except Exception as match_err:
         logger.warning(f"Could not save job match for candidate {candidate_id}: {match_err}")
+        with contextlib.suppress(Exception):
+            match_conn.rollback()
+    finally:
+        # Always return the connection to the pool — critical for parallel bulk workers
+        with contextlib.suppress(Exception):
+            return_connection(match_conn)
 
 
 def _fetch_job_for_bulk(job_id):

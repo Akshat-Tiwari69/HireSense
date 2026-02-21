@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import lru_cache
 
 import psycopg2
-from db_config import get_connection
+from db_config import get_connection, return_connection
 
 
 class DatabaseError(Exception):
@@ -36,6 +36,7 @@ def create_user(email, password_hash, role, name):
     Raises:
         DatabaseError: If creation fails
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -49,7 +50,6 @@ def create_user(email, password_hash, role, name):
         result = cursor.fetchone()
         user_id = result[0] if result else None
         conn.commit()
-        conn.close()
         
         return user_id
     
@@ -57,6 +57,9 @@ def create_user(email, password_hash, role, name):
         raise DatabaseError(f"Email already exists: {str(e)}") from e
     except Exception as e:
         raise DatabaseError(f"Error creating user: {str(e)}") from e
+    finally:
+        if conn:
+            return_connection(conn)
 
 
 @lru_cache(maxsize=128)
@@ -209,6 +212,7 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
     Raises:
         DatabaseError: If insertion fails
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -222,19 +226,19 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         
         # Converting lists to JSON strings
         skills_json = json.dumps(skills)
-        pros_json = json.dumps(pros) if pros else None
-        cons_json = json.dumps(cons) if cons else None
+        # pros/cons are plain newline-separated strings — store as-is, not JSON-encoded
+        pros_text = pros if pros else None
+        cons_text = cons if cons else None
         
         cursor.execute("""
             INSERT INTO candidates 
             (name, email, phone, resume_path, parsed_skills, years_experience, education, match_score, shortlist_status, pros, cons, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
-        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_json, cons_json, status))
+        """, (name, email, phone, resume_path, skills_json, experience, education, match_score, shortlist_status, pros_text, cons_text, status))
         
         result = cursor.fetchone()
         candidate_id = result[0] if result else None
         conn.commit()
-        conn.close()
         
         return candidate_id
         
@@ -242,6 +246,9 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
         raise DatabaseError(f"Integrity error: {str(e)}") from e
     except Exception as e:
         raise DatabaseError(f"Error inserting candidate: {str(e)}") from e
+    finally:
+        if conn:
+            return_connection(conn)
 
 
 def get_candidate_by_id(candidate_id):
@@ -325,6 +332,22 @@ def get_all_candidates():
         rows = cursor.fetchall()
         conn.close()
         
+        def _parse_pros_cons(raw):
+            """Handle pros/cons as plain newline-text (new) or legacy JSON-encoded string."""
+            if not raw:
+                return []
+            try:
+                parsed = json.loads(raw)
+                # Legacy: was stored as json.dumps(string) → unwrap and split
+                if isinstance(parsed, str):
+                    return [p.strip() for p in parsed.split('\n') if p.strip()]
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            # New format: plain newline-separated text
+            return [p.strip() for p in raw.split('\n') if p.strip()]
+
         # Use list comprehension for better performance
         return [
             {
@@ -338,8 +361,8 @@ def get_all_candidates():
                 'education': row[7],
                 'match_score': row[8],
                 'shortlist_status': row[9],
-                'pros': json.loads(row[10]) if row[10] else [],
-                'cons': json.loads(row[11]) if row[11] else [],
+                'pros': _parse_pros_cons(row[10]),
+                'cons': _parse_pros_cons(row[11]),
                 'status': row[12],
                 'created_at': row[13],
                 'updated_at': row[14]
@@ -1208,6 +1231,7 @@ def log_email(recipient_email, recipient_name, email_type, subject, status='sent
     Raises:
         DatabaseError: If logging fails
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -1221,12 +1245,14 @@ def log_email(recipient_email, recipient_name, email_type, subject, status='sent
         result = cursor.fetchone()
         log_id = result[0] if result else None
         conn.commit()
-        conn.close()
         
         return log_id
     
     except Exception as e:
         raise DatabaseError(f"Error logging email: {str(e)}") from e
+    finally:
+        if conn:
+            return_connection(conn)
 
 
 def get_candidate_emails(candidate_email):
@@ -1609,13 +1635,14 @@ def get_violations_for_assessment(assessment_id):
     Returns:
         list: List of violation records
     """
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
         
         cursor.execute(
             """SELECT id, assessment_id, violation_type, description, severity, 
-                      screenshot_url, timestamp, resolved
+                      screenshot_url, timestamp
                FROM proctoring_violations 
                WHERE assessment_id = %s
                ORDER BY timestamp DESC""",
@@ -1623,7 +1650,6 @@ def get_violations_for_assessment(assessment_id):
         )
         
         rows = cursor.fetchall()
-        conn.close()
         
         return [
             {
@@ -1633,14 +1659,16 @@ def get_violations_for_assessment(assessment_id):
                 'description': row[3],
                 'severity': row[4],
                 'screenshot_url': row[5],
-                'timestamp': row[6],
-                'resolved': row[7]
+                'timestamp': row[6]
             }
             for row in rows
         ]
     
     except Exception as e:
         raise DatabaseError(f"Error retrieving violations: {str(e)}") from e
+    finally:
+        if conn:
+            return_connection(conn)
 
 
 def count_violations_for_assessment(assessment_id):

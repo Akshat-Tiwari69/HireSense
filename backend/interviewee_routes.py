@@ -260,12 +260,13 @@ def start_assessment(candidate_id):
         applied_job_title = ""
         job_required_skills = []
         is_technical_job = True  # Default to technical
+        jconn = None
         try:
             from db_config import get_connection, return_connection
             jconn = get_connection()
             jcur = jconn.cursor()
             jcur.execute(
-                """SELECT jd.title, jd.required_skills, jd.is_technical 
+                """SELECT jd.title, jd.required_skills 
                 FROM job_descriptions jd 
                 JOIN candidates c ON c.best_match_job_id = jd.id 
                 WHERE c.id = %s""",
@@ -277,11 +278,13 @@ def start_assessment(candidate_id):
                 # Parse required skills from job description
                 if jrow[1]:
                     job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
-                # Get is_technical flag (default True if NULL)
-                is_technical_job = jrow[2] if jrow[2] is not None else True
-            return_connection(jconn)
         except Exception as jtitle_err:
             logger.warning(f"Could not fetch applied job details: {jtitle_err}")
+        finally:
+            if jconn:
+                import contextlib
+                with contextlib.suppress(Exception):
+                    return_connection(jconn)
         
         logger.info(f"Generating AI questions for candidate {candidate_id} (role: {applied_job_title or 'unknown'}, technical: {is_technical_job}) with skills: {candidate_skills[:10]}, job skills: {job_required_skills[:5]}")
         
@@ -865,6 +868,7 @@ def start_assessment_with_token(token):
         # Load pre-generated questions from scheduled assessment (generated at schedule time)
         is_technical_role = True  # Default
         if not stored_questions:
+            pconn = None
             try:
                 from db_config import get_connection, return_connection
                 pconn = get_connection()
@@ -888,9 +892,13 @@ def start_assessment_with_token(token):
                         logger.info(f"Using pre-generated questions from schedule time for assessment {assessment['id']}")
                 if prow:
                     is_technical_role = prow[1] if prow[1] is not None else True
-                return_connection(pconn)
             except Exception as pre_err:
                 logger.warning(f"Could not load pre-generated questions: {pre_err}")
+            finally:
+                if pconn:
+                    import contextlib
+                    with contextlib.suppress(Exception):
+                        return_connection(pconn)
         
         # Fallback: generate questions on-the-fly if none were pre-generated
         if not stored_questions:
@@ -919,24 +927,32 @@ def start_assessment_with_token(token):
             job_required_skills = []
             try:
                 from db_config import get_connection, return_connection
-                jconn = get_connection()
-                jcur = jconn.cursor()
-                jcur.execute(
-                    """SELECT jd.title, jd.required_skills 
-                    FROM job_descriptions jd 
-                    JOIN candidates c ON c.best_match_job_id = jd.id 
-                    WHERE c.id = %s""",
-                    (assessment['candidate_id'],)
-                )
-                jrow = jcur.fetchone()
-                if jrow:
-                    applied_job_title = jrow[0] or ""
-                    # Parse required skills from job description
-                    if jrow[1]:
-                        job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
-                return_connection(jconn)
-            except Exception as jtitle_err:
-                logger.warning(f"Could not fetch applied job details: {jtitle_err}")
+                jconn2 = None
+                try:
+                    jconn2 = get_connection()
+                    jcur = jconn2.cursor()
+                    jcur.execute(
+                        """SELECT jd.title, jd.required_skills 
+                        FROM job_descriptions jd 
+                        JOIN candidates c ON c.best_match_job_id = jd.id 
+                        WHERE c.id = %s""",
+                        (assessment['candidate_id'],)
+                    )
+                    jrow = jcur.fetchone()
+                    if jrow:
+                        applied_job_title = jrow[0] or ""
+                        # Parse required skills from job description
+                        if jrow[1]:
+                            job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
+                except Exception as jtitle_err:
+                    logger.warning(f"Could not fetch applied job details: {jtitle_err}")
+                finally:
+                    if jconn2:
+                        import contextlib
+                        with contextlib.suppress(Exception):
+                            return_connection(jconn2)
+            except Exception:
+                pass
             
             logger.info(f"Generating AI questions for candidate skills: {candidate_skills[:10]} (role: {applied_job_title or 'unknown'}, technical: {is_technical_role})")
             

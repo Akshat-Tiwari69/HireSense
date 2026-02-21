@@ -23,7 +23,7 @@ def add_security_headers(app):
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: https:; "
             "font-src 'self' data:; "
-            "connect-src 'self' http://localhost:*"
+            "connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:*"
         )
         
         # Referrer policy

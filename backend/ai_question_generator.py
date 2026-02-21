@@ -792,12 +792,20 @@ Merging them into one sorted list: 1->1->2->3->4->4->5->6''',
         return scenarios[:count]
 
 
-# Singleton instance
+# Singleton instance — refreshed automatically if OPENAI_API_KEY changes at runtime
 _generator_instance = None
+_generator_api_key = None
+
 
 def get_ai_question_generator() -> AIQuestionGenerator:
-    """Get or create the AI question generator singleton"""
-    global _generator_instance
-    if _generator_instance is None:
+    """Get or create the AI question generator singleton.
+    
+    Re-creates the instance if the OPENAI_API_KEY environment variable has
+    changed since the last call (e.g., set via the admin settings page).
+    """
+    global _generator_instance, _generator_api_key
+    current_key = os.environ.get("OPENAI_API_KEY")
+    if _generator_instance is None or current_key != _generator_api_key:
         _generator_instance = AIQuestionGenerator()
+        _generator_api_key = current_key
     return _generator_instance

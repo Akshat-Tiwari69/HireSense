@@ -3,6 +3,7 @@ import psycopg2
 import psycopg2.extras
 from psycopg2 import pool
 import threading
+from contextlib import contextmanager
 
 # Thread-local storage for connection pool (ensures pool is per-thread for thread safety)
 _thread_local = threading.local()
@@ -92,6 +93,33 @@ def return_connection(conn):
         conn.close()
     except Exception as e:
         print(f"Error closing connection: {e}")
+
+
+@contextmanager
+def db_connection():
+    """Context manager for database connections that guarantees cleanup.
+    
+    Usage:
+        with db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(...)
+            conn.commit()
+    
+    On exception, the connection is rolled back and closed automatically.
+    On success, the caller is responsible for calling conn.commit().
+    The connection is always closed when the block exits.
+    """
+    conn = get_connection()
+    try:
+        yield conn
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        return_connection(conn)
 
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):

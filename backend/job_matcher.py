@@ -21,11 +21,15 @@ class JobMatcher:
     """
 
     def __init__(self, api_key: Optional[str] = None):
-        if api_key := (api_key or os.environ.get("OPENAI_API_KEY")):
+        # Resolve key: explicit arg > env var
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.model = "gpt-4o-mini"
+
+        if self.api_key:
             try:
                 from openai import OpenAI
                 http_client = httpx.Client()
-                self.client = OpenAI(api_key=api_key, http_client=http_client)
+                self.client = OpenAI(api_key=self.api_key, http_client=http_client)
             except TypeError as e:
                 if "proxies" in str(e):
                     proxy = (
@@ -36,12 +40,11 @@ class JobMatcher:
                     )
                     http_client = httpx.Client(proxies=proxy) if proxy else httpx.Client()
                     from openai import OpenAI
-                    self.client = OpenAI(api_key=api_key, http_client=http_client)
+                    self.client = OpenAI(api_key=self.api_key, http_client=http_client)
                 else:
                     raise
         else:
             self.client = None
-        self.model = "gpt-4o-mini"
 
     # ------------------------------------------------------------------
     # Public API
@@ -244,6 +247,13 @@ Consider:
 
 Respond ONLY with valid JSON array, no extra text."""
 
+        # NOTE: response_format=json_object requires a top-level JSON object (not an array).
+        # We instruct the model to wrap in {"matches": [...]} and unwrap below.
+        prompt = prompt.replace(
+            "Respond ONLY with valid JSON array, no extra text.",
+            "Respond ONLY with valid JSON in this format: {\"matches\": [<array of match objects>]}, no extra text."
+        )
+
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -256,9 +266,9 @@ Respond ONLY with valid JSON array, no extra text."""
         )
 
         result = json.loads(response.choices[0].message.content)
-        # Handle both {"matches": [...]} and bare [...]
+        # Unwrap envelope: support {"matches": [...]}, {"rankings": [...]}, or bare list
         if isinstance(result, dict):
-            result = result.get("matches", result.get("rankings", []))
+            result = result.get("matches", result.get("rankings", list(result.values())[0] if result else []))
         return result if isinstance(result, list) else []
 
     # ------------------------------------------------------------------
@@ -282,14 +292,22 @@ Respond ONLY with valid JSON array, no extra text."""
         return [s.strip() for s in str(skills_value).split(",") if s.strip()]
 
 
-# Module-level convenience
+# Module-level convenience — refreshed automatically if OPENAI_API_KEY changes at runtime
 _matcher_instance = None
+_matcher_api_key = None
 
 
 def get_job_matcher() -> JobMatcher:
-    global _matcher_instance
-    if _matcher_instance is None:
+    """Get or create the JobMatcher singleton.
+    
+    Re-creates the instance if the OPENAI_API_KEY environment variable has
+    changed since the last call (e.g., set via the admin settings page).
+    """
+    global _matcher_instance, _matcher_api_key
+    current_key = os.environ.get("OPENAI_API_KEY")
+    if _matcher_instance is None or current_key != _matcher_api_key:
         _matcher_instance = JobMatcher()
+        _matcher_api_key = current_key
     return _matcher_instance
 
 

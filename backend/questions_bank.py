@@ -11,14 +11,18 @@ def get_mcq_questions(count=10):
             'question': 'What is the time complexity of binary search?',
             'options': ['O(n)', 'O(log n)', 'O(n^2)', 'O(1)'],
             'correct_answer': 'O(log n)',
-            'category': 'algorithms'
+            'category': 'algorithms',
+            'difficulty': 'easy',
+            'time_limit': 60
         },
         {
             'id': 2,
             'question': 'Which data structure uses LIFO?',
             'options': ['Queue', 'Stack', 'Array', 'Tree'],
             'correct_answer': 'Stack',
-            'category': 'data-structures'
+            'category': 'data-structures',
+            'difficulty': 'easy',
+            'time_limit': 60
         },
         {
             'id': 3,
@@ -30,7 +34,9 @@ def get_mcq_questions(count=10):
                 'Remote State Transfer'
             ],
             'correct_answer': 'Representational State Transfer',
-            'category': 'web-development'
+            'category': 'web-development',
+            'difficulty': 'easy',
+            'time_limit': 60
         }
     ]
     return questions[:count]

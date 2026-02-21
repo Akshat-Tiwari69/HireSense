@@ -15,14 +15,19 @@ class ResumeAnalyzer:
     
     def __init__(self, api_key: Optional[str] = None):
         """
-        Initialize the Resume Analyzer
-        
+        Initialize the Resume Analyzer.
+
         Args:
+            api_key: OpenAI API key. If not provided, falls back to the
+                     OPENAI_API_KEY environment variable.
         """
-        
+        # Resolve key: explicit arg > env var
+        self.api_key = api_key or os.environ.get('OPENAI_API_KEY')
+
         if not self.api_key:
             raise ValueError(
-                "or pass api_key parameter"
+                "OpenAI API key is required. Set the OPENAI_API_KEY environment variable "
+                "or pass api_key parameter to ResumeAnalyzer()."
             )
         
         try:

@@ -102,16 +102,12 @@ def get_candidates():
         if status_filter:
             candidates = [c for c in candidates if c.get('status') == status_filter]
         
-        # Parse pros and cons from database text
+        # Ensure pros/cons are always lists
+        # (get_all_candidates already returns them as lists after the db_helpers fix)
         for candidate in candidates:
-            if candidate.get('pros'):
-                candidate['pros'] = candidate['pros'].split('\n') if isinstance(candidate['pros'], str) else []
-            else:
+            if not isinstance(candidate.get('pros'), list):
                 candidate['pros'] = []
-            
-            if candidate.get('cons'):
-                candidate['cons'] = candidate['cons'].split('\n') if isinstance(candidate['cons'], str) else []
-            else:
+            if not isinstance(candidate.get('cons'), list):
                 candidate['cons'] = []
         
         # Sort candidates
@@ -164,15 +160,16 @@ def get_candidate_details(candidate_id):
                 'message': 'Candidate not found'
             }), 404
         
-        # Parse pros and cons
-        if candidate.get('pros'):
-            candidate['pros'] = candidate['pros'].split('\n') if isinstance(candidate['pros'], str) else []
-        else:
+        # Ensure pros/cons are always lists
+        # (get_candidate_by_id may return raw strings for these fields)
+        if isinstance(candidate.get('pros'), str):
+            candidate['pros'] = [p.strip() for p in candidate['pros'].split('\n') if p.strip()]
+        elif not isinstance(candidate.get('pros'), list):
             candidate['pros'] = []
         
-        if candidate.get('cons'):
-            candidate['cons'] = candidate['cons'].split('\n') if isinstance(candidate['cons'], str) else []
-        else:
+        if isinstance(candidate.get('cons'), str):
+            candidate['cons'] = [c.strip() for c in candidate['cons'].split('\n') if c.strip()]
+        elif not isinstance(candidate.get('cons'), list):
             candidate['cons'] = []
         
         # Get assessment if any
@@ -365,9 +362,10 @@ def schedule_assessment(candidate_id):
         # Fetch job details for better question generation
         applied_job_title = ""
         job_required_skills = []
+        jconn = None
         try:
-            conn = get_connection()
-            cursor = conn.cursor()
+            jconn = get_connection()
+            cursor = jconn.cursor()
             cursor.execute(
                 """SELECT jd.title, jd.required_skills 
                 FROM job_descriptions jd 
@@ -380,9 +378,13 @@ def schedule_assessment(candidate_id):
                 applied_job_title = jrow[0] or ""
                 if jrow[1]:
                     job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
-            return_connection(conn)
         except Exception as e:
             logger.warning(f"Could not fetch job details: {e}")
+        finally:
+            if jconn:
+                import contextlib
+                with contextlib.suppress(Exception):
+                    return_connection(jconn)
         
         # Generate UNIQUE AI questions at schedule time (pre-cached for fast assessment start)
         print("[SCHEDULE] Generating unique AI questions for candidate...", flush=True)
