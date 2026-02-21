@@ -1,4 +1,5 @@
 # HireSense
+[Repository](https://github.com/Akshat-Tiwari69/HireSense) • [Issues](https://github.com/Akshat-Tiwari69/HireSense/issues)
 
 An AI-powered recruitment and assessment platform that automates hiring
 workflows — from resume intake and job matching to live-proctored technical
