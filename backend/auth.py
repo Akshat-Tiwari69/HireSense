@@ -30,6 +30,9 @@ EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a
 # Valid roles (expanded for RBAC)
 VALID_ROLES = ['interviewer', 'admin', 'proctor', 'super_admin', 'sector_admin', 'recruiter']
 
+# Only low-privilege roles can self-register
+SELF_REGISTER_ROLES = ['interviewer']
+
 # Cache compiled regex pattern for validation (avoids recompiling on each request)
 _EMAIL_PATTERN_COMPILED = re.compile(EMAIL_PATTERN)
 
@@ -132,6 +135,14 @@ def register():
                 'status': 'error',
                 'message': f'Invalid role. Must be one of: {", ".join(VALID_ROLES)}'
             }), 400
+
+        # Prevent self-service privileged account creation
+        if role not in SELF_REGISTER_ROLES:
+            logger.warning(f"[SECURITY] Blocked self-registration with privileged role: {role}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Self-registration is restricted. Allowed roles: {", ".join(SELF_REGISTER_ROLES)}'
+            }), 403
         
         # Validate name
         if len(name) < 2:
@@ -172,8 +183,8 @@ def register():
             }
         }), 201
     
-    except Exception as e:
-        logger.error(f"[ERROR] Registration error: {str(e)}")
+    except Exception:
+        logger.exception("[ERROR] Registration error")
         return jsonify({
             'status': 'error',
             'message': 'An error occurred during registration'
@@ -281,10 +292,11 @@ def login():
             }
         }), 200
         
-    except Exception as e:
+    except Exception:
+        logger.exception("[ERROR] Login failed")
         return jsonify({
             'status': 'error',
-            'message': f'Login failed: {str(e)}'
+            'message': 'Login failed. Please try again later.'
         }), 500
 
 
@@ -332,10 +344,11 @@ def get_current_user():
             }
         }), 200
         
-    except Exception as e:
+    except Exception:
+        logger.exception("[ERROR] Failed to get current user")
         return jsonify({
             'status': 'error',
-            'message': f'Failed to get user info: {str(e)}'
+            'message': 'Failed to get user info'
         }), 500
 
 
@@ -367,8 +380,9 @@ def verify_token():
             }
         }), 200
         
-    except Exception as e:
+    except Exception:
+        logger.exception("[ERROR] Token verification failed")
         return jsonify({
             'status': 'error',
-            'message': f'Token verification failed: {str(e)}'
+            'message': 'Token verification failed'
         }), 401

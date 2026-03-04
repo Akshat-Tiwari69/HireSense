@@ -77,7 +77,7 @@ def get_all_users():
         
         return jsonify({'status': 'success', 'data': users}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -127,7 +127,7 @@ def create_user():
     except Exception as e:
         if 'unique constraint' in str(e).lower() or 'duplicate' in str(e).lower():
             return jsonify({'status': 'error', 'message': 'Email already exists'}), 409
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/users/<int:user_id>', methods=['PUT'])
@@ -181,7 +181,7 @@ def update_user(user_id):
         return jsonify({'status': 'success', 'message': 'User updated successfully'}), 200
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to update user ID {user_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/users/<int:user_id>', methods=['DELETE'])
@@ -219,7 +219,7 @@ def delete_user(user_id):
         return jsonify({'status': 'success', 'message': 'User deleted successfully'}), 200
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to delete user ID {user_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 # ============================================================================
@@ -278,7 +278,7 @@ def get_absence_of_details():
         return jsonify({'status': 'success', 'data': results, 'total': len(results)}), 200
     except Exception as e:
         logger.error(f"[ADMIN] absence-of-details error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -316,7 +316,7 @@ def get_all_candidates():
         
         return jsonify({'status': 'success', 'data': candidates}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -375,7 +375,7 @@ def update_candidate(candidate_id):
         return jsonify({'status': 'success', 'message': 'Candidate updated successfully'}), 200
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to update candidate ID {candidate_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/candidates/<int:candidate_id>', methods=['DELETE'])
@@ -414,7 +414,7 @@ def delete_candidate(candidate_id):
         return jsonify({'status': 'success', 'message': 'Candidate deleted successfully'}), 200
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to delete candidate ID {candidate_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 # ============================================================================
@@ -443,7 +443,7 @@ def get_db_tables():
         tables = [row[0] for row in rows]
         return jsonify({'status': 'success', 'data': tables}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/db/tables/<table_name>', methods=['GET'])
@@ -494,7 +494,7 @@ def get_table_data(table_name):
             'count': len(data)
         }), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -548,7 +548,7 @@ def get_db_stats():
         stats = _fetch_database_stats()
         return jsonify({'status': 'success', 'data': stats}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 # ============================================================================
@@ -584,7 +584,7 @@ def get_env_status():
         
         return jsonify({'status': 'success', 'data': status}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/settings/env', methods=['POST'])
@@ -647,7 +647,7 @@ def set_env_variable():
         
     except Exception as e:
         logger.error(f"Error setting environment variable: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/reset-candidate-status/<int:candidate_id>', methods=['POST'])
@@ -690,7 +690,7 @@ def reset_candidate_status(candidate_id):
         return jsonify({'status': 'success', 'message': 'Candidate status reset to Applied'}), 200
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to reset candidate ID {candidate_id}: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 # ============================================================================
@@ -724,7 +724,7 @@ def get_email_logs():
         })
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to fetch email logs: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -831,7 +831,7 @@ def get_analytics():
         })
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to fetch analytics: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             conn.close()
@@ -1695,7 +1695,7 @@ def list_question_banks():
 
     except Exception as e:
         logger.error(f"[CUSTOM QB] List failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/question-bank/<int:qb_id>', methods=['GET'])
@@ -1703,6 +1703,11 @@ def list_question_banks():
 def get_question_bank(qb_id):
     """Get a single question bank with all parsed questions."""
     try:
+        claims = get_jwt()
+        role = claims.get('role', '')
+        if role not in ('admin', 'super_admin', 'interviewer'):
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
+
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -1740,7 +1745,7 @@ def get_question_bank(qb_id):
 
     except Exception as e:
         logger.error(f"[CUSTOM QB] Get failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/question-bank/<int:qb_id>', methods=['DELETE'])
@@ -1775,7 +1780,7 @@ def delete_question_bank(qb_id):
 
     except Exception as e:
         logger.error(f"[CUSTOM QB] Delete failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_bp.route('/question-bank/<int:qb_id>/toggle', methods=['PATCH'])
@@ -1783,6 +1788,11 @@ def delete_question_bank(qb_id):
 def toggle_question_bank(qb_id):
     """Toggle active/inactive status of a question bank."""
     try:
+        claims = get_jwt()
+        role = claims.get('role', '')
+        if role not in ('admin', 'super_admin'):
+            return jsonify({'status': 'error', 'message': 'Only admins can toggle status'}), 403
+
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -1802,4 +1812,4 @@ def toggle_question_bank(qb_id):
 
     except Exception as e:
         logger.error(f"[CUSTOM QB] Toggle failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
