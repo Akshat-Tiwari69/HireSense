@@ -66,7 +66,24 @@ logger.info("HireSense Backend Starting...")
 logger.info("="*80)
 
 # Configure JWT
-app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'dev-secret-key-change-in-production')
+def _get_jwt_secret():
+    """Load and validate JWT secret to prevent insecure defaults in deployment."""
+    secret = os.environ.get('JWT_SECRET_KEY', '').strip()
+    allow_insecure_dev_secret = os.environ.get('ALLOW_INSECURE_DEV_SECRET', '').lower() == 'true'
+
+    if not secret:
+        if allow_insecure_dev_secret:
+            logger.warning("[SECURITY] Using insecure dev JWT secret due to ALLOW_INSECURE_DEV_SECRET=true")
+            return 'dev-secret-key-change-in-production'
+        raise RuntimeError("JWT_SECRET_KEY must be set. Refusing to start with an insecure default.")
+
+    if len(secret) < 32:
+        raise RuntimeError("JWT_SECRET_KEY is too short. Use at least 32 characters.")
+
+    return secret
+
+
+app.config['JWT_SECRET_KEY'] = _get_jwt_secret()
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 jwt = JWTManager(app)
 
@@ -147,6 +164,10 @@ app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
 
 # Register job postings & sectors routes blueprint
 app.register_blueprint(jobs_bp, url_prefix='/api/jobs')
+
+# Initialize rate limiting after blueprint registration
+from rate_limiter import init_rate_limiting
+init_rate_limiting(app)
 
 # Ensure uploads folder exists
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -1058,4 +1079,3 @@ if __name__ == '__main__':
     # Run with Socket.IO WSGI app
     import eventlet.wsgi
     eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app_with_socketio)
-

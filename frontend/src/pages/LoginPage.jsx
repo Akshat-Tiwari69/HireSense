@@ -28,8 +28,6 @@ const LoginPage = () => {
     }
     if (!password) {
       newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -85,7 +83,7 @@ const LoginPage = () => {
           <div>
             <CardTitle className="text-2xl sm:text-3xl font-bold text-slate-900">Welcome Back</CardTitle>
             <CardDescription className="text-sm sm:text-base text-slate-600 mt-2">
-              Sign in to access your interviewer dashboard
+              Sign in to access your dashboard
             </CardDescription>
           </div>
         </CardHeader>
