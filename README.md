@@ -292,4 +292,4 @@ Railway, Render, or Heroku.
 
 ## License
 
-This project is proprietary. All rights reserved.
+MIT
