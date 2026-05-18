@@ -30,7 +30,7 @@ def add_security_headers(app):
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         
         # Permissions policy
-        response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+        response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(self), camera=(self)'
         
         return response
     

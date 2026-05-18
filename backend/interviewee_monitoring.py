@@ -64,7 +64,7 @@ def report_violation(assessment_id):
 
     except Exception as e:
         logger.error(f"Failed to record violation: {e}")
-        return jsonify({'status': 'error', 'message': f'Failed to record violation: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to record violation'}), 500
 
 
 @interviewee_monitoring_bp.route('/assessment/<int:assessment_id>/sync-time', methods=['POST'])
@@ -78,4 +78,4 @@ def sync_assessment_time(assessment_id):
         update_assessment_time_elapsed(assessment_id, int(time_elapsed))
         return jsonify({'status': 'success', 'message': 'Time synced'}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to sync time: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to sync time'}), 500

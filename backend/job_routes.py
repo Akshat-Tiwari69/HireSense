@@ -109,7 +109,7 @@ def get_sectors():
         return jsonify({'status': 'success', 'data': sectors})
     except Exception as e:
         logger.error(f"[SECTORS] Failed to fetch: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -145,7 +145,7 @@ def create_sector():
         if conn:
             conn.rollback()
         logger.error(f"[SECTORS] Create failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -179,7 +179,7 @@ def update_sector(sector_id):
     except Exception as e:
         if conn:
             conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -200,7 +200,7 @@ def delete_sector(sector_id):
     except Exception as e:
         if conn:
             conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -251,7 +251,7 @@ def get_job_postings():
         return jsonify({'status': 'success', 'data': jobs})
     except Exception as e:
         logger.error(f"[JOBS] Failed to fetch postings: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -328,7 +328,7 @@ def create_job_posting():
         if conn:
             conn.rollback()
         logger.error(f"[JOBS] Create failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -376,7 +376,7 @@ def update_job_posting(job_id):
     except Exception as e:
         if conn:
             conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -407,7 +407,7 @@ def delete_job_posting(job_id):
     except Exception as e:
         if conn:
             conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -436,7 +436,7 @@ def get_job_posting_detail(job_id):
         job['preferred_skills_list'] = _parse_skills(job.get('preferred_skills', ''))
         return jsonify({'status': 'success', 'data': job})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -548,7 +548,7 @@ def match_candidate_to_jobs_endpoint():
         if conn:
             conn.rollback()
         logger.error(f"[MATCH] Error: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -578,7 +578,7 @@ def get_candidate_matches(candidate_id):
                 m['reviewed_at'] = m['reviewed_at'].isoformat()
         return jsonify({'status': 'success', 'data': matches})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -607,7 +607,7 @@ def get_job_candidates(job_id):
                 c['matched_at'] = c['matched_at'].isoformat()
         return jsonify({'status': 'success', 'data': candidates})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)
@@ -638,7 +638,7 @@ def get_audit_log():
                 log['created_at'] = log['created_at'].isoformat()
         return jsonify({'status': 'success', 'data': logs})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         if conn:
             return_connection(conn)

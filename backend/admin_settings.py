@@ -55,6 +55,9 @@ def set_env_variable():
         if not var_name:
             return jsonify({'status': 'error', 'message': 'Variable name is required'}), 400
 
+        if var_name not in _TRACKED_ENV_VARS:
+            return jsonify({'status': 'error', 'message': 'Variable name not allowed'}), 400
+
         if var_name == 'DATABASE_URL' and var_value and not var_value.startswith(('postgresql://', 'postgres://')):
             return jsonify({'status': 'error', 'message': 'DATABASE_URL must start with postgresql:// or postgres://'}), 400
 

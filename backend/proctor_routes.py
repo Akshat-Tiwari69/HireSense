@@ -9,12 +9,13 @@ import json
 from datetime import datetime, timedelta
 from functools import wraps
 from db_config import get_connection
+from psycopg2.extras import RealDictCursor
 
-proctor_bp = Blueprint('proctor', __name__, url_prefix='/api/proctor')
+proctor_bp = Blueprint('proctor', __name__)
 
 def get_db():
-    conn = get_connection(use_dict_cursor=True)
-    # Enable autocommit for PostgreSQL to avoid transaction issues
+    conn = get_connection()
+    conn.cursor_factory = RealDictCursor
     if hasattr(conn, 'set_session'):
         conn.set_session(autocommit=True)
     return conn

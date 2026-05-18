@@ -43,11 +43,13 @@ const LoginPage = () => {
       const res = await api.post('/api/auth/login', { email, password });
       const token = res?.data?.data?.access_token;
       const userRole = res?.data?.data?.user?.role;
+      const userId = res?.data?.data?.user?.id;
       if (!token) throw new Error('No token received');
 
       localStorage.setItem('authToken', token);
       localStorage.setItem('userEmail', email);
       localStorage.setItem('userRole', userRole);
+      if (userId) localStorage.setItem('user_id', String(userId));
       toast({ title: 'Login successful', description: 'Welcome back!' });
 
       // Redirect based on role
