@@ -60,7 +60,7 @@ def submit_answer(assessment_id):
                 assessment_id=assessment_id, question_id=question_id_int,
                 selected_answer=selected, is_correct=is_correct, time_spent=time_spent
             )
-            return jsonify({'status': 'success', 'message': 'MCQ answer saved', 'is_correct': is_correct}), 200
+            return jsonify({'status': 'success', 'message': 'MCQ answer saved'}), 200
 
         elif answer_type == 'coding':
             save_coding_submission(
@@ -93,7 +93,7 @@ def submit_answer(assessment_id):
         return jsonify({'status': 'error', 'message': 'Invalid answer type'}), 400
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to save answer: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to save answer'}), 500
 
 
 @interviewee_answers_bp.route('/assessment/<int:assessment_id>/complete', methods=['POST'])
@@ -179,7 +179,7 @@ def complete_assessment(assessment_id):
 
     except Exception as e:
         logger.error(f"Assessment {assessment_id}: FAILED to complete — {str(e)}", exc_info=True)
-        return jsonify({'status': 'error', 'message': f'Failed to complete assessment: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to complete assessment'}), 500
 
 
 def _resolve_correct_answer(question_id_int, questions):

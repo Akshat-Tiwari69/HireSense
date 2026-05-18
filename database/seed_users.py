@@ -22,31 +22,55 @@ if os.path.exists(env_path):
 
 try:
     import psycopg2
+    import secrets
+    import string
     from werkzeug.security import generate_password_hash
 except ImportError as e:
     print(f"Missing dependency: {e}")
     print("Run: pip install psycopg2-binary werkzeug python-dotenv")
     sys.exit(1)
 
+
+def _generate_password(length=20):
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _get_or_generate(env_key, label):
+    val = os.environ.get(env_key)
+    if val:
+        return val, False
+    generated = _generate_password()
+    print(f"  INFO  {label}: no {env_key} env var set — generated a one-time password (shown below)")
+    return generated, True
+
+
 # ── Default users to seed ──────────────────────────────────────────────────────
+_admin_pw, _admin_generated = _get_or_generate('SEED_ADMIN_PASSWORD', 'Admin')
+_interviewer_pw, _interviewer_generated = _get_or_generate('SEED_INTERVIEWER_PASSWORD', 'Interviewer')
+_proctor_pw, _proctor_generated = _get_or_generate('SEED_PROCTOR_PASSWORD', 'Proctor')
+
 DEFAULT_USERS = [
     {
         "name":  "Admin User",
         "email": "admin@hiresense.com",
-        "password": "admin123",
+        "password": _admin_pw,
         "role":  "admin",
+        "show_password": _admin_generated,
     },
     {
         "name":  "Interviewer User",
         "email": "interviewer@hiresense.com",
-        "password": "interviewer123",
+        "password": _interviewer_pw,
         "role":  "interviewer",
+        "show_password": _interviewer_generated,
     },
     {
         "name":  "Proctor User",
         "email": "proctor@hiresense.com",
-        "password": "proctor123",
+        "password": _proctor_pw,
         "role":  "proctor",
+        "show_password": _proctor_generated,
     },
 ]
 
@@ -115,7 +139,10 @@ for user in DEFAULT_USERS:
             ),
         )
         new_id = cur.fetchone()[0]
-        print(f"  OK    {user['email']} | role={user['role']} | password={user['password']} | id={new_id}")
+        if user.get('show_password'):
+            print(f"  OK    {user['email']} | role={user['role']} | ONE-TIME PASSWORD: {user['password']} | id={new_id}")
+        else:
+            print(f"  OK    {user['email']} | role={user['role']} | password set from env | id={new_id}")
         created += 1
 
     except Exception as e:
@@ -128,8 +155,4 @@ conn.close()
 # ── Summary ────────────────────────────────────────────────────────────────────
 print(f"\nDone! Created {created} user(s), skipped {skipped} existing.")
 if created > 0:
-    print("\nDefault credentials:")
-    print("  Admin:       admin@hiresense.com      / admin123")
-    print("  Interviewer: interviewer@hiresense.com / interviewer123")
-    print("  Proctor:     proctor@hiresense.com     / proctor123")
-    print("\n⚠️  Change these passwords after first login!")
+    print("\n⚠️  Store any generated passwords shown above — they will not be shown again.")

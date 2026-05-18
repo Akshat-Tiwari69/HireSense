@@ -148,8 +148,8 @@ def get_analytics():
                 (SELECT COUNT(*) FROM scheduled_assessments WHERE status = 'scheduled') as scheduled_assessments,
                 (SELECT COUNT(*) FROM scheduled_assessments WHERE status = 'in_progress') as in_progress_assessments,
                 (SELECT COUNT(*) FROM scheduled_assessments WHERE status = 'completed') as completed_assessments,
-                (SELECT AVG(technical_score) FROM scheduled_assessments) as avg_technical_score,
-                (SELECT AVG(psychometric_score) FROM scheduled_assessments) as avg_psychometric_score,
+                (SELECT AVG(technical_score) FROM assessments) as avg_technical_score,
+                (SELECT AVG(psychometric_score) FROM assessments) as avg_psychometric_score,
                 (SELECT COUNT(*) FROM scheduled_assessments WHERE created_at >= NOW() - INTERVAL '30 days') as assessments_this_month
         """)
 

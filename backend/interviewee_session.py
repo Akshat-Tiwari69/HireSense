@@ -73,7 +73,7 @@ def get_my_assessment(candidate_id):
             'assessment_id': scheduled.get('assessment_id')
         }}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to fetch assessment info: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to fetch assessment info'}), 500
 
 
 @interviewee_session_bp.route('/assessment/start/<int:candidate_id>', methods=['POST'])
@@ -150,7 +150,7 @@ def start_assessment(candidate_id):
         }}), 201
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to start assessment: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to start assessment'}), 500
 
 
 @interviewee_session_bp.route('/assessment/verify/<token>', methods=['GET'])
@@ -187,7 +187,7 @@ def verify_assessment_token(token):
             'already_started': assessment['status'] == 'in_progress'
         }}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to verify assessment: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to verify assessment'}), 500
 
 
 @interviewee_session_bp.route('/assessment/start-by-token/<token>', methods=['POST'])
@@ -312,7 +312,7 @@ def start_assessment_with_token(token):
                         }}), 200
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Failed to start assessment: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Failed to start assessment'}), 500
 
 
 # ============================================================================

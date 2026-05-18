@@ -47,9 +47,7 @@ def validate_email(email):
 
 def hash_password(password):
     """Hash a password using bcrypt"""
-    logger.info(f"[HASH] Hashing password (length: {len(password)} chars)")
     hashed = generate_password_hash(password)
-    logger.info(f"[OK] Password hashed successfully")
     return hashed
 
 

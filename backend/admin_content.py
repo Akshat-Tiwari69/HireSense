@@ -494,7 +494,7 @@ def bulk_upload_resumes():
         return jsonify({'status': 'error', 'message': 'Invalid or corrupted archive file'}), 400
     except Exception as e:
         logger.exception(f"[BULK] Unexpected error: {e}")
-        return jsonify({'status': 'error', 'message': f'Bulk upload failed: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
     finally:
         with contextlib.suppress(Exception):
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -628,7 +628,7 @@ def ai_enhance_text():
 
     except Exception as e:
         logger.error(f"[AI ENHANCE] Failed: {e}")
-        return jsonify({'status': 'error', 'message': f'AI enhancement failed: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_content_bp.route('/question-bank/upload', methods=['POST'])
@@ -698,7 +698,7 @@ def upload_question_bank():
 
     except Exception as e:
         logger.error(f"[CUSTOM QB] Upload failed: {e}")
-        return jsonify({'status': 'error', 'message': f'Upload failed: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 
 @admin_content_bp.route('/question-bank', methods=['GET'])

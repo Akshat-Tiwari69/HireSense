@@ -131,7 +131,7 @@ def get_candidates():
         logger.exception(f" Failed to fetch candidates: {e}")
         return jsonify({
             'status': 'error',
-            'message': f'Failed to fetch candidates: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -185,7 +185,7 @@ def get_candidate_details(candidate_id):
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Failed to fetch candidate details: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -225,7 +225,7 @@ def download_resume(candidate_id):
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Failed to download resume: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -287,7 +287,7 @@ def reject_candidate(candidate_id):
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Failed to reject candidate: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -550,7 +550,7 @@ def schedule_assessment(candidate_id):
         traceback.print_exc()
         return jsonify({
             'status': 'error',
-            'message': f'Failed to schedule assessment: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -581,7 +581,7 @@ def get_assessment_results(candidate_id):
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Failed to fetch assessment results: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -687,7 +687,7 @@ def make_final_decision(assessment_id):
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Failed to record final decision: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -724,7 +724,7 @@ def get_dashboard_stats():
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Failed to fetch dashboard stats: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
@@ -762,7 +762,7 @@ def manage_candidate_notes(candidate_id):
     except Exception as e:
         return jsonify({
             'status': 'error',
-            'message': f'Failed to manage notes: {str(e)}'
+            'message': 'Internal server error'
         }), 500
 
 
