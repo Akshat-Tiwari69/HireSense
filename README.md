@@ -1,295 +1,189 @@
-# HireSense
-[Repository](https://github.com/Akshat-Tiwari69/HireSense) • [Issues](https://github.com/Akshat-Tiwari69/HireSense/issues)
+# HireSense — AI-Powered Recruitment Platform
 
-An AI-powered recruitment and assessment platform that automates hiring
-workflows — from resume intake and job matching to live-proctored technical
-assessments with real-time video monitoring.
+> **Team:** Akshat (Backend) | Shaivi (Frontend) | Prashanth (Database)
 
-![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)
-![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask)
-![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-4169E1?logo=postgresql&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white)
-![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991?logo=openai&logoColor=white)
+HireSense is a full-stack AI-enabled hiring platform that handles the complete recruitment pipeline — from resume submission and AI analysis through technical assessments with live proctoring to final hiring decisions.
 
 ---
 
-## Overview
+## Tech Stack
 
-HireSense is a full-stack recruitment platform built for companies
-that need a structured, secure, and intelligent hiring pipeline. It combines
-AI-driven candidate evaluation with a multi-role dashboard system and a
-live-proctored assessment engine.
+| Layer | Technologies |
+|-------|-------------|
+| Frontend | React 18, Vite, Tailwind CSS, shadcn/ui, Recharts |
+| Backend | Flask 3.0, Flask-JWT-Extended, Flask-Limiter, Flask-CORS |
+| Database | PostgreSQL 15 (Supabase compatible) |
+| AI | OpenAI GPT-4o-mini (resume analysis, question generation, job matching) |
+| Realtime | Socket.IO + WebRTC (live proctoring) |
+| Email | Resend API with SMTP fallback |
 
-**Key capabilities:**
+---
 
-- AI resume analysis and job matching powered by OpenAI GPT-4o-mini
-- Three-part technical assessments (MCQ, coding challenges, psychometric)
-- Live proctoring with WebRTC video streaming and violation detection
-- Role-based access control across five user roles
-- Automated email notifications for every stage of the hiring pipeline
+## What It Does
 
-## Features
+| Feature | Description |
+|---------|-------------|
+| Resume Parsing & AI Analysis | Extracts skills/experience, generates pros/cons and match scores |
+| Job Matching | Rule-based + AI re-ranking of candidate-to-job fit |
+| Assessment Engine | MCQ, coding challenges (multi-language), psychometric tests |
+| Live Proctoring | WebRTC video stream with violation detection (face, tab-switch, copy-paste) |
+| Role-Based Dashboards | Admin, Sector Admin, Interviewer, Proctor, Candidate |
+| Email Automation | Assessment invitations, rejections, final decisions |
 
-### AI-powered recruitment
+---
 
-- **Resume analysis** — Upload PDF/DOCX resumes for automatic skill
-  extraction, experience parsing, and AI-generated pros/cons evaluation
-  with match scoring against job requirements.
-- **Job matching engine** — Rule-based scoring combined with AI re-ranking
-  to match candidates to open positions by skills, experience, and
-  education.
-- **Question generation** — AI-generated MCQs, coding problems, and test
-  cases tailored to each candidate's resume and the target role.
+## User Roles
 
-### Assessment system
+| Role | Access |
+|------|--------|
+| Admin | Full system — users, candidates, jobs, sectors, analytics |
+| Sector Admin | Scoped to their sector's jobs and candidates |
+| Interviewer | Candidate review, assessment scheduling, final decisions |
+| Proctor | Live session monitoring, violation reporting |
+| Candidate | Job listings, application submission, assessment |
 
-- **MCQ section** — Technical multiple-choice questions covering algorithms,
-  data structures, web development, and more.
-- **Coding challenges** — Multi-language support (Python, JavaScript, Java)
-  with an integrated Monaco code editor, starter code, and automated test
-  cases at easy, medium, and hard difficulty levels.
-- **Psychometric evaluation** — Scenario-based trait assessment for
-  teamwork, responsibility, and decision-making.
-- **Secure access** — Token-based assessment links with a ±30-minute
-  scheduling window and time-elapsed tracking.
+---
 
-### Live proctoring
-
-- **Real-time video monitoring** — WebRTC peer-to-peer streaming from
-  candidate to proctor via Socket.IO signaling.
-- **Violation detection** — Tracks tab switches, copy-paste attempts,
-  face detection anomalies (no face / multiple faces), and captures
-  screenshots as evidence.
-- **Room-based architecture** — Each assessment runs in an isolated
-  session with automatic cleanup on disconnect.
-
-### Multi-role dashboards
-
-| Role | Capabilities |
-|------|-------------|
-| **Admin** | Full system control, user management, analytics, bulk operations |
-| **Sector Admin** | Sector-scoped job and candidate management |
-| **Interviewer** | Candidate review, assessment scheduling, email notifications |
-| **Proctor** | Live session monitoring, violation tracking, assessment oversight |
-| **Candidate** | Job applications, resume submission, assessment participation |
-
-### Email automation
-
-- Assessment invitations with secure token links
-- Rejection notices with optional feedback
-- Final hiring decisions
-- Dual transport (Resend API with SMTP fallback) and full audit logging
-
-## Tech stack
-
-### Backend
-
-| Technology | Purpose |
-|-----------|---------|
-| Python 3.9+ / Flask 3.0 | REST API framework |
-| Flask-JWT-Extended | JWT authentication with 24-hour token expiry |
-| PostgreSQL (psycopg2) | Database with connection pooling |
-| Socket.IO + eventlet | Real-time WebSocket communication |
-| OpenAI GPT-4o-mini | AI resume analysis, question generation, job matching |
-| Resend / SMTP | Email delivery |
-| PyPDF2, python-docx | Resume parsing |
-| Gunicorn | Production WSGI server |
-| bcrypt | Password hashing |
-
-### Frontend
-
-| Technology | Purpose |
-|-----------|---------|
-| React 18 + Vite 5 | UI framework and build tooling |
-| React Router DOM 7 | Client-side routing |
-| Tailwind CSS 3 | Utility-first styling |
-| Radix UI + shadcn/ui | Accessible component library |
-| Monaco Editor | In-browser code editor for assessments |
-| Recharts | Data visualization and analytics |
-| Socket.IO Client + simple-peer | WebRTC proctoring |
-| Zod + React Hook Form | Form validation |
-| Axios | HTTP client |
-
-## Project structure
-
-```
-hiresense/
-├── backend/
-│   ├── app.py                  # Application entry point
-│   ├── auth.py                 # Authentication endpoints
-│   ├── admin_routes.py         # Admin dashboard API
-│   ├── interviewer_routes.py   # Interviewer dashboard API
-│   ├── interviewee_routes.py   # Candidate assessment API
-│   ├── proctor_routes.py       # Proctoring API
-│   ├── job_routes.py           # Job postings and matching API
-│   ├── db_config.py            # Connection pool configuration
-│   ├── db_helpers.py           # Data access layer with caching
-│   ├── resume_parser.py        # Resume text extraction
-│   ├── resume_analyzer.py      # AI-powered resume evaluation
-│   ├── job_matcher.py          # AI job matching engine
-│   ├── ai_question_generator.py# AI assessment question generator
-│   ├── questions_bank.py       # Static question repository
-│   ├── email_service.py        # Email notification service
-│   ├── websocket_server.py     # Socket.IO / WebRTC signaling
-│   ├── rate_limiter.py         # Request rate limiting
-│   ├── security_headers.py     # HTTP security headers
-│   ├── request_logger.py       # Request logging middleware
-│   └── requirements.txt        # Python dependencies
-├── frontend/
-│   ├── src/
-│   │   ├── pages/              # 11 route pages
-│   │   ├── components/         # Reusable UI components
-│   │   ├── services/           # API client
-│   │   ├── hooks/              # Custom React hooks
-│   │   ├── context/            # Theme and auth providers
-│   │   └── lib/                # Utility functions
-│   ├── package.json
-│   └── vite.config.js
-├── database/
-│   ├── schema_postgresql.sql   # Full database schema
-│   └── migrations/             # Incremental migrations
-└── docs/
-    ├── API.md                  # API reference
-    ├── ARCHITECTURE.md         # System architecture
-    ├── DATABASE.md             # Schema documentation
-    └── SETUP.md                # Installation guide
-```
-
-## Quick start
+## Setup
 
 ### Prerequisites
 
-- Python 3.9 or higher
-- Node.js 16.0 or higher
-- PostgreSQL database (local or Supabase)
-- OpenAI API key (for AI features)
+- Python 3.9+
+- Node.js 18+
+- PostgreSQL 15+ (or a Supabase project)
+- OpenAI API key
 
-### Backend setup
+### Backend
 
 ```bash
 cd backend
+
+# Create virtual environment
 python -m venv venv
+source venv/bin/activate    # Windows: venv\Scripts\activate
 
-# Windows
-venv\Scripts\activate
-# macOS/Linux
-source venv/bin/activate
-
+# Install dependencies
 pip install -r requirements.txt
-```
 
-Create a `backend/.env` file:
+# Create .env file — see docs/ENVIRONMENT_CONFIG.md for all variables
+cp .env.example .env        # then fill in values
 
-```properties
-DATABASE_URL=postgresql://user:password@host:5432/dbname
-SECRET_KEY=your_flask_secret_key
-JWT_SECRET_KEY=your_jwt_signing_key
-OPENAI_API_KEY=your_openai_api_key
+# Run database migrations
+python scripts/run_migration.py
 
-# Email (optional)
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-```
-
-Initialize the database and start the server:
-
-```bash
-psql "$DATABASE_URL" -f ../database/schema_postgresql.sql
+# Start server (development)
 python app.py
 ```
 
-The API runs at `http://localhost:5000`.
+Server runs at `http://localhost:5000`
 
-### Frontend setup
+### Frontend
 
 ```bash
 cd frontend
+
+# Install dependencies
 npm install
-```
 
-Create a `frontend/.env` file:
-
-```properties
-VITE_API_BASE_URL=http://localhost:5000
-```
-
-Start the development server:
-
-```bash
+# Create .env.local — minimum required:
+# VITE_API_BASE_URL=http://localhost:5000
 npm run dev
 ```
 
-The UI runs at `http://localhost:5173`.
+App runs at `http://localhost:5173`
 
-## API overview
-
-All endpoints return standardized JSON responses:
-
-```json
-{
-  "status": "success",
-  "message": "Description",
-  "data": { }
-}
-```
-
-| Blueprint | Prefix | Description |
-|----------|--------|-------------|
-| Auth | `/api/auth` | Registration, login, JWT management |
-| Admin | `/api/admin` | System administration and analytics |
-| Interviewer | `/api/interviewer` | Candidate management and scheduling |
-| Interviewee | `/api/interviewee` | Assessment access and submission |
-| Proctor | `/api/proctor` | Live proctoring and monitoring |
-| Jobs | `/api/jobs` | Job postings, sectors, and matching |
-
-For the complete endpoint reference, see [docs/API.md](docs/API.md).
-
-## Security
-
-- **Authentication** — JWT tokens with configurable expiry and automatic
-  refresh error handling.
-- **Authorization** — Role-based access control (RBAC) with a hierarchical
-  permission model across five roles.
-- **Data protection** — Parameterized SQL queries, input validation,
-  secure filename sanitization, and 10 MB upload limits.
-- **HTTP hardening** — Content-Security-Policy, X-Frame-Options,
-  X-Content-Type-Options, Referrer-Policy, and Permissions-Policy headers.
-- **Rate limiting** — Configurable per-endpoint limits (200/day default,
-  10/min login, 5/min register, 10/hr upload).
-- **Password storage** — bcrypt hashing via werkzeug.
-
-## Database
-
-The platform uses PostgreSQL with 12 tables covering users, candidates,
-assessments, proctoring events, email logs, and audit trails. JSONB columns
-provide flexible storage for questions and assessment data.
-
-For the full schema and entity-relationship diagram, see
-[docs/DATABASE.md](docs/DATABASE.md).
-
-## Deployment
-
-The project includes configuration for cloud deployment on platforms like
-Railway, Render, or Heroku.
-
-- **Backend** — Gunicorn WSGI server via `Procfile`, with Nixpacks
-  configuration for automated builds.
-- **Frontend** — Vite production build with static hosting support.
-- **Database** — Compatible with Supabase PostgreSQL, with connection
-  pooling tuned for free-tier limits (2-5 connections).
+---
 
 ## Documentation
 
-| Document | Description |
-|---------|-------------|
-| [docs/SETUP.md](docs/SETUP.md) | Installation and configuration guide |
-| [docs/API.md](docs/API.md) | Complete API endpoint reference |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and architecture |
-| [docs/DATABASE.md](docs/DATABASE.md) | Database schema and ERD |
+All documentation lives in `docs/`. Start with the index:
+
+| Document | What it covers |
+|----------|----------------|
+| [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) | Full doc index + quick API reference |
+| [docs/PROJECT_ARCHITECTURE.md](docs/PROJECT_ARCHITECTURE.md) | System design, data flows, module responsibilities |
+| [docs/BACKEND_FILE_REFERENCE.md](docs/BACKEND_FILE_REFERENCE.md) | Every backend Python file and its functions |
+| [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) | All 12 tables, relationships, indexes |
+| [docs/API_DOCS.md](docs/API_DOCS.md) | Complete REST API reference with examples |
+| [docs/ASSESSMENT_SYSTEM_GUIDE.md](docs/ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, coding, psychometric tests |
+| [docs/PROCTOR_GUIDE.md](docs/PROCTOR_GUIDE.md) | WebRTC proctoring, face detection, violations |
+| [docs/ADMIN_DASHBOARD_GUIDE.md](docs/ADMIN_DASHBOARD_GUIDE.md) | Admin panel, user/job management |
+| [docs/FRONTEND_GUIDE.md](docs/FRONTEND_GUIDE.md) | React pages, components, routing |
+| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Railway / Render / Vercel deployment |
+| [docs/ENVIRONMENT_CONFIG.md](docs/ENVIRONMENT_CONFIG.md) | All environment variables |
+
+---
+
+## Current Development Status
+
+### What's Working (on `main`)
+- Full candidate application flow
+- AI resume analysis and job matching
+- Assessment engine (MCQ, coding, psychometric)
+- Live proctoring with WebRTC
+- Role-based access for all 5 roles
+- Email automation (Resend + SMTP fallback)
+- Admin dashboard with analytics
+
+### Active Refactoring (on `dev`)
+The codebase is being restructured to make it maintainable long-term.
+See the [refactoring plan](#refactoring-plan) below.
+
+---
+
+## Refactoring Plan
+
+The project has several large files that are hard to maintain. We are splitting them into focused modules, one phase at a time. All changes go to `dev` branch first.
+
+### Phase 1 — Backend DB split (done)
+
+`backend/db_helpers.py` was 1,820 lines containing every database query for every domain. It has been split into:
+
+| Module | Responsibility |
+|--------|---------------|
+| `backend/user_db.py` | User auth queries |
+| `backend/candidate_db.py` | Candidate CRUD |
+| `backend/assessment_db.py` | Assessments, responses, scoring, scheduling, token access |
+| `backend/proctoring_db.py` | Violation recording and event logging |
+| `backend/email_db.py` | Email log reads/writes |
+
+`db_helpers.py` is now a thin re-export hub — all existing imports in other files continue to work unchanged.
+
+### Phase 2 — Backend route split (upcoming)
+
+| File | Lines | Plan |
+|------|-------|------|
+| `admin_routes.py` | 1,815 | Split into `routes/admin_users.py`, `routes/admin_jobs.py`, `routes/admin_analytics.py` |
+| `interviewee_routes.py` | 1,217 | Split by assessment section |
+| `app.py` | 1,081 | Extract resume endpoints into their own blueprint |
+
+### Phase 3 — Frontend component split (upcoming)
+
+| File | Lines | Plan |
+|------|-------|------|
+| `AdminDashboardPage.jsx` | 2,602 | Extract 6 tab-level sub-components |
+| `AssessmentPage.jsx` | 1,654 | Extract `MCQSection`, `CodingSection`, `PsychometricSection` |
+| `InterviewerDashboardPage.jsx` | 1,025 | Extract modal and list components |
+
+### Phase 4 — Tests and CI (upcoming)
+
+- Backend: `pytest` fixtures for every route file
+- Frontend: Vitest for critical components
+- GitHub Actions: lint → test → build pipeline
+
+---
+
+## Branch Strategy
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Production-stable code only |
+| `dev` | Integration branch — all features and refactoring go here first |
+
+PRs from `dev` → `main` are reviewed before merging.
+
+---
 
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE) for details.

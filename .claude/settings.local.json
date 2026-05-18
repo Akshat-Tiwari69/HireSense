@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sort -k5 -rh)",
+      "Bash(xargs wc *)",
+      "Bash(grep -E \"[0-9]{4,}\")",
+      "Bash(python -c \"import db_helpers; print\\('db_helpers imports OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(git stash *)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)",
+      "Bash(git commit -m ' *)",
+      "Bash(find docs *)",
+      "Bash(ls docs/)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git push *)",
+      "Bash(git merge *)",
+      "Bash(xargs -I{} basename {})",
+      "Bash(python -c \"import db_helpers; print\\('db_helpers OK'\\)\")",
+      "Bash(python -c \"import user_db, candidate_db, assessment_db, proctoring_db, email_db; print\\('all domain modules OK'\\)\")",
+      "Bash(echo \"exit:$?\")"
+    ]
+  }
+}

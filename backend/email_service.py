@@ -1,6 +1,6 @@
 """
 Email Notification Service
-Handles all email communications for the HireSense system
+Handles all email communications for the CYGNUSA Elite-Hire system
 Supports Resend API (recommended for cloud) and SMTP fallback
 """
 
@@ -66,9 +66,9 @@ class EmailService:
         # Configure Resend if available
         if self.resend_api_key and RESEND_AVAILABLE:
             resend.api_key = self.resend_api_key
-            print(f"[EMAIL]  Resend API configured (from: {self.resend_from_email})", flush=True)
+            print(f"[EMAIL] ✅ Resend API configured (from: {self.resend_from_email})", flush=True)
         elif not self.smtp_user or not self.smtp_pass:
-            print("[EMAIL]  No email service configured (set RESEND_API_KEY or SMTP_USER/SMTP_PASS)", flush=True)
+            print("[EMAIL] ⚠️ No email service configured (set RESEND_API_KEY or SMTP_USER/SMTP_PASS)", flush=True)
     
     def _send_via_resend(
         self,
@@ -90,7 +90,7 @@ class EmailService:
             }
             
             response = resend.Emails.send(params)
-            print(f"[EMAIL]  Resend success! ID: {response.get('id', 'unknown')}", flush=True)
+            print(f"[EMAIL] ✅ Resend success! ID: {response.get('id', 'unknown')}", flush=True)
             
             log_email(
                 recipient_email=recipient_email,
@@ -103,7 +103,7 @@ class EmailService:
             return True
             
         except Exception as e:
-            print(f"[EMAIL]  Resend failed: {e}", flush=True)
+            print(f"[EMAIL] ❌ Resend failed: {e}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', str(e))
             return False
     
@@ -132,15 +132,30 @@ class EmailService:
         """
         print(f"[EMAIL] Starting send: {email_type} to {recipient_email}", flush=True)
         
-        # Try Resend API first (works on cloud platforms like Render)
+        # Try Gmail/SMTP FIRST (primary method)
+        if self.smtp_user and self.smtp_pass:
+            smtp_success = self._send_via_smtp(recipient_email, recipient_name, subject, html_body, text_body, email_type)
+            if smtp_success:
+                return True
+            print(f"[EMAIL] SMTP failed, trying Resend fallback...", flush=True)
+        
+        # Fall back to Resend API
         if self.resend_api_key and RESEND_AVAILABLE:
             return self._send_via_resend(recipient_email, recipient_name, subject, html_body, email_type)
         
-        # Fall back to SMTP
-        if not self.smtp_user or not self.smtp_pass:
-            print(f"[EMAIL]  No email service configured, skipping email to {recipient_email}", flush=True)
-            return False
-        
+        print(f"[EMAIL] ⚠️ No email service configured, skipping email to {recipient_email}", flush=True)
+        return False
+    
+    def _send_via_smtp(
+        self,
+        recipient_email: str,
+        recipient_name: str,
+        subject: str,
+        html_body: str,
+        text_body: Optional[str],
+        email_type: str
+    ) -> bool:
+        """Send email via SMTP (Gmail)"""
         try:
             print(f"[EMAIL] SMTP config: {self.smtp_host}:{self.smtp_port}", flush=True)
             
@@ -159,7 +174,7 @@ class EmailService:
             html_part = MIMEText(html_body, 'html')
             message.attach(html_part)
             
-            print("[EMAIL] Connecting to SMTP...", flush=True)
+            print(f"[EMAIL] Connecting to SMTP...", flush=True)
             
             # Connect to SMTP server and send (with 10 second timeout)
             try:
@@ -177,7 +192,7 @@ class EmailService:
                     server.send_message(message)
                     print("[EMAIL] SSL send succeeded!", flush=True)
             
-            print(f"[EMAIL]  Email sent successfully to {recipient_email}!", flush=True)
+            print(f"[EMAIL] ✅ Email sent successfully to {recipient_email}!", flush=True)
             
             log_email(
                 recipient_email=recipient_email,
@@ -191,20 +206,20 @@ class EmailService:
             
         except smtplib.SMTPAuthenticationError as e:
             error_msg = f"SMTP authentication failed: {str(e)}"
-            print(f"[EMAIL]  {error_msg}", flush=True)
+            print(f"[EMAIL] ❌ {error_msg}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except smtplib.SMTPException as e:
             error_msg = f"SMTP error: {str(e)}"
-            print(f"[EMAIL]  {error_msg}", flush=True)
+            print(f"[EMAIL] ❌ {error_msg}", flush=True)
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
             
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            print(f"[EMAIL]  {error_msg}", flush=True)
-            logger.exception(f" {error_msg}")
+            print(f"[EMAIL] ❌ {error_msg}", flush=True)
+            logger.exception(f"❌ {error_msg}")
             log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
             return False
     
@@ -225,7 +240,7 @@ class EmailService:
         Returns:
             bool: True if sent successfully
         """
-        subject = "Application Status - HireSense"
+        subject = "Application Status - CYGNUSA Elite-Hire"
         
         # HTML email template
         html_body = f"""
@@ -252,7 +267,7 @@ class EmailService:
 <body>
     <div class="container">
         <div class="header">
-            <h1>HireSense</h1>
+            <h1>CYGNUSA Elite-Hire</h1>
         </div>
         <div class="content">
             <h2>Dear {candidate_name},</h2>
@@ -268,11 +283,11 @@ class EmailService:
             <p>We wish you the best in your job search and future career endeavors.</p>
             
             <p>Best regards,<br>
-            <strong>HireSense Team</strong></p>
+            <strong>CYGNUSA Elite-Hire Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 HireSense. All rights reserved.</p>
+            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -287,18 +302,18 @@ Thank you for your interest in joining our team and for taking the time to submi
 
 After careful review of your qualifications, we regret to inform you that we will not be moving forward with your application at this time.
 
-{f'Feedback: {reason}' if reason else ''}
+{'Feedback: ' + reason if reason else ''}
 
 We appreciate the effort you put into your application. We encourage you to apply for future opportunities that match your skills and experience.
 
 We wish you the best in your job search and future career endeavors.
 
 Best regards,
-HireSense Team
+CYGNUSA Elite-Hire Team
 
 ---
 This is an automated message. Please do not reply to this email.
-© 2026 HireSense. All rights reserved.
+© 2026 CYGNUSA Elite-Hire. All rights reserved.
 """
         
         return self._send_email(
@@ -333,7 +348,7 @@ This is an automated message. Please do not reply to this email.
         Returns:
             bool: True if sent successfully
         """
-        subject = "Assessment Invitation - HireSense"
+        subject = "Assessment Invitation - CYGNUSA Elite-Hire"
         
         # HTML email template
         html_body = f"""
@@ -363,7 +378,7 @@ This is an automated message. Please do not reply to this email.
 <body>
     <div class="container">
         <div class="header">
-            <h1> Congratulations!</h1>
+            <h1>🎉 Congratulations!</h1>
         </div>
         <div class="content">
             <h2>Dear {candidate_name},</h2>
@@ -371,9 +386,9 @@ This is an automated message. Please do not reply to this email.
             <p>Great news! After reviewing your application, we are pleased to invite you to take our technical assessment.</p>
             
             <div class="highlight">
-                <p><strong> Scheduled Time:</strong> {scheduled_time}</p>
+                <p><strong>📅 Scheduled Time:</strong> {scheduled_time}</p>
                 <p><strong>⏰ Assessment Window:</strong> ±30 minutes from scheduled time</p>
-                <p><strong>⏱ Duration:</strong> Approximately 60-90 minutes</p>
+                <p><strong>⏱️ Duration:</strong> Approximately 60-90 minutes</p>
             </div>
             
             <div class="instructions">
@@ -406,11 +421,11 @@ This is an automated message. Please do not reply to this email.
             <p>Good luck! We're excited to see your skills in action.</p>
             
             <p>Best regards,<br>
-            <strong>HireSense Team</strong></p>
+            <strong>CYGNUSA Elite-Hire Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 HireSense. All rights reserved.</p>
+            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -419,24 +434,24 @@ This is an automated message. Please do not reply to this email.
         
         # Plain text version
         text_body = f"""
- Congratulations!
+🎉 Congratulations!
 
 Dear {candidate_name},
 
 Great news! After reviewing your application, we are pleased to invite you to take our technical assessment.
 
- Scheduled Time: {scheduled_time}
+📅 Scheduled Time: {scheduled_time}
 ⏰ Assessment Window: ±30 minutes from scheduled time
-⏱ Duration: Approximately 60-90 minutes
+⏱️ Duration: Approximately 60-90 minutes
 
 Assessment Components:
 - Multiple Choice Questions: 10 technical questions
 - Coding Challenge: 1 programming problem
 - Psychometric Assessment: 3 scenario-based questions
 
-{f'Contact Person: {interviewer_name}' if interviewer_name else ''}
+{'Contact Person: ' + interviewer_name if interviewer_name else ''}
 
-{additional_info or ''}
+{additional_info if additional_info else ''}
 
 Important: Please ensure you:
 - Have a stable internet connection
@@ -451,11 +466,11 @@ If you need to reschedule or have any questions, please contact us as soon as po
 Good luck! We're excited to see your skills in action.
 
 Best regards,
-HireSense Team
+CYGNUSA Elite-Hire Team
 
 ---
 This is an automated message. Please do not reply to this email.
-© 2026 HireSense. All rights reserved.
+© 2026 CYGNUSA Elite-Hire. All rights reserved.
 """
         
         return self._send_email(
@@ -492,7 +507,7 @@ This is an automated message. Please do not reply to this email.
         """
         is_hired = decision.lower() in ['hire', 'hired', 'selected']
         
-        subject = f"{'Congratulations' if is_hired else 'Assessment Results'} - HireSense"
+        subject = f"{'Congratulations' if is_hired else 'Assessment Results'} - CYGNUSA Elite-Hire"
         
         if is_hired:
             # Positive decision email
@@ -513,13 +528,13 @@ This is an automated message. Please do not reply to this email.
 <body>
     <div class="container">
         <div class="header">
-            <h1> Congratulations!</h1>
+            <h1>🎉 Congratulations!</h1>
         </div>
         <div class="content">
             <h2>Dear {candidate_name},</h2>
             
             <div class="success-box">
-                <h3>We are delighted to offer you a position with HireSense!</h3>
+                <h3>We are delighted to offer you a position with CYGNUSA!</h3>
             </div>
             
             <p>We were impressed by your performance in the assessment and believe you will be a valuable addition to our team.</p>
@@ -534,11 +549,11 @@ This is an automated message. Please do not reply to this email.
             <p>Welcome to the team! We look forward to working with you.</p>
             
             <p>Best regards,<br>
-            <strong>HireSense Team</strong></p>
+            <strong>CYGNUSA Elite-Hire Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 HireSense. All rights reserved.</p>
+            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -581,11 +596,11 @@ This is an automated message. Please do not reply to this email.
             <p>We wish you the best in your job search and future career endeavors.</p>
             
             <p>Best regards,<br>
-            <strong>HireSense Team</strong></p>
+            <strong>CYGNUSA Elite-Hire Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 HireSense. All rights reserved.</p>
+            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -595,25 +610,25 @@ This is an automated message. Please do not reply to this email.
         # Plain text version
         if is_hired:
             text_body = f"""
- Congratulations!
+🎉 Congratulations!
 
 Dear {candidate_name},
 
-We are delighted to offer you a position with HireSense!
+We are delighted to offer you a position with CYGNUSA!
 
 We were impressed by your performance in the assessment and believe you will be a valuable addition to our team.
 
-{f'Assessment Feedback: {rationale}' if rationale else ''}
+{'Assessment Feedback: ' + rationale if rationale else ''}
 
-{self._format_scores_text(scores) or ''}
+{self._format_scores_text(scores) if scores else ''}
 
 Next Steps:
-{next_steps or 'Our HR team will contact you within 2-3 business days with your offer letter and onboarding details.'}
+{next_steps if next_steps else 'Our HR team will contact you within 2-3 business days with your offer letter and onboarding details.'}
 
 Welcome to the team! We look forward to working with you.
 
 Best regards,
-HireSense Team
+CYGNUSA Elite-Hire Team
 """
         else:
             text_body = f"""
@@ -634,7 +649,7 @@ We encourage you to continue developing your skills and apply for future opportu
 We wish you the best in your job search and future career endeavors.
 
 Best regards,
-HireSense Team
+CYGNUSA Elite-Hire Team
 """
         
         return self._send_email(
@@ -651,35 +666,33 @@ HireSense Team
         if not scores:
             return ""
         
-        # Use list and join() instead of += concatenation (10-100x faster for multiple strings)
-        score_items = ['<div class="scores"><h4>Your Assessment Scores:</h4><ul>']
+        html = '<div class="scores"><h4>Your Assessment Scores:</h4><ul>'
         
         if 'technical' in scores:
-            score_items.append(f'<li><strong>Technical Score:</strong> {scores["technical"]}%</li>')
+            html += f'<li><strong>Technical Score:</strong> {scores["technical"]}%</li>'
         if 'psychometric' in scores:
-            score_items.append(f'<li><strong>Psychometric Score:</strong> {scores["psychometric"]}%</li>')
+            html += f'<li><strong>Psychometric Score:</strong> {scores["psychometric"]}%</li>'
         if 'overall' in scores:
-            score_items.append(f'<li><strong>Overall Score:</strong> {scores["overall"]}%</li>')
+            html += f'<li><strong>Overall Score:</strong> {scores["overall"]}%</li>'
         
-        score_items.append('</ul></div>')
-        return ''.join(score_items)
+        html += '</ul></div>'
+        return html
     
     def _format_scores_text(self, scores: Dict) -> str:
         """Format scores dictionary as plain text"""
         if not scores:
             return ""
         
-        # Use list and join() instead of += concatenation (10-100x faster)
-        text_items = ["Your Assessment Scores:"]
+        text = "Your Assessment Scores:\n"
         
         if 'technical' in scores:
-            text_items.append(f"- Technical Score: {scores['technical']}%")
+            text += f"- Technical Score: {scores['technical']}%\n"
         if 'psychometric' in scores:
-            text_items.append(f"- Psychometric Score: {scores['psychometric']}%")
+            text += f"- Psychometric Score: {scores['psychometric']}%\n"
         if 'overall' in scores:
-            text_items.append(f"- Overall Score: {scores['overall']}%")
+            text += f"- Overall Score: {scores['overall']}%\n"
         
-        return "\n".join(text_items) + "\n"
+        return text
 
 
 # Convenience functions for easy import
@@ -743,7 +756,7 @@ def test_email_service():
     print(f"  Pass: {'*' * 8 if service.smtp_pass else 'NOT SET'}")
     
     if not service.smtp_user or not service.smtp_pass:
-        print("\n  SMTP credentials not configured!")
+        print("\n⚠️  SMTP credentials not configured!")
         print("Set environment variables:")
         print("  SMTP_USER=your-email@gmail.com")
         print("  SMTP_PASS=your-app-password")
@@ -752,7 +765,7 @@ def test_email_service():
     test_email = input("\nEnter test email address (or press Enter to skip): ").strip()
     
     if not test_email:
-        print("\n Configuration check passed. Skipping actual email send.")
+        print("\n✅ Configuration check passed. Skipping actual email send.")
         return
     
     print(f"\nSending test emails to {test_email}...")
@@ -764,7 +777,7 @@ def test_email_service():
         candidate_name="Test Candidate",
         reason="Thank you for your application. After review, we found other candidates with more experience in our required tech stack."
     )
-    print(f"   Result: {' Sent' if result1 else ' Failed'}")
+    print(f"   Result: {'✅ Sent' if result1 else '❌ Failed'}")
     
     # Test 2: Assessment invitation
     print("\n2. Testing assessment invitation...")
@@ -775,7 +788,7 @@ def test_email_service():
         scheduled_time="January 25, 2026 at 10:00 AM EST",
         interviewer_name="Jane Doe"
     )
-    print(f"   Result: {' Sent' if result2 else ' Failed'}")
+    print(f"   Result: {'✅ Sent' if result2 else '❌ Failed'}")
     
     # Test 3: Final decision (hired)
     print("\n3. Testing final decision email (hired)...")
@@ -786,7 +799,7 @@ def test_email_service():
         rationale="Excellent performance across all assessment areas.",
         scores={"technical": 85, "psychometric": 90, "overall": 87}
     )
-    print(f"   Result: {' Sent' if result3 else ' Failed'}")
+    print(f"   Result: {'✅ Sent' if result3 else '❌ Failed'}")
     
     print("\n" + "=" * 60)
     print("Email service test completed!")

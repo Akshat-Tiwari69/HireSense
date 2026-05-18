@@ -28,6 +28,10 @@ function App() {
             <Route path="/proctor" element={<ProctorDashboardPage />} />
             <Route path="/assessment" element={<AssessmentPage />} />
             <Route path="/assessment/:token" element={<AssessmentPage />} />
+            {/* Alias routes added in dev for direct navigation */}
+            <Route path="/admin-dashboard" element={<AdminDashboardPage />} />
+            <Route path="/interviewer-dashboard" element={<InterviewerDashboardPage />} />
+            <Route path="/proctor-dashboard" element={<ProctorDashboardPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Router>

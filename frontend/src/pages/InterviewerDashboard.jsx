@@ -1,0 +1,1063 @@
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AlertCircle, Plus, Search, Wand2, BarChart3, Clock, CheckCircle, Users, LogOut, Eye } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useToast } from '@/hooks/use-toast';
+import { api } from '@/services/api';
+
+const InterviewerDashboard = () => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState('my-jobs');
+  const [jobs, setJobs] = useState([]);
+  const [activeAssessments, setActiveAssessments] = useState([]);
+  const [jobAnalytics, setJobAnalytics] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [showJobModal, setShowJobModal] = useState(false);
+  const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
+  const [candidates, setCandidates] = useState([]);
+  const [completedAssessments, setCompletedAssessments] = useState([]);
+  const [newJob, setNewJob] = useState({
+    title: '',
+    description: '',
+    required_skills: [],
+    min_experience: 0,
+    department: '',
+    location: ''
+  });
+  const [preferences, setPreferences] = useState({
+    default_assessment_template_id: null,
+    email_notifications: true,
+    assessment_time_window_minutes: 30
+  });
+  const [savingPreferences, setSavingPreferences] = useState(false);
+
+  // Schedule modal state
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [scheduleForm, setScheduleForm] = useState({
+    scheduled_date: '',
+    scheduled_time: '',
+    proctoring_enabled: true,
+    additional_info: ''
+  });
+
+  useEffect(() => {
+    if (activeTab === 'my-jobs') fetchJobs();
+    if (activeTab === 'active') fetchActiveAssessments();
+    if (activeTab === 'candidates') fetchCandidates();
+    if (activeTab === 'results') fetchResults();
+    if (activeTab === 'settings') fetchPreferences();
+  }, [activeTab]);
+
+  const fetchPreferences = async () => {
+    try {
+      const response = await api.get('/api/interviewer/preferences');
+      if (response.data) {
+        setPreferences(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching preferences:', error);
+    }
+  };
+
+  const handleSavePreferences = async () => {
+    setSavingPreferences(true);
+    try {
+      await api.post('/api/interviewer/preferences', preferences);
+      toast({ title: 'Success', description: 'Preferences saved successfully' });
+    } catch (error) {
+      console.error('Error saving preferences:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to save preferences' });
+    }
+    setSavingPreferences(false);
+  };
+
+  const fetchJobs = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/interviewer/my-jobs');
+      setJobs(response.data);
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+    }
+    setLoading(false);
+  };
+
+  const fetchActiveAssessments = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/interviewer/active-assessments');
+      setActiveAssessments(response.data);
+    } catch (error) {
+      console.error('Error fetching assessments:', error);
+    }
+    setLoading(false);
+  };
+
+  const fetchCandidates = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/interviewer/candidates');
+      setCandidates(response.data);
+    } catch (error) {
+      console.error('Error fetching candidates:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to fetch candidates' });
+    }
+    setLoading(false);
+  };
+
+  const fetchResults = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/interviewer/completed-assessments');
+      setCompletedAssessments(response.data);
+    } catch (error) {
+      console.error('Error fetching results:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to fetch assessment results' });
+    }
+    setLoading(false);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('userRole');
+    navigate('/login');
+  };
+
+  const createJob = async () => {
+    try {
+      setLoading(true);
+      await api.post('/api/interviewer/jobs', newJob);
+      toast({ title: 'Success', description: 'Job created successfully!' });
+      setShowJobModal(false);
+      setNewJob({
+        title: '',
+        description: '',
+        required_skills: [],
+        min_experience: 0,
+        department: '',
+        location: ''
+      });
+      fetchJobs();
+    } catch (error) {
+      console.error('Error creating job:', error);
+      toast({ variant: 'destructive', title: 'Error', description: error?.response?.data?.error || 'Failed to create job' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const refineJobWithAI = async (jobId) => {
+    try {
+      setLoading(true);
+      toast({ title: 'AI Processing...', description: 'Refining job description with AI' });
+      const response = await api.post(`/api/interviewer/jobs/${jobId}/ai-refine`, {});
+      toast({ title: 'Success!', description: 'Job refined with AI. Click "View Details" to see improvements.' });
+      fetchJobs();
+    } catch (error) {
+      console.error('Error refining job:', error);
+      toast({ variant: 'destructive', title: 'Error', description: error?.response?.data?.error || 'Failed to refine job' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const viewJobAnalytics = async (jobId) => {
+    try {
+      const response = await api.get(`/api/interviewer/jobs/${jobId}/analytics`);
+      setJobAnalytics(response.data);
+      setActiveTab('analytics');
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
+    }
+  };
+
+  return (
+    <div className="space-y-6 p-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Interviewer Dashboard</h1>
+        <div className="flex items-center gap-4">
+          <Badge variant="outline">Job Management & Assessment Control</Badge>
+          <Button variant="destructive" onClick={handleLogout} className="gap-2">
+            <LogOut className="w-4 h-4" />
+            Logout
+          </Button>
+        </div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-6">
+          <TabsTrigger value="my-jobs">My Job Postings</TabsTrigger>
+          <TabsTrigger value="candidates">Candidates</TabsTrigger>
+          <TabsTrigger value="active">Active Assessments</TabsTrigger>
+          <TabsTrigger value="results">Assessment Results</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+        </TabsList>
+
+        {/* MY JOB POSTINGS TAB */}
+        <TabsContent value="my-jobs" className="space-y-4">
+          <div className="flex gap-2 mb-4">
+            <Button onClick={() => setShowJobModal(true)} className="gap-2">
+              <Plus className="w-4 h-4" /> Create New Job
+            </Button>
+          </div>
+
+          {showJobModal && (
+            <Card className="border-blue-500">
+              <CardHeader>
+                <CardTitle>Create New Job Posting</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold">Job Title *</label>
+                  <Input
+                    placeholder="e.g., Senior Software Engineer"
+                    value={newJob.title}
+                    onChange={(e) => setNewJob({ ...newJob, title: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold">Description *</label>
+                  <textarea
+                    className="w-full border rounded p-2 h-24"
+                    placeholder="Job description..."
+                    value={newJob.description}
+                    onChange={(e) => setNewJob({ ...newJob, description: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold">Department</label>
+                    <Input
+                      value={newJob.department}
+                      onChange={(e) => setNewJob({ ...newJob, department: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold">Location</label>
+                    <Input
+                      value={newJob.location}
+                      onChange={(e) => setNewJob({ ...newJob, location: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold">Min Experience (years)</label>
+                    <Input
+                      type="number"
+                      value={newJob.min_experience}
+                      onChange={(e) => setNewJob({ ...newJob, min_experience: parseInt(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold">Required Skills</label>
+                    <Input
+                      placeholder="Python, JavaScript, React..."
+                      onChange={(e) => setNewJob({
+                        ...newJob,
+                        required_skills: e.target.value.split(',').map(s => s.trim())
+                      })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={createJob}>Create Job</Button>
+                  <Button variant="outline" onClick={() => setShowJobModal(false)}>Cancel</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="grid gap-4">
+            {jobs.map((job) => (
+              <Card key={job.id} className="hover:shadow-lg transition-shadow">
+                <CardHeader>
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <CardTitle>{job.title}</CardTitle>
+                      <p className="text-sm text-gray-600">{job.department} • {job.location}</p>
+                    </div>
+                    <Badge variant={job.role_complexity_level === 'senior' ? 'destructive' : 'secondary'}>
+                      {job.role_complexity_level || 'standard'}
+                    </Badge>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  <p className="text-sm">{job.description?.substring(0, 150)}...</p>
+
+                  {job.skill_taxonomy && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-600 mb-2">Skills:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {job.skill_taxonomy?.slice(0, 5).map((skill) => (
+                          <Badge key={skill} variant="secondary" className="text-xs">{skill}</Badge>
+                        ))}
+                        {job.skill_taxonomy?.length > 5 && (
+                          <Badge variant="outline" className="text-xs">+{job.skill_taxonomy.length - 5}</Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {job.analytics && (
+                    <div className="grid grid-cols-3 gap-2 bg-blue-50 p-3 rounded">
+                      <div>
+                        <p className="text-xs text-gray-600">Assessments</p>
+                        <p className="font-bold">{job.analytics.total_assessments || 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600">Completed</p>
+                        <p className="font-bold">{job.analytics.completed_assessments || 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600">Hired</p>
+                        <p className="font-bold text-green-600">{job.analytics.hired_count || 0}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 flex-wrap">
+                    <Button variant="outline" size="sm" onClick={() => { setSelectedJob(job); setShowJobDetailsModal(true); }}>
+                      <Eye className="w-4 h-4 mr-1" /> View Details
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => refineJobWithAI(job.id)} disabled={loading}>
+                      <Wand2 className="w-4 h-4 mr-1" /> AI Refine
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => viewJobAnalytics(job.id)}>
+                      <BarChart3 className="w-4 h-4 mr-1" /> Analytics
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        {/* CANDIDATES TAB */}
+        <TabsContent value="candidates" className="space-y-4">
+          <div className="grid gap-4">
+            {candidates.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-center text-gray-500">No candidates yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              candidates.map((candidate) => {
+                const matchScore = candidate.parsed_data?.match_score || 0;
+                const matchLevel = matchScore >= 80 ? 'high' : matchScore >= 60 ? 'medium' : 'low';
+                const matchColor = matchLevel === 'high' ? 'bg-green-100 text-green-800' :
+                  matchLevel === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-red-100 text-red-800';
+
+                return (
+                  <Card key={candidate.id}>
+                    <CardHeader>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <CardTitle className="text-base">{candidate.name}</CardTitle>
+                          <p className="text-sm text-gray-600">{candidate.email}</p>
+                          {candidate.job_title && (
+                            <p className="text-sm text-blue-600 mt-1">Applied for: {candidate.job_title}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 items-start">
+                          <Badge className={matchColor}>
+                            {matchScore}% Match
+                          </Badge>
+                          <Badge variant={candidate.status === 'pending' ? 'secondary' : 'default'}>
+                            {candidate.status || 'pending'}
+                          </Badge>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {candidate.parsed_data && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Strengths</p>
+                            <ul className="text-sm text-gray-600 list-disc list-inside">
+                              {candidate.parsed_data.pros?.slice(0, 3).map((pro, idx) => (
+                                <li key={idx}>{pro}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Areas to Explore</p>
+                            <ul className="text-sm text-gray-600 list-disc list-inside">
+                              {candidate.parsed_data.cons?.slice(0, 3).map((con, idx) => (
+                                <li key={idx}>{con}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 pt-2 border-t">
+                        {candidate.resume_path && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const apiBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || window.location.origin;
+                              window.open(`${apiBase}${candidate.resume_path}`, '_blank');
+                            }}
+                          >
+                            View Resume
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              const response = await api.get(`/api/interviewer/candidates/${candidate.id}`);
+                              toast({
+                                title: "Candidate Details",
+                                description: `Full details: ${JSON.stringify(response.data, null, 2)}`
+                              });
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: "Failed to load candidate details",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          View Details
+                        </Button>
+                        {['pending', 'Applied', 'applied'].includes(candidate.status) && (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setSelectedCandidate(candidate);
+                                // Default to 7 days from now
+                                const defaultDate = new Date();
+                                defaultDate.setDate(defaultDate.getDate() + 7);
+                                setScheduleForm({
+                                  scheduled_date: defaultDate.toISOString().split('T')[0],
+                                  scheduled_time: '10:00',
+                                  proctoring_enabled: true,
+                                  additional_info: 'Please complete the assessment within the scheduled time window.'
+                                });
+                                setShowScheduleModal(true);
+                              }}
+                            >
+                              Schedule Interview
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={async () => {
+                                if (!confirm(`Are you sure you want to reject ${candidate.name}?`)) return;
+
+                                try {
+                                  const response = await api.post(`/api/interviewer/candidates/${candidate.id}/reject`, {
+                                    reason: 'After careful review, we have decided to move forward with other candidates.'
+                                  });
+
+                                  toast({
+                                    title: "Success",
+                                    description: `${candidate.name} rejected. ${response.data.email_sent ? 'Notification email sent!' : 'Email pending.'}`
+                                  });
+                                  fetchCandidates();
+                                } catch (err) {
+                                  console.error('Reject error:', err);
+                                  toast({
+                                    title: "Error",
+                                    description: err?.response?.data?.error || "Failed to reject candidate",
+                                    variant: "destructive"
+                                  });
+                                }
+                              }}
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        </TabsContent>
+
+        {/* ACTIVE ASSESSMENTS TAB */}
+        <TabsContent value="active" className="space-y-4">
+          <div className="grid gap-4">
+            {activeAssessments.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-center text-gray-500">No active assessments</p>
+                </CardContent>
+              </Card>
+            ) : (
+              activeAssessments.map((assessment) => (
+                <Card key={assessment.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-base">{assessment.candidate_name}</CardTitle>
+                        <p className="text-sm text-gray-600">{assessment.job_title}</p>
+                      </div>
+                      <Badge variant="destructive" className="animate-pulse">In Progress</Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-600">Started</p>
+                        <p className="font-semibold">{new Date(assessment.started_at).toLocaleTimeString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Violations</p>
+                        <p className={`font-semibold ${assessment.proctoring_violations > 2 ? 'text-red-600' : ''}`}>
+                          {assessment.proctoring_violations}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Time Elapsed</p>
+                        <p className="font-semibold">
+                          {Math.round((Date.now() - new Date(assessment.started_at)) / 60000)} min
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        {/* RESULTS TAB */}
+        <TabsContent value="results" className="space-y-4">
+          <div className="grid gap-4">
+            {completedAssessments.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-center text-gray-500">No completed assessments yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              completedAssessments.map((assessment) => (
+                <Card key={assessment.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-base">{assessment.candidate_name}</CardTitle>
+                        <p className="text-sm text-gray-600">{assessment.job_title || 'General Assessment'}</p>
+                        <p className="text-xs text-gray-500">
+                          Completed: {new Date(assessment.completed_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Badge variant={assessment.decision === 'hire' ? 'default' : assessment.decision === 'rejected' ? 'destructive' : 'secondary'}>
+                        {assessment.decision || 'Pending Decision'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="text-center p-3 bg-blue-50 rounded">
+                        <p className="text-xs text-gray-600">Technical</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.technical_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-purple-50 rounded">
+                        <p className="text-xs text-gray-600">Psychometric</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.psychometric_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-green-50 rounded">
+                        <p className="text-xs text-gray-600">Overall</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.overall_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-red-50 rounded">
+                        <p className="text-xs text-gray-600">Violations</p>
+                        <p className="text-xl font-bold text-red-600">{assessment.proctoring_violations || 0}</p>
+                      </div>
+                    </div>
+
+                    {assessment.hiring_recommendation && (
+                      <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
+                        <p className="text-sm font-semibold text-yellow-900">AI Recommendation:</p>
+                        <p className="text-sm text-gray-700">{assessment.hiring_recommendation}</p>
+                      </div>
+                    )}
+
+                    {assessment.rationale && (
+                      <div className="bg-gray-50 p-3 rounded">
+                        <p className="text-sm font-semibold text-gray-900">Decision Rationale:</p>
+                        <p className="text-sm text-gray-700">{assessment.rationale}</p>
+                      </div>
+                    )}
+
+                    {!assessment.decision && (
+                      <div className="flex gap-2 pt-2 border-t">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={async () => {
+                            const rationale = prompt('Enter hiring rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'hire',
+                                rationale: rationale || 'Strong performance in assessment',
+                                next_steps: 'HR will contact you for next steps'
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate marked for hire. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-1" /> Hire
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={async () => {
+                            const rationale = prompt('Enter rejection rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'no-hire',
+                                rationale: rationale || 'After careful review',
+                                next_steps: ''
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate rejected. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <AlertCircle className="w-4 h-4 mr-1" /> Reject
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        {/* RESULTS TAB */}
+        <TabsContent value="results" className="space-y-4">
+          <div className="grid gap-4">
+            {completedAssessments.length === 0 ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-center text-gray-500">No completed assessments yet</p>
+                </CardContent>
+              </Card>
+            ) : (
+              completedAssessments.map((assessment) => (
+                <Card key={assessment.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-base">{assessment.candidate_name}</CardTitle>
+                        <p className="text-sm text-gray-600">{assessment.job_title || 'General Assessment'}</p>
+                        <p className="text-xs text-gray-500">
+                          Completed: {assessment.completed_at ? new Date(assessment.completed_at).toLocaleDateString() : 'Recently'}
+                        </p>
+                      </div>
+                      <Badge variant={assessment.decision === 'hire' ? 'default' : assessment.decision === 'rejected' ? 'destructive' : 'secondary'}>
+                        {assessment.decision || 'Pending Decision'}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="text-center p-3 bg-blue-50 rounded">
+                        <p className="text-xs text-gray-600">Technical</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.technical_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-purple-50 rounded">
+                        <p className="text-xs text-gray-600">Psychometric</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.psychometric_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-green-50 rounded">
+                        <p className="text-xs text-gray-600">Overall</p>
+                        <p className="text-xl font-bold">{Math.round(assessment.overall_score || 0)}%</p>
+                      </div>
+                      <div className="text-center p-3 bg-red-50 rounded">
+                        <p className="text-xs text-gray-600">Violations</p>
+                        <p className="text-xl font-bold text-red-600">{assessment.proctoring_violations || 0}</p>
+                      </div>
+                    </div>
+
+                    {assessment.hiring_recommendation && (
+                      <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
+                        <p className="text-sm font-semibold text-yellow-900">🤖 AI Recommendation:</p>
+                        <p className="text-sm text-gray-700">{assessment.hiring_recommendation}</p>
+                      </div>
+                    )}
+
+                    {assessment.rationale && (
+                      <div className="bg-gray-50 p-3 rounded">
+                        <p className="text-sm font-semibold text-gray-900">Decision Rationale:</p>
+                        <p className="text-sm text-gray-700">{assessment.rationale}</p>
+                      </div>
+                    )}
+
+                    {!assessment.decision && (
+                      <div className="flex gap-2 pt-2 border-t">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={async () => {
+                            const rationale = prompt('Enter hiring rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'hire',
+                                rationale: rationale || 'Strong performance in assessment',
+                                next_steps: 'HR will contact you for next steps'
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate marked for hire. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-1" /> Hire
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={async () => {
+                            const rationale = prompt('Enter rejection rationale (optional):');
+                            try {
+                              await api.post(`/api/interviewer/assessments/${assessment.id}/final-decision`, {
+                                decision: 'no-hire',
+                                rationale: rationale || 'After careful review',
+                                next_steps: ''
+                              });
+                              toast({
+                                title: "Success",
+                                description: "Candidate rejected. Notification email sent!"
+                              });
+                              fetchResults();
+                            } catch (err) {
+                              toast({
+                                title: "Error",
+                                description: err?.response?.data?.error || "Failed to update decision",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                        >
+                          <AlertCircle className="w-4 h-4 mr-1" /> Reject
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </TabsContent>
+
+        {/* ANALYTICS TAB */}
+        <TabsContent value="analytics" className="space-y-4">
+          {selectedJob ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Job Analytics: {selectedJob?.title}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50 p-4 rounded">
+                    <p className="text-sm text-gray-600">Total Candidates</p>
+                    <p className="text-2xl font-bold">{jobAnalytics.total_candidates_for_job || 0}</p>
+                  </div>
+                  <div className="bg-green-50 p-4 rounded">
+                    <p className="text-sm text-gray-600">Completed</p>
+                    <p className="text-2xl font-bold">{jobAnalytics.completed_assessments || 0}</p>
+                  </div>
+                  <div className="bg-purple-50 p-4 rounded">
+                    <p className="text-sm text-gray-600">Hired</p>
+                    <p className="text-2xl font-bold text-green-600">{jobAnalytics.hired || 0}</p>
+                  </div>
+                  <div className="bg-red-50 p-4 rounded">
+                    <p className="text-sm text-gray-600">Rejected</p>
+                    <p className="text-2xl font-bold text-red-600">{jobAnalytics.rejected || 0}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <p className="text-sm text-gray-600">Avg Technical Score</p>
+                      <p className="text-3xl font-bold">{Math.round(jobAnalytics.avg_technical_score || 0)}%</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <p className="text-sm text-gray-600">Avg Psychometric Score</p>
+                      <p className="text-3xl font-bold">{Math.round(jobAnalytics.avg_psychometric_score || 0)}%</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-center text-gray-500">Select a job to view analytics</p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* SETTINGS TAB */}
+        <TabsContent value="settings" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Your Preferences</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Default Assessment Template</label>
+                <select
+                  className="w-full border rounded p-2"
+                  value={preferences.default_assessment_template_id || ''}
+                  onChange={(e) => setPreferences({ ...preferences, default_assessment_template_id: e.target.value || null })}
+                >
+                  <option value="">None</option>
+                  <option value="SWE_Junior">SWE_Junior</option>
+                  <option value="SWE_Mid">SWE_Mid</option>
+                  <option value="SWE_Senior">SWE_Senior</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Assessment Time Window (minutes)</label>
+                <Input
+                  type="number"
+                  value={preferences.assessment_time_window_minutes}
+                  onChange={(e) => setPreferences({ ...preferences, assessment_time_window_minutes: parseInt(e.target.value) || 30 })}
+                />
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={preferences.email_notifications}
+                  onChange={(e) => setPreferences({ ...preferences, email_notifications: e.target.checked })}
+                />
+                <span className="text-sm">Email notifications for scheduled assessments</span>
+              </label>
+
+              <Button onClick={handleSavePreferences} disabled={savingPreferences}>
+                {savingPreferences ? 'Saving...' : 'Save Preferences'}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Job Details Modal */}
+      {showJobDetailsModal && selectedJob && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <CardHeader>
+              <div className="flex justify-between items-start">
+                <div>
+                  <CardTitle>{selectedJob.title}</CardTitle>
+                  <p className="text-sm text-gray-600">{selectedJob.department} • {selectedJob.location}</p>
+                </div>
+                <Button variant="ghost" onClick={() => setShowJobDetailsModal(false)}>✕</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <h3 className="font-semibold mb-2">Original Description</h3>
+                <p className="text-sm text-gray-700">{selectedJob.description}</p>
+              </div>
+
+              {selectedJob.ai_refined_description && (
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2 text-blue-900">✨ AI-Refined Description</h3>
+                  <p className="text-sm text-gray-700">{selectedJob.ai_refined_description}</p>
+                </div>
+              )}
+
+              {selectedJob.ideal_candidate_profile && (
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2 text-green-900">👤 Ideal Candidate Profile</h3>
+                  <p className="text-sm text-gray-700">{selectedJob.ideal_candidate_profile}</p>
+                </div>
+              )}
+
+              <div>
+                <h3 className="font-semibold mb-2">Required Skills</h3>
+                <div className="flex flex-wrap gap-2">
+                  {(selectedJob.required_skills || []).map((skill, idx) => (
+                    <Badge key={idx} variant="secondary">{skill}</Badge>
+                  ))}
+                </div>
+              </div>
+
+              {selectedJob.skill_taxonomy && selectedJob.skill_taxonomy.length > 0 && (
+                <div>
+                  <h3 className="font-semibold mb-2">🎯 AI-Enhanced Skill Taxonomy</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedJob.skill_taxonomy.map((skill, idx) => (
+                      <Badge key={idx} variant="outline" className="bg-purple-50">{skill}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-gray-600">Min Experience</p>
+                  <p className="text-lg">{selectedJob.min_experience} years</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-600">Complexity Level</p>
+                  <Badge>{selectedJob.role_complexity_level || 'standard'}</Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Schedule Assessment Modal */}
+      {showScheduleModal && selectedCandidate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="max-w-md w-full">
+            <CardHeader>
+              <div className="flex justify-between items-start">
+                <div>
+                  <CardTitle>Schedule Assessment</CardTitle>
+                  <p className="text-sm text-gray-600">For: {selectedCandidate.name}</p>
+                </div>
+                <Button variant="ghost" onClick={() => setShowScheduleModal(false)}>✕</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Date</label>
+                <Input
+                  type="date"
+                  value={scheduleForm.scheduled_date}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, scheduled_date: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Time</label>
+                <Input
+                  type="time"
+                  value={scheduleForm.scheduled_time}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, scheduled_time: e.target.value })}
+                />
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={scheduleForm.proctoring_enabled}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, proctoring_enabled: e.target.checked })}
+                />
+                <span className="text-sm">Enable proctoring (camera monitoring)</span>
+              </label>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold">Additional Instructions</label>
+                <textarea
+                  className="w-full border rounded-md p-2 min-h-[80px]"
+                  value={scheduleForm.additional_info}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, additional_info: e.target.value })}
+                  placeholder="Any additional instructions for the candidate..."
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button
+                  className="flex-1"
+                  onClick={async () => {
+                    try {
+                      const scheduled_time = new Date(`${scheduleForm.scheduled_date}T${scheduleForm.scheduled_time}`).toISOString();
+
+                      const response = await api.post(`/api/interviewer/candidates/${selectedCandidate.id}/schedule`, {
+                        scheduled_time: scheduled_time,
+                        job_id: selectedCandidate.matched_job_id || selectedCandidate.job_id,
+                        proctoring_enabled: scheduleForm.proctoring_enabled,
+                        additional_info: scheduleForm.additional_info
+                      });
+
+                      toast({
+                        title: "Success",
+                        description: `Assessment scheduled for ${selectedCandidate.name}. ${response.data.email_sent ? 'Invitation email sent!' : ''}`
+                      });
+                      setShowScheduleModal(false);
+                      setSelectedCandidate(null);
+                      fetchCandidates();
+                    } catch (err) {
+                      console.error('Schedule error:', err);
+                      toast({
+                        title: "Error",
+                        description: err?.response?.data?.error || "Failed to schedule assessment",
+                        variant: "destructive"
+                      });
+                    }
+                  }}
+                >
+                  Schedule Assessment
+                </Button>
+                <Button variant="outline" onClick={() => setShowScheduleModal(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default InterviewerDashboard;
