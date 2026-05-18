@@ -3,6 +3,11 @@
 This document describes the PostgreSQL database schema used by HireSense,
 including all tables, relationships, indexes, and migrations.
 
+> **Naming note:** The database table is called `job_descriptions` for historical reasons.
+> The API routes, UI, and documentation all refer to these records as **job postings**.
+> A future migration should rename the table to `job_postings` for consistency.
+> Until then, treat `job_descriptions` and "job postings" as the same concept.
+
 ## Entity-relationship diagram
 
 ```mermaid

@@ -38,6 +38,36 @@ logger = logging.getLogger(__name__)
 
 interviewee_session_bp = Blueprint('interviewee_session', __name__)
 
+ASSESSMENT_DURATION_SECONDS = 60 * 60  # 1 hour
+
+
+@interviewee_session_bp.route('/assessment/<int:assessment_id>/remaining-time', methods=['GET'])
+@connection_pool
+def get_remaining_time(assessment_id):
+    """
+    Return server-authoritative remaining time for an active assessment.
+    Calculated from started_at so the client cannot inflate it.
+    """
+    try:
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
+        if assessment.get('status') not in ('started', 'in_progress'):
+            return jsonify({'status': 'error', 'message': 'Assessment is not active'}), 400
+
+        elapsed = get_assessment_time_elapsed(assessment_id)
+        remaining = max(0, ASSESSMENT_DURATION_SECONDS - elapsed)
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'elapsed_seconds': elapsed,
+                'remaining_seconds': remaining,
+                'total_seconds': ASSESSMENT_DURATION_SECONDS,
+            }
+        }), 200
+    except Exception:
+        return jsonify({'status': 'error', 'message': 'Failed to fetch remaining time'}), 500
+
 
 @interviewee_session_bp.route('/my-assessment/<int:candidate_id>', methods=['GET'])
 @connection_pool
@@ -174,11 +204,11 @@ def verify_assessment_token(token):
             scheduled_dt = ist.localize(scheduled_dt)
         current_dt = datetime.now(ist)
         minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
-        can_start = abs(minutes_until) <= 30
+        # Allow starting from 30 min before to 30 min after scheduled time
+        can_start = -30 <= minutes_until <= 30
 
         return jsonify({'status': 'success', 'data': {
             'candidate_name': assessment['candidate_name'],
-            'candidate_email': assessment['candidate_email'],
             'scheduled_time': str(assessment['scheduled_time']),
             'minutes_until_start': minutes_until,
             'can_start': can_start,

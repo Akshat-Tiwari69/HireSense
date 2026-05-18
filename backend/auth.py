@@ -3,10 +3,12 @@ Authentication Module
 Handles user registration, login, and JWT token management
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
 from flask_jwt_extended import (
-    create_access_token, 
-    jwt_required, 
+    create_access_token,
+    set_access_cookies,
+    unset_jwt_cookies,
+    jwt_required,
     get_jwt_identity,
     get_jwt
 )
@@ -275,7 +277,7 @@ def login():
         logger.info(f"[SUCCESS] LOGIN SUCCESSFUL - User: {email}, Role: {user['role']}")
         logger.info("="*80)
         
-        return jsonify({
+        response = make_response(jsonify({
             'status': 'success',
             'message': 'Login successful',
             'data': {
@@ -288,14 +290,26 @@ def login():
                     'sector_id': user.get('sector_id')
                 }
             }
-        }), 200
-        
+        }), 200)
+        # Set HttpOnly cookie so the browser sends the token automatically.
+        # The token is also returned in the body so localStorage-based clients keep working.
+        set_access_cookies(response, access_token)
+        return response
+
     except Exception:
         logger.exception("[ERROR] Login failed")
         return jsonify({
             'status': 'error',
             'message': 'Login failed. Please try again later.'
         }), 500
+
+
+@auth_bp.route('/logout', methods=['POST'])
+def logout():
+    """Clear the JWT cookie so browser sessions are properly terminated."""
+    response = make_response(jsonify({'status': 'success', 'message': 'Logged out'}), 200)
+    unset_jwt_cookies(response)
+    return response
 
 
 @auth_bp.route('/me', methods=['GET'])

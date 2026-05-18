@@ -11,6 +11,7 @@ import AdminDashboardPage from "./pages/AdminDashboardPage";
 import ProctorDashboardPage from "./pages/ProctorDashboardPage";
 import JobListingsPage from "./pages/JobListingsPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import ProtectedRoute from "./components/ProtectedRoute";
 import { Toaster } from "./components/ui/sonner";
 
 function App() {
@@ -19,19 +20,22 @@ function App() {
       <div className="App">
         <Router>
           <Routes>
+            {/* Public routes */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/jobs" element={<JobListingsPage />} />
             <Route path="/apply" element={<ApplyPage />} />
-            <Route path="/dashboard" element={<InterviewerDashboardPage />} />
-            <Route path="/admin" element={<AdminDashboardPage />} />
-            <Route path="/proctor" element={<ProctorDashboardPage />} />
             <Route path="/assessment" element={<AssessmentPage />} />
             <Route path="/assessment/:token" element={<AssessmentPage />} />
-            {/* Alias routes added in dev for direct navigation */}
-            <Route path="/admin-dashboard" element={<AdminDashboardPage />} />
-            <Route path="/interviewer-dashboard" element={<InterviewerDashboardPage />} />
-            <Route path="/proctor-dashboard" element={<ProctorDashboardPage />} />
+
+            {/* Protected routes — require a valid auth token */}
+            <Route path="/dashboard" element={<ProtectedRoute element={<InterviewerDashboardPage />} requiredRole="interviewer" />} />
+            <Route path="/interviewer-dashboard" element={<ProtectedRoute element={<InterviewerDashboardPage />} requiredRole="interviewer" />} />
+            <Route path="/admin" element={<ProtectedRoute element={<AdminDashboardPage />} requiredRole="admin" />} />
+            <Route path="/admin-dashboard" element={<ProtectedRoute element={<AdminDashboardPage />} requiredRole="admin" />} />
+            <Route path="/proctor" element={<ProtectedRoute element={<ProctorDashboardPage />} requiredRole="proctor" />} />
+            <Route path="/proctor-dashboard" element={<ProtectedRoute element={<ProctorDashboardPage />} requiredRole="proctor" />} />
+
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Router>

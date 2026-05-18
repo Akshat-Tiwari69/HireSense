@@ -5,7 +5,9 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: false,
+  // Send cookies cross-origin so the HttpOnly JWT cookie is attached automatically.
+  // The backend must respond with the exact origin (not *) when credentials are included.
+  withCredentials: true,
 });
 
 // Attach token if available

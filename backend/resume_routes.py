@@ -44,6 +44,15 @@ def _name_from_email(email):
     return " ".join(p.capitalize() for p in parts) if parts else None
 
 
+def _delete_file(filepath):
+    """Silently delete a file — used for cleanup when request fails after upload."""
+    try:
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
+    except OSError:
+        pass
+
+
 def _get_job_description_for_id(job_id):
     try:
         import json as _json
@@ -111,10 +120,12 @@ def upload_resume():
 
     selected_job_id = request.form.get('job_id')
     if not selected_job_id:
+        _delete_file(filepath)
         return jsonify({"status": "error", "message": "Please select a job position to apply for."}), 400
 
     job_description, selected_job_info = _get_job_description_for_id(selected_job_id)
     if not job_description:
+        _delete_file(filepath)
         return jsonify({"status": "error",
                         "message": "The selected job position is no longer active."}), 400
 
@@ -182,6 +193,7 @@ def upload_resume():
     phone = manual_phone or parsed_data.get('phone') or ""
 
     if not email or not _is_valid_email(email):
+        _delete_file(filepath)
         return jsonify({"status": "error",
                         "message": "Could not detect a valid email in the resume. Please ensure your resume contains a valid email address."}), 400
 
@@ -239,6 +251,12 @@ def upload_resume():
                         return_connection(match_conn)
     except Exception as e:
         logger.exception(f"[ERROR] Error saving candidate: {e}")
+        _delete_file(filepath)
+        return jsonify({"status": "error", "message": "Failed to save application. Please try again."}), 500
+
+    if not candidate_id:
+        _delete_file(filepath)
+        return jsonify({"status": "error", "message": "Failed to save application. Please try again."}), 500
 
     relative_path = os.path.join(os.path.basename(upload_folder), unique_filename)
     response_data = {

@@ -15,8 +15,8 @@ import MCQSection from '../components/assessment/MCQSection';
 import CodingSection from '../components/assessment/CodingSection';
 import PsychometricSection from '../components/assessment/PsychometricSection';
 
-// Piston API for code execution (free, no API key needed)
-const PISTON_API = 'https://emkc.org/api/v2/piston';
+// Code execution is proxied through our backend to prevent direct external API calls
+const CODE_EXEC_URL = '/api/interviewee/run-code';
 
 const LANGUAGE_CONFIG = {
   javascript: { runtime: 'javascript', version: '18.15.0', extension: 'js' },
@@ -609,27 +609,21 @@ const AssessmentPage = () => {
         return;
       }
 
-      const response = await fetch(`${PISTON_API}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          language: langConfig.runtime,
-          version: langConfig.version,
-          files: [{
-            name: `main.${langConfig.extension}`,
-            content: code
-          }]
-        })
+      const response = await api.post(CODE_EXEC_URL, {
+        language: langConfig.runtime,
+        version: langConfig.version,
+        filename: `main.${langConfig.extension}`,
+        code,
       });
 
-      const result = await response.json();
+      const result = response.data?.data;
 
-      if (result.run) {
+      if (result?.run) {
         const stdout = result.run.stdout || '';
         const stderr = result.run.stderr || '';
         const output = stdout + (stderr ? `\nErrors:\n${stderr}` : '');
         setOutput(output || 'Code executed successfully (no output)');
-      } else if (result.message) {
+      } else if (result?.message) {
         setOutput(`Error: ${result.message}`);
       } else {
         setOutput('Execution failed. Please try again.');
@@ -673,26 +667,19 @@ const AssessmentPage = () => {
           testCode += `\n\n# Test execution\nprint(${tc.input.includes(',') ? `two_sum(${tc.input})` : `solution(${tc.input})`})`;
         }
 
-        const response = await fetch(`${PISTON_API}/execute`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            language: langConfig.runtime,
-            version: langConfig.version,
-            files: [{
-              name: `main.${langConfig.extension}`,
-              content: testCode
-            }]
-          })
+        const response = await api.post(CODE_EXEC_URL, {
+          language: langConfig.runtime,
+          version: langConfig.version,
+          filename: `main.${langConfig.extension}`,
+          code: testCode,
         });
 
-        const result = await response.json();
+        const result = response.data?.data;
 
-        if (result.run) {
+        if (result?.run) {
           const stdout = (result.run.stdout || '').trim();
           const stderr = result.run.stderr || '';
 
-          // Simple comparison (could be improved)
           const expectedClean = tc.expected.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false');
           const actualClean = stdout.replace(/'/g, '"');
 
@@ -707,7 +694,7 @@ const AssessmentPage = () => {
           }
         } else {
           failed++;
-          results.push(` Test ${i + 1}: ERROR\n   ${result.message || 'Execution failed'}\n`);
+          results.push(` Test ${i + 1}: ERROR\n   ${result?.message || 'Execution failed'}\n`);
         }
       } catch (err) {
         failed++;

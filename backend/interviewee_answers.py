@@ -36,6 +36,13 @@ interviewee_answers_bp = Blueprint('interviewee_answers', __name__)
 @connection_pool
 def submit_answer(assessment_id):
     try:
+        # Guard: assessment must exist and be active
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
+        if assessment.get('status') not in ('started', 'in_progress'):
+            return jsonify({'status': 'error', 'message': 'Assessment is not active'}), 400
+
         data = request.json
         answer_type = data.get('type')
 
@@ -44,13 +51,8 @@ def submit_answer(assessment_id):
             selected = data.get('answer')
             time_spent = data.get('timeSpent', 0)
 
-            assessment = get_assessment_by_id(assessment_id)
-            if not assessment:
-                return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
-
             stored_questions = get_assessment_questions(assessment_id)
-            questions = (stored_questions.get('mcq_questions', [])
-                         if stored_questions else get_mcq_questions(count=20))
+            questions = (stored_questions.get('mcq_questions', []) if stored_questions else get_mcq_questions(count=20))
 
             question_id_int = int(question_id) if isinstance(question_id, str) else question_id
             correct_answer = _resolve_correct_answer(question_id_int, questions)
@@ -180,6 +182,49 @@ def complete_assessment(assessment_id):
     except Exception as e:
         logger.error(f"Assessment {assessment_id}: FAILED to complete — {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to complete assessment'}), 500
+
+
+@interviewee_answers_bp.route('/run-code', methods=['POST'])
+def run_code():
+    """
+    Proxy code execution through the backend to Piston API.
+    Prevents candidates from calling Piston directly and bypassing logging/rate-limiting.
+    """
+    import urllib.request
+    import json as _json
+
+    data = request.json or {}
+    language = data.get('language')
+    version = data.get('version', '*')
+    code = data.get('code', '')
+    filename = data.get('filename', 'main')
+    stdin = data.get('stdin', '')
+
+    if not language or not code:
+        return jsonify({'status': 'error', 'message': 'language and code are required'}), 400
+
+    try:
+        payload = _json.dumps({
+            'language': language,
+            'version': version,
+            'files': [{'name': filename, 'content': code}],
+            'stdin': stdin,
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://emkc.org/api/v2/piston/execute',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = _json.loads(resp.read().decode('utf-8'))
+
+        logger.info(f"[CODE EXEC] lang={language} exit={result.get('run', {}).get('code')}")
+        return jsonify({'status': 'success', 'data': result}), 200
+    except Exception as e:
+        logger.error(f"[CODE EXEC] Piston error: {e}")
+        return jsonify({'status': 'error', 'message': 'Code execution service unavailable'}), 503
 
 
 def _resolve_correct_answer(question_id_int, questions):
