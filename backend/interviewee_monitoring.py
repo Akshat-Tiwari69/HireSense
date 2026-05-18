@@ -16,7 +16,7 @@ except ImportError:
 
 from db_helpers import (
     record_proctoring_violation, count_violations_for_assessment,
-    update_assessment_time_elapsed, get_assessment_by_id,
+    update_assessment_time_elapsed, get_assessment_by_id, get_assessment_time_elapsed,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,13 @@ def sync_assessment_time(assessment_id):
         if time_elapsed is None:
             return jsonify({'status': 'error', 'message': 'time_elapsed_seconds is required'}), 400
         update_assessment_time_elapsed(assessment_id, int(time_elapsed))
-        return jsonify({'status': 'success', 'message': 'Time synced'}), 200
+        # Return authoritative server-side remaining time so the client can correct drift
+        server_elapsed = get_assessment_time_elapsed(assessment_id)
+        remaining = max(0, 3600 - server_elapsed)
+        return jsonify({
+            'status': 'success',
+            'message': 'Time synced',
+            'data': {'server_elapsed_seconds': server_elapsed, 'server_remaining_seconds': remaining}
+        }), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': 'Failed to sync time'}), 500

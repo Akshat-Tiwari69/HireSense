@@ -282,14 +282,23 @@ def create_job_posting():
                 'message': 'Required skills must be specified for the job posting'
             }), 400
 
-        admin_email = get_jwt_identity()
+        claims = get_jwt()
+        user_id = int(get_jwt_identity())
+        role = claims.get('role')
+        user_sector_id = claims.get('sector_id')
+
+        # Enforce sector scoping for non-admin roles
+        if role in ('sector_admin', 'recruiter'):
+            if not user_sector_id:
+                return jsonify({'status': 'error', 'message': 'No sector assigned to your account'}), 403
+            requested_sector = data.get('sector_id')
+            if requested_sector and int(requested_sector) != int(user_sector_id):
+                return jsonify({'status': 'error', 'message': 'You can only create jobs in your own sector'}), 403
+            data['sector_id'] = user_sector_id
+
+        creator_id = user_id
         conn = get_connection()
         cursor = conn.cursor()
-
-        # Get creator's user ID
-        cursor.execute("SELECT id FROM users WHERE email = %s", (admin_email,))
-        creator_row = cursor.fetchone()
-        creator_id = creator_row[0] if creator_row else None
 
         cursor.execute("""
             INSERT INTO job_descriptions 
@@ -345,8 +354,23 @@ def update_job_posting(job_id):
     conn = None
     try:
         data = request.get_json()
+        claims = get_jwt()
+        role = claims.get('role')
+        user_sector_id = claims.get('sector_id')
+
         conn = get_connection()
         cursor = conn.cursor()
+
+        # Sector scoping: non-admin users may only edit jobs in their sector
+        if role in ('sector_admin', 'recruiter'):
+            if not user_sector_id:
+                return jsonify({'status': 'error', 'message': 'No sector assigned to your account'}), 403
+            cursor.execute("SELECT sector_id FROM job_descriptions WHERE id = %s", (job_id,))
+            job_row = cursor.fetchone()
+            if not job_row:
+                return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+            if job_row[0] != user_sector_id:
+                return jsonify({'status': 'error', 'message': 'You can only edit jobs in your own sector'}), 403
 
         allowed_fields = [
             'title', 'description', 'required_skills', 'preferred_skills',
@@ -392,8 +416,23 @@ def delete_job_posting(job_id):
     """Permanently delete a job posting."""
     conn = None
     try:
+        claims = get_jwt()
+        role = claims.get('role')
+        user_sector_id = claims.get('sector_id')
+
         conn = get_connection()
         cursor = conn.cursor()
+
+        # Sector scoping: non-admin users may only delete jobs in their sector
+        if role in ('sector_admin', 'recruiter'):
+            if not user_sector_id:
+                return jsonify({'status': 'error', 'message': 'No sector assigned to your account'}), 403
+            cursor.execute("SELECT sector_id FROM job_descriptions WHERE id = %s", (job_id,))
+            job_row = cursor.fetchone()
+            if not job_row:
+                return jsonify({'status': 'error', 'message': 'Job not found'}), 404
+            if job_row[0] != user_sector_id:
+                return jsonify({'status': 'error', 'message': 'You can only delete jobs in your own sector'}), 403
 
         # Remove related candidate-job matches first
         cursor.execute("DELETE FROM candidate_job_matches WHERE job_id = %s", (job_id,))
@@ -401,8 +440,7 @@ def delete_job_posting(job_id):
         cursor.execute("DELETE FROM job_descriptions WHERE id = %s", (job_id,))
         conn.commit()
 
-        admin_email = get_jwt_identity()
-        audit_log(conn, admin_email, 'delete_job_posting', 'job_posting', job_id,
+        audit_log(conn, get_jwt_identity(), 'delete_job_posting', 'job_posting', job_id,
                   None, request.remote_addr)
         conn.commit()
 

@@ -38,6 +38,36 @@ logger = logging.getLogger(__name__)
 
 interviewee_session_bp = Blueprint('interviewee_session', __name__)
 
+ASSESSMENT_DURATION_SECONDS = 60 * 60  # 1 hour
+
+
+@interviewee_session_bp.route('/assessment/<int:assessment_id>/remaining-time', methods=['GET'])
+@connection_pool
+def get_remaining_time(assessment_id):
+    """
+    Return server-authoritative remaining time for an active assessment.
+    Calculated from started_at so the client cannot inflate it.
+    """
+    try:
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
+        if assessment.get('status') not in ('started', 'in_progress'):
+            return jsonify({'status': 'error', 'message': 'Assessment is not active'}), 400
+
+        elapsed = get_assessment_time_elapsed(assessment_id)
+        remaining = max(0, ASSESSMENT_DURATION_SECONDS - elapsed)
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'elapsed_seconds': elapsed,
+                'remaining_seconds': remaining,
+                'total_seconds': ASSESSMENT_DURATION_SECONDS,
+            }
+        }), 200
+    except Exception:
+        return jsonify({'status': 'error', 'message': 'Failed to fetch remaining time'}), 500
+
 
 @interviewee_session_bp.route('/my-assessment/<int:candidate_id>', methods=['GET'])
 @connection_pool

@@ -81,6 +81,12 @@ def _get_jwt_secret():
 
 app.config['JWT_SECRET_KEY'] = _get_jwt_secret()
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
+# Accept JWT from both HttpOnly cookie AND Authorization header so the browser
+# gets the cookie automatically while API clients can still use Bearer tokens.
+app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']
+app.config['JWT_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
+app.config['JWT_COOKIE_SAMESITE'] = 'Lax'
+app.config['JWT_COOKIE_CSRF_PROTECT'] = False  # CORS + SameSite=Lax is sufficient for non-state-changing GETs; enable CSRF protection for mutations once frontend is ready
 jwt = JWTManager(app)
 
 # JWT error handlers
@@ -131,8 +137,9 @@ CORS(app, resources={
 })
 
 # Initialize Socket.IO for live proctoring
-from websocket_server import get_socketio_app
+from websocket_server import get_socketio_app, init_websocket_server
 sio = get_socketio_app()
+init_websocket_server(app)  # give websocket server access to app context for JWT decode
 # Wrap Flask app with Socket.IO
 app_with_socketio = socketio.WSGIApp(sio, app)
 logger.info("[PROCTORING] Socket.IO initialized for live video streaming")

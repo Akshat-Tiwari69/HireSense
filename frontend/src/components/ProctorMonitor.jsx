@@ -27,11 +27,12 @@ const ProctorMonitor = ({ assessmentId, onClose }) => {
             console.log('[PROCTOR] Connected to server');
             setConnected(true);
 
-            // Join as interviewer
             const userId = localStorage.getItem('user_id') || '1';
+            const token = localStorage.getItem('authToken');
             socket.emit('join_as_interviewer', {
                 assessment_id: assessmentId,
-                user_id: parseInt(userId)
+                user_id: parseInt(userId),
+                token: token,
             });
         });
 

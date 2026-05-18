@@ -184,6 +184,49 @@ def complete_assessment(assessment_id):
         return jsonify({'status': 'error', 'message': 'Failed to complete assessment'}), 500
 
 
+@interviewee_answers_bp.route('/run-code', methods=['POST'])
+def run_code():
+    """
+    Proxy code execution through the backend to Piston API.
+    Prevents candidates from calling Piston directly and bypassing logging/rate-limiting.
+    """
+    import urllib.request
+    import json as _json
+
+    data = request.json or {}
+    language = data.get('language')
+    version = data.get('version', '*')
+    code = data.get('code', '')
+    filename = data.get('filename', 'main')
+    stdin = data.get('stdin', '')
+
+    if not language or not code:
+        return jsonify({'status': 'error', 'message': 'language and code are required'}), 400
+
+    try:
+        payload = _json.dumps({
+            'language': language,
+            'version': version,
+            'files': [{'name': filename, 'content': code}],
+            'stdin': stdin,
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://emkc.org/api/v2/piston/execute',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = _json.loads(resp.read().decode('utf-8'))
+
+        logger.info(f"[CODE EXEC] lang={language} exit={result.get('run', {}).get('code')}")
+        return jsonify({'status': 'success', 'data': result}), 200
+    except Exception as e:
+        logger.error(f"[CODE EXEC] Piston error: {e}")
+        return jsonify({'status': 'error', 'message': 'Code execution service unavailable'}), 503
+
+
 def _resolve_correct_answer(question_id_int, questions):
     """Try 5 matching strategies to find the correct answer letter (A/B/C/D)."""
     for q in questions:
