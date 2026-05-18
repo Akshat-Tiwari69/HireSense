@@ -4,7 +4,7 @@ eventlet.monkey_patch()
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, jwt_required
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 import socketio
@@ -207,8 +207,9 @@ def root():
 
 
 @app.route('/uploads/<path:filename>')
+@jwt_required()
 def serve_uploaded_file(filename):
-    """Serve uploaded files (resumes, violation screenshots, etc.)"""
+    """Serve uploaded files — requires a valid JWT to prevent unauthenticated PII access."""
     try:
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
     except FileNotFoundError:

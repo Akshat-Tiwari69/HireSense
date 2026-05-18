@@ -28,6 +28,6 @@ def init_rate_limiting(app):
     _limit_if_present(limiter, app, 'auth.register', "5 per minute")
 
     # File upload - limited
-    _limit_if_present(limiter, app, 'upload_resume', "10 per hour")
+    _limit_if_present(limiter, app, 'resume.upload_resume', "10 per hour")
 
     return limiter

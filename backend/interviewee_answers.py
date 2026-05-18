@@ -36,6 +36,13 @@ interviewee_answers_bp = Blueprint('interviewee_answers', __name__)
 @connection_pool
 def submit_answer(assessment_id):
     try:
+        # Guard: assessment must exist and be active
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
+        if assessment.get('status') not in ('started', 'in_progress'):
+            return jsonify({'status': 'error', 'message': 'Assessment is not active'}), 400
+
         data = request.json
         answer_type = data.get('type')
 
@@ -44,13 +51,8 @@ def submit_answer(assessment_id):
             selected = data.get('answer')
             time_spent = data.get('timeSpent', 0)
 
-            assessment = get_assessment_by_id(assessment_id)
-            if not assessment:
-                return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
-
             stored_questions = get_assessment_questions(assessment_id)
-            questions = (stored_questions.get('mcq_questions', [])
-                         if stored_questions else get_mcq_questions(count=20))
+            questions = (stored_questions.get('mcq_questions', []) if stored_questions else get_mcq_questions(count=20))
 
             question_id_int = int(question_id) if isinstance(question_id, str) else question_id
             correct_answer = _resolve_correct_answer(question_id_int, questions)

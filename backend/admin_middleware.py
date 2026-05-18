@@ -7,12 +7,15 @@ from flask import jsonify
 from flask_jwt_extended import get_jwt
 
 
+_ADMIN_ROLES = {'admin', 'super_admin'}
+
+
 def require_admin_role(f):
-    """Decorator: rejects non-admin JWT tokens with 403."""
+    """Decorator: rejects tokens that do not have an admin-level role."""
     @wraps(f)
     def check_admin_role(*args, **kwargs):
         claims = get_jwt()
-        if claims.get('role') != 'admin':
+        if claims.get('role') not in _ADMIN_ROLES:
             return jsonify({
                 'status': 'error',
                 'message': 'Access denied. Admin role required.'

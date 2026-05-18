@@ -14,7 +14,10 @@ except ImportError:
     def connection_pool(f):
         return f
 
-from db_helpers import record_proctoring_violation, count_violations_for_assessment, update_assessment_time_elapsed
+from db_helpers import (
+    record_proctoring_violation, count_violations_for_assessment,
+    update_assessment_time_elapsed, get_assessment_by_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,12 @@ interviewee_monitoring_bp = Blueprint('interviewee_monitoring', __name__)
 @connection_pool
 def report_violation(assessment_id):
     try:
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
+        if assessment.get('status') not in ('started', 'in_progress'):
+            return jsonify({'status': 'error', 'message': 'Assessment is not active'}), 400
+
         data = request.get_json() or {}
         violation_type = data.get('violation_type')
         description = data.get('description', '')
@@ -71,6 +80,12 @@ def report_violation(assessment_id):
 @connection_pool
 def sync_assessment_time(assessment_id):
     try:
+        assessment = get_assessment_by_id(assessment_id)
+        if not assessment:
+            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
+        if assessment.get('status') not in ('started', 'in_progress'):
+            return jsonify({'status': 'error', 'message': 'Assessment is not active'}), 400
+
         data = request.get_json() or {}
         time_elapsed = data.get('time_elapsed_seconds')
         if time_elapsed is None:

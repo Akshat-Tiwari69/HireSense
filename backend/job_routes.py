@@ -66,14 +66,17 @@ def get_user_sector_id(claims):
     return claims.get('sector_id')
 
 
-def audit_log(conn, user_email, action, entity_type=None, entity_id=None, details=None, ip_address=None):
-    """Write an entry to the audit_log table."""
+def audit_log(conn, user_identity, action, entity_type=None, entity_id=None, details=None, ip_address=None):
+    """Write an entry to the audit_log table. user_identity is the JWT identity (user_id as string)."""
     try:
         cursor = conn.cursor()
-        # Look up user_id
-        cursor.execute("SELECT id FROM users WHERE email = %s", (user_email,))
-        row = cursor.fetchone()
-        user_id = row[0] if row else None
+        # JWT identity is set to str(user_id) at login time
+        user_id = int(user_identity) if user_identity else None
+        user_email = None
+        if user_id:
+            cursor.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+            row = cursor.fetchone()
+            user_email = row[0] if row else None
 
         cursor.execute("""
             INSERT INTO audit_log (user_id, user_email, action, entity_type, entity_id, details, ip_address)
@@ -556,6 +559,7 @@ def match_candidate_to_jobs_endpoint():
 
 @jobs_bp.route('/matches/<int:candidate_id>', methods=['GET'])
 @jwt_required()
+@require_role('recruiter')
 def get_candidate_matches(candidate_id):
     """Get all job matches for a candidate."""
     conn = None

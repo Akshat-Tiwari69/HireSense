@@ -65,7 +65,7 @@ source venv/bin/activate    # Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Create .env file — see docs/ENVIRONMENT_CONFIG.md for all variables
+# Create .env file — see docs/SETUP.md for all variables
 cp .env.example .env        # then fill in values
 
 # Run database migrations
@@ -101,16 +101,14 @@ All documentation lives in `docs/`. Start with the index:
 | Document | What it covers |
 |----------|----------------|
 | [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) | Full doc index + quick API reference |
-| [docs/PROJECT_ARCHITECTURE.md](docs/PROJECT_ARCHITECTURE.md) | System design, data flows, module responsibilities |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flows, module responsibilities |
 | [docs/BACKEND_FILE_REFERENCE.md](docs/BACKEND_FILE_REFERENCE.md) | Every backend Python file and its functions |
-| [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) | All 12 tables, relationships, indexes |
-| [docs/API_DOCS.md](docs/API_DOCS.md) | Complete REST API reference with examples |
-| [docs/ASSESSMENT_SYSTEM_GUIDE.md](docs/ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, coding, psychometric tests |
-| [docs/PROCTOR_GUIDE.md](docs/PROCTOR_GUIDE.md) | WebRTC proctoring, face detection, violations |
-| [docs/ADMIN_DASHBOARD_GUIDE.md](docs/ADMIN_DASHBOARD_GUIDE.md) | Admin panel, user/job management |
-| [docs/FRONTEND_GUIDE.md](docs/FRONTEND_GUIDE.md) | React pages, components, routing |
+| [docs/DATABASE.md](docs/DATABASE.md) | All tables, relationships, indexes |
+| [docs/API.md](docs/API.md) | Complete REST API reference with examples |
+| [docs/PROCTOR_USER_SETUP.md](docs/PROCTOR_USER_SETUP.md) | WebRTC proctoring, face detection, violations |
+| [docs/ROLES.md](docs/ROLES.md) | Role definitions, permissions, access control |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Railway / Render / Vercel deployment |
-| [docs/ENVIRONMENT_CONFIG.md](docs/ENVIRONMENT_CONFIG.md) | All environment variables |
+| [docs/SETUP.md](docs/SETUP.md) | All environment variables and local setup |
 
 ---
 

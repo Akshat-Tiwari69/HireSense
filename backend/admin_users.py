@@ -6,7 +6,7 @@ import logging
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from db_config import get_connection, return_connection
-from auth import hash_password
+from auth import hash_password, validate_email
 from admin_middleware import require_admin_role
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,12 @@ def create_user():
 
         if not all([name, email, password]):
             return jsonify({'status': 'error', 'message': 'Name, email, and password are required'}), 400
+
+        if not validate_email(email):
+            return jsonify({'status': 'error', 'message': 'Invalid email format'}), 400
+
+        if len(password) < 8:
+            return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters'}), 400
 
         if role not in ['interviewer', 'admin', 'proctor']:
             return jsonify({'status': 'error', 'message': 'Invalid role. Must be interviewer, proctor, or admin'}), 400
@@ -108,6 +114,8 @@ def update_user(user_id):
             field_names.append('name')
             values.append(data['name'])
         if 'email' in data:
+            if not validate_email(data['email']):
+                return jsonify({'status': 'error', 'message': 'Invalid email format'}), 400
             field_names.append('email')
             values.append(data['email'])
         if 'role' in data:
@@ -116,6 +124,8 @@ def update_user(user_id):
             field_names.append('role')
             values.append(data['role'])
         if 'password' in data and data['password']:
+            if len(data['password']) < 8:
+                return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters'}), 400
             field_names.append('password_hash')
             values.append(hash_password(data['password']))
 

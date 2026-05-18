@@ -174,11 +174,11 @@ def verify_assessment_token(token):
             scheduled_dt = ist.localize(scheduled_dt)
         current_dt = datetime.now(ist)
         minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
-        can_start = abs(minutes_until) <= 30
+        # Allow starting from 30 min before to 30 min after scheduled time
+        can_start = -30 <= minutes_until <= 30
 
         return jsonify({'status': 'success', 'data': {
             'candidate_name': assessment['candidate_name'],
-            'candidate_email': assessment['candidate_email'],
             'scheduled_time': str(assessment['scheduled_time']),
             'minutes_until_start': minutes_until,
             'can_start': can_start,
