@@ -108,14 +108,12 @@ def get_all_candidates():
 @jwt_required()
 @require_admin_role
 def update_candidate(candidate_id):
+    conn = None
     try:
         admin_email = get_jwt_identity()
         data = request.get_json()
 
         logger.info(f"[ADMIN ACTION] {admin_email} updating candidate ID: {candidate_id} with data: {list(data.keys())}")
-
-        conn = get_connection()
-        cursor = conn.cursor()
 
         from psycopg2 import sql as psql
         field_names = []
@@ -142,6 +140,8 @@ def update_candidate(candidate_id):
         if not field_names:
             return jsonify({'status': 'error', 'message': 'No fields to update'}), 400
 
+        conn = get_connection()
+        cursor = conn.cursor()
         values.append(candidate_id)
         set_clause = psql.SQL(', ').join(
             [psql.SQL("{} = %s").format(psql.Identifier(f)) for f in field_names]
@@ -149,7 +149,6 @@ def update_candidate(candidate_id):
         query = psql.SQL("UPDATE candidates SET {} WHERE id = %s").format(set_clause)
         cursor.execute(query, values)
         conn.commit()
-        conn.close()
 
         logger.info(f"[ADMIN ACTION] {admin_email} successfully updated candidate ID: {candidate_id}")
 
@@ -157,6 +156,9 @@ def update_candidate(candidate_id):
     except Exception as e:
         logger.error(f"[ADMIN ERROR] Failed to update candidate ID {candidate_id}: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
+    finally:
+        if conn:
+            return_connection(conn)
 
 
 @admin_candidates_bp.route('/candidates/<int:candidate_id>', methods=['DELETE'])

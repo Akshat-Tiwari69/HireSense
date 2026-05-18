@@ -112,7 +112,9 @@ def complete_assessment(assessment_id):
         try:
             scheduled = get_scheduled_assessment(candidate_id)
             if scheduled:
-                is_technical_role = scheduled.get('is_technical_role', True) or True
+                val = scheduled.get('is_technical_role')
+                if val is not None:
+                    is_technical_role = bool(val)
         except Exception as e:
             logger.warning(f"Could not determine is_technical_role: {e}")
 
@@ -171,7 +173,7 @@ def complete_assessment(assessment_id):
                 'psychometric': round(avg_psychometric * 10, 2),
                 'overall': round(overall_score, 2)
             },
-            'psychometric_breakdown': {k: round(v, 2) for k, v in psychometric_scores.items()},
+            'psychometric_breakdown': {k: round(v, 2) for k, v in psychometric_scores.items()} if psychometric_scores else {},
             'decision': decision, 'rationale': rationale, 'ai_recommendation': recommendation
         }}), 200
 
