@@ -2,20 +2,18 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
-import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
-import { Label } from '../components/ui/label';
-import { Progress } from '../components/ui/progress';
 import { Badge } from '../components/ui/badge';
 import {
-  Clock, CheckCircle, Loader2, Play, AlertTriangle, Video, VideoOff,
-  Eye, ShieldAlert, Timer, Code, Brain, FileText, ChevronRight, ChevronLeft, Zap, Terminal
+  Clock, CheckCircle, Loader2, Video, VideoOff,
+  Eye, ShieldAlert, Timer, Code, Brain, FileText
 } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import { useProctorStream } from '../hooks/useProctorStream';
-import Editor from '@monaco-editor/react';
 import Logo from '../components/Logo';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { api } from '../services/api';
+import MCQSection from '../components/assessment/MCQSection';
+import CodingSection from '../components/assessment/CodingSection';
+import PsychometricSection from '../components/assessment/PsychometricSection';
 
 // Piston API for code execution (free, no API key needed)
 const PISTON_API = 'https://emkc.org/api/v2/piston';
@@ -905,429 +903,6 @@ const AssessmentPage = () => {
   }, [isTechnicalRole]);
   const progressPercentage = ((currentSection + 1) / sections.length) * 100;
 
-  const renderMCQSection = useMemo(() => () => {
-    const questions = assessmentData?.mcq_questions || [];
-    if (questions.length === 0) return <p className="text-slate-400 text-center py-8">No questions available</p>;
-
-    const question = questions[currentQuestion];
-    if (!question) return null;
-
-    const answeredCount = Object.keys(mcqAnswers).length;
-    const progressPercent = (answeredCount / questions.length) * 100;
-
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">
-                Question {currentQuestion + 1} of {questions.length}
-              </h3>
-              <Badge className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-0">
-                {question.category}
-              </Badge>
-            </div>
-            <div className="mt-3">
-              <Progress value={progressPercent} className="h-2 bg-slate-700" />
-              <p className="text-xs text-slate-400 mt-2">{answeredCount}/{questions.length} answered</p>
-            </div>
-          </div>
-        </div>
-
-        <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-          <CardContent className="pt-8">
-            <p className="text-lg text-slate-100 mb-8 leading-relaxed font-medium">{question.question}</p>
-            <RadioGroup
-              value={mcqAnswers[question.id] !== undefined ? mcqAnswers[question.id].toString() : ''}
-              onValueChange={(value) => handleMCQAnswer(question.id, parseInt(value))}
-            >
-              <div className="space-y-3">
-                {question.options.map((option, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex items-center space-x-4 p-5 rounded-lg border-2 transition-all duration-200 cursor-pointer ${mcqAnswers[question.id] === idx
-                      ? 'border-emerald-500 bg-emerald-500/15 shadow-md'
-                      : 'border-slate-600 hover:border-indigo-500 hover:bg-slate-700/40'
-                      }`}
-                    onClick={() => handleMCQAnswer(question.id, idx)}
-                  >
-                    <RadioGroupItem value={idx.toString()} id={`option-${idx}`} className="border-slate-400" />
-                    <Label htmlFor={`option-${idx}`} className="flex-1 cursor-pointer text-slate-200 text-base">
-                      {String.fromCharCode(65 + idx)}) {option}
-                    </Label>
-                  </div>
-                ))}
-              </div>
-            </RadioGroup>
-          </CardContent>
-        </Card>
-
-        <div className="flex justify-between gap-3 pt-4">
-          <Button
-            variant="outline"
-            onClick={() => setCurrentQuestion(prev => Math.max(0, prev - 1))}
-            disabled={currentQuestion === 0}
-            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
-          >
-            <ChevronLeft className="w-4 h-4" /> Previous
-          </Button>
-          {currentQuestion < questions.length - 1 ? (
-            <Button
-              onClick={() => setCurrentQuestion(prev => prev + 1)}
-              className="bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 gap-2"
-            >
-              Next Question <ChevronRight className="w-4 h-4" />
-            </Button>
-          ) : (
-            <Button
-              onClick={handleNextSection}
-              className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
-            >
-              Next Section <ChevronRight className="w-4 h-4" />
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-  }, [assessmentData?.mcq_questions, currentQuestion, mcqAnswers, handleMCQAnswer, handleNextSection]);
-
-  const renderCodingSection = useMemo(() => () => {
-    const problem = assessmentData?.coding_problem;
-    if (!problem) return <p className="text-slate-400 text-center py-8">No coding problem available</p>;
-
-    return (
-      <div className="space-y-6">
-        {/* Problem Description */}
-        <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-white flex items-center gap-3">
-                <Code className="w-6 h-6 text-emerald-400" />
-                <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-                  {problem.title}
-                </span>
-              </CardTitle>
-              <div className="flex gap-2">
-                <Badge className={`${problem.difficulty === 'Easy' ? 'bg-emerald-600' : problem.difficulty === 'Medium' ? 'bg-amber-600' : 'bg-red-600'}`}>
-                  {problem.difficulty}
-                </Badge>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="bg-slate-700/40 p-5 rounded-lg border border-slate-600">
-              <p className="text-slate-200 whitespace-pre-line leading-relaxed">{problem.description}</p>
-            </div>
-
-            {problem.example && (
-              <div className="bg-indigo-900/30 border border-indigo-700/50 p-5 rounded-lg">
-                <p className="text-indigo-300 font-semibold mb-3 flex items-center gap-2">
-                  <Zap className="w-4 h-4" /> Example:
-                </p>
-                <pre className="text-slate-300 text-sm font-mono bg-slate-900/50 p-3 rounded border border-slate-700 overflow-x-auto">{problem.example}</pre>
-              </div>
-            )}
-
-            {problem.constraints && problem.constraints.length > 0 && (
-              <div>
-                <p className="text-slate-300 font-semibold mb-3 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4" /> Constraints:
-                </p>
-                <ul className="text-slate-400 text-sm space-y-2 pl-6">
-                  {problem.constraints.map((c, idx) => (
-                    <li key={idx} className="list-disc">{c}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {problem.test_cases && problem.test_cases.length > 0 && (
-              <div>
-                <p className="text-slate-300 font-semibold mb-3">Test Cases:</p>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {problem.test_cases.filter(tc => !tc.is_hidden).map((tc, idx) => (
-                    <div key={idx} className="bg-slate-700/50 border border-slate-600 p-4 rounded-lg text-sm">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <span className="text-slate-400">Input:</span>
-                          <code className="text-emerald-400 ml-2 font-mono">{tc.input}</code>
-                        </div>
-                        <div>
-                          <span className="text-slate-400">Expected:</span>
-                          <code className="text-cyan-400 ml-2 font-mono">{tc.expected}</code>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-
-          </CardContent>
-        </Card>
-
-        {/* Code Editor */}
-        <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <CardTitle className="text-white">Your Solution</CardTitle>
-              <Select value={language} onValueChange={(val) => {
-                setLanguage(val);
-                setCode(getStarterCode(problem, val));
-              }}>
-                <SelectTrigger className="w-48 bg-slate-700 border-slate-600 text-white hover:bg-slate-600">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-slate-800 border-slate-700">
-                  <SelectItem value="javascript">JavaScript</SelectItem>
-                  <SelectItem value="python">Python</SelectItem>
-                  <SelectItem value="java">Java</SelectItem>
-                  <SelectItem value="cpp">C++</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="border-2 border-slate-700 rounded-lg overflow-hidden shadow-lg">
-              <Editor
-                height="380px"
-                language={language}
-                value={code}
-                onChange={(value) => setCode(value || '')}
-                theme="vs-dark"
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                  wordWrap: 'on',
-                  padding: { top: 12, bottom: 12 }
-                }}
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                onClick={handleRunCode}
-                disabled={isRunning}
-                className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2 font-semibold"
-              >
-                {isRunning ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Executing...
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4" />
-                    Run Code
-                  </>
-                )}
-              </Button>
-              {problem.test_cases && problem.test_cases.length > 0 && (
-                <Button
-                  onClick={() => handleRunTestCases(problem.test_cases)}
-                  disabled={isRunning}
-                  variant="outline"
-                  className="border-indigo-600 text-indigo-300 hover:bg-indigo-900/50 hover:text-indigo-100 gap-2 font-semibold"
-                >
-                  {isRunning ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Testing...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-4 h-4" />
-                      Run Tests
-                    </>
-                  )}
-                </Button>
-              )}
-              {testsPassed && !codeSaved && (
-                <Button
-                  onClick={handleSubmitCode}
-                  disabled={isRunning}
-                  className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 gap-2 font-semibold animate-pulse"
-                >
-                  <CheckCircle className="w-4 h-4" />
-                  Submit Code
-                </Button>
-              )}
-              {codeSaved && (
-                <Button
-                  disabled
-                  className="bg-green-800 text-green-200 gap-2 font-semibold cursor-default"
-                >
-                  <CheckCircle className="w-4 h-4" />
-                  Code Saved 
-                </Button>
-              )}
-            </div>
-
-            {output && (
-              <div className="bg-slate-900/80 border-2 border-slate-700 rounded-lg p-4 font-mono text-sm overflow-auto max-h-56">
-                <div className="text-emerald-400 font-semibold mb-2 flex items-center gap-2">
-                  <Terminal className="w-4 h-4" /> Output:
-                </div>
-                <pre className="text-slate-300 whitespace-pre-wrap break-words">{output}</pre>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="flex justify-between gap-3 pt-4">
-          <Button
-            variant="outline"
-            onClick={handlePrevSection}
-            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
-          >
-            <ChevronLeft className="w-4 h-4" /> Previous Section
-          </Button>
-          <Button
-            onClick={handleNextSection}
-            className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
-          >
-            Next Section <ChevronRight className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-    );
-  }, [assessmentData?.coding_problem, assessmentId, language, code, output, isRunning, testsPassed, codeSaved, handleRunCode, handleSubmitCode, handleNextSection, handlePrevSection, handleRunTestCases]);
-
-  const renderPsychometricSection = useMemo(() => () => {
-    const scenarios = assessmentData?.psychometric_scenarios || [];
-    if (scenarios.length === 0) return <p className="text-slate-400 text-center py-8">No scenarios available</p>;
-
-    const scenario = scenarios[currentQuestion];
-    if (!scenario) return null;
-
-    const answeredCount = Object.keys(psychometricAnswers).length;
-    const progressPercent = (answeredCount / scenarios.length) * 100;
-
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-3">
-                <Brain className="w-6 h-6 text-purple-400" />
-                Scenario {currentQuestion + 1} of {scenarios.length}
-              </h3>
-              <Badge className="bg-gradient-to-r from-purple-600 to-purple-700 text-white border-0">
-                Personality Assessment
-              </Badge>
-            </div>
-            <div className="mt-3">
-              <Progress value={progressPercent} className="h-2 bg-slate-700" />
-              <p className="text-xs text-slate-400 mt-2">{answeredCount}/{scenarios.length} answered</p>
-            </div>
-          </div>
-        </div>
-
-        <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-          <CardContent className="pt-8">
-            <div className="bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-700/50 p-6 rounded-lg mb-8">
-              <p className="text-lg text-slate-100 leading-relaxed font-medium">{scenario.scenario}</p>
-            </div>
-            <div className="space-y-3">
-              <p className="text-slate-400 text-sm font-semibold mb-4">Choose the response that best describes your reaction:</p>
-              <RadioGroup
-                value={psychometricAnswers[scenario.id] !== undefined ? psychometricAnswers[scenario.id].toString() : ''}
-                onValueChange={(value) => handlePsychometricAnswer(scenario.id, parseInt(value))}
-              >
-                <div className="space-y-3">
-                  {scenario.options.map((option, idx) => (
-                    <div
-                      key={idx}
-                      className={`flex items-start space-x-4 p-5 rounded-lg border-2 transition-all duration-200 cursor-pointer ${psychometricAnswers[scenario.id] === idx
-                        ? 'border-purple-500 bg-purple-500/15 shadow-md'
-                        : 'border-slate-600 hover:border-purple-500 hover:bg-slate-700/40'
-                        }`}
-                      onClick={() => handlePsychometricAnswer(scenario.id, idx)}
-                    >
-                      <RadioGroupItem value={idx.toString()} id={`psy-${idx}`} className="border-slate-400 mt-1" />
-                      <Label htmlFor={`psy-${idx}`} className="flex-1 cursor-pointer text-slate-200 text-base leading-relaxed">
-                        {option}
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              </RadioGroup>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex justify-between gap-3 pt-4">
-          {currentQuestion > 0 ? (
-            <Button
-              variant="outline"
-              onClick={() => setCurrentQuestion(prev => prev - 1)}
-              className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
-            >
-              <ChevronLeft className="w-4 h-4" /> Previous Scenario
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              onClick={handlePrevSection}
-              className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
-            >
-              <ChevronLeft className="w-4 h-4" /> Previous Section
-            </Button>
-          )}
-          {currentQuestion < scenarios.length - 1 ? (
-            <Button
-              onClick={() => setCurrentQuestion(prev => prev + 1)}
-              className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 gap-2"
-            >
-              Next Scenario <ChevronRight className="w-4 h-4" />
-            </Button>
-          ) : (
-            <Button
-              onClick={handleSubmit}
-              className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2 font-semibold"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="w-4 h-4" />
-                  Submit Assessment
-                </>
-              )}
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-  }, [assessmentData?.psychometric_scenarios, currentQuestion, psychometricAnswers, handlePsychometricAnswer, handlePrevSection, handleSubmit, isSubmitting]);
-
-  const renderSuccessScreen = useMemo(() => () => (
-    <div className="flex items-center justify-center min-h-[60vh]">
-      <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl border-emerald-600 max-w-md w-full">
-        <CardContent className="pt-12 text-center pb-8">
-          <div className="flex justify-center mb-6">
-            <div className="w-20 h-20 bg-gradient-to-r from-emerald-400 to-cyan-400 rounded-full flex items-center justify-center animate-pulse">
-              <CheckCircle className="w-12 h-12 text-white" />
-            </div>
-          </div>
-          <h2 className="text-3xl font-bold text-white mb-2">Assessment Complete!</h2>
-          <p className="text-slate-300 text-lg mb-6">Thank you for completing your assessment.</p>
-          <div className="bg-slate-700/50 border border-slate-600 p-4 rounded-lg mb-6">
-            <p className="text-slate-400 text-sm">Your responses have been submitted successfully.</p>
-            <p className="text-emerald-400 font-semibold text-sm mt-2">Redirecting...</p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  ), []);
 
   // Loading state - early return AFTER all hooks
   if (loading) {
@@ -1516,18 +1091,66 @@ const AssessmentPage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Assessment Content */}
           <div className="lg:col-span-3">
-            {currentSection === 0 && renderMCQSection()}
+            {currentSection === 0 && (
+              <MCQSection
+                questions={assessmentData?.mcq_questions || []}
+                currentQuestion={currentQuestion}
+                mcqAnswers={mcqAnswers}
+                onAnswer={handleMCQAnswer}
+                onNextSection={handleNextSection}
+                setCurrentQuestion={setCurrentQuestion}
+              />
+            )}
             {isTechnicalRole ? (
               <>
-                {currentSection === 1 && renderCodingSection()}
-                {currentSection === 2 && renderPsychometricSection()}
+                {currentSection === 1 && (
+                  <CodingSection
+                    problem={assessmentData?.coding_problem}
+                    language={language}
+                    setLanguage={setLanguage}
+                    code={code}
+                    setCode={setCode}
+                    output={output}
+                    isRunning={isRunning}
+                    testsPassed={testsPassed}
+                    codeSaved={codeSaved}
+                    onRunCode={handleRunCode}
+                    onRunTests={handleRunTestCases}
+                    onSubmitCode={handleSubmitCode}
+                    onNextSection={handleNextSection}
+                    onPrevSection={handlePrevSection}
+                    getStarterCode={getStarterCode}
+                  />
+                )}
+                {currentSection === 2 && (
+                  <PsychometricSection
+                    scenarios={assessmentData?.psychometric_scenarios || []}
+                    currentQuestion={currentQuestion}
+                    psychometricAnswers={psychometricAnswers}
+                    onAnswer={handlePsychometricAnswer}
+                    onPrevSection={handlePrevSection}
+                    onSubmit={handleSubmit}
+                    isSubmitting={isSubmitting}
+                    setCurrentQuestion={setCurrentQuestion}
+                  />
+                )}
               </>
             ) : (
               <>
-                {currentSection === 1 && renderPsychometricSection()}
+                {currentSection === 1 && (
+                  <PsychometricSection
+                    scenarios={assessmentData?.psychometric_scenarios || []}
+                    currentQuestion={currentQuestion}
+                    psychometricAnswers={psychometricAnswers}
+                    onAnswer={handlePsychometricAnswer}
+                    onPrevSection={handlePrevSection}
+                    onSubmit={handleSubmit}
+                    isSubmitting={isSubmitting}
+                    setCurrentQuestion={setCurrentQuestion}
+                  />
+                )}
               </>
             )}
-            {submitted && renderSuccessScreen()}
           </div>
 
           {/* Proctoring Camera Feed */}
