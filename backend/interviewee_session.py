@@ -11,9 +11,9 @@ from flask import Blueprint, request, jsonify
 try:
     from db_config import connection_pool, get_connection, return_connection
 except ImportError:
+    from db_config import get_connection, return_connection
     def connection_pool(f):
         return f
-    from db_config import get_connection, return_connection
 
 from db_helpers import (
     get_candidate_by_id,

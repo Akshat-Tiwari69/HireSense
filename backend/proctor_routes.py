@@ -370,17 +370,16 @@ def get_job_performance_metrics():
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT 
+        SELECT
             jd.id,
             jd.title as job_title,
             COUNT(DISTINCT a.id) as total_assessments,
             AVG(a.overall_score) as avg_score,
             AVG(a.proctoring_violations) as avg_violations,
-            COUNT(DISTINCT CASE WHEN COUNT(pe.id) > 3 THEN a.id END) as highly_flagged,
+            COUNT(DISTINCT CASE WHEN a.proctoring_violations > 3 THEN a.id END) as highly_flagged,
             jd.role_complexity_level as complexity
         FROM job_descriptions jd
         LEFT JOIN assessments a ON jd.id = a.job_id
-        LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE a.completed_at >= NOW() - INTERVAL '30 days'
         GROUP BY jd.id, jd.title, jd.role_complexity_level
         ORDER BY avg_violations DESC

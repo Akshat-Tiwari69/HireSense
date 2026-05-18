@@ -19,6 +19,7 @@ Sub-module responsibilities:
 
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required
+from admin_middleware import require_admin_role
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -43,6 +44,7 @@ admin_bp.register_blueprint(admin_content_bp)
 
 @admin_bp.route('/job-postings', methods=['GET'])
 @jwt_required()
+@require_admin_role
 def get_job_postings():
     from flask import redirect
     return redirect('/api/jobs/postings?status=all', code=307)
@@ -50,6 +52,7 @@ def get_job_postings():
 
 @admin_bp.route('/job-postings', methods=['POST'])
 @jwt_required()
+@require_admin_role
 def create_job_posting():
     from flask import redirect
     return redirect('/api/jobs/postings', code=307)
@@ -57,6 +60,7 @@ def create_job_posting():
 
 @admin_bp.route('/job-postings/<int:job_id>', methods=['DELETE'])
 @jwt_required()
+@require_admin_role
 def delete_job_posting(job_id):
     from flask import redirect
     return redirect(f'/api/jobs/postings/{job_id}', code=307)
