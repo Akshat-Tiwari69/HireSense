@@ -6,21 +6,47 @@ Complete reference for all backend Python files and their functions.
 
 ## File Overview
 
+### Route Files
+
 | File | Lines | Purpose |
 |------|-------|---------|
-| `app.py` | ~900 | Main Flask application, routes, blueprints |
-| `auth.py` | ~370 | JWT authentication blueprint |
-| `interviewer_routes.py` | ~575 | Interviewer dashboard API |
-| `interviewee_routes.py` | ~775 | Candidate assessment API |
-| `admin_routes.py` | ~300 | Admin management API |
-| `proctor_routes.py` | ~200 | Proctoring API |
-| `db_helpers.py` | ~1550 | Database operations |
-| `db_config.py` | ~50 | Database connection |
-| `resume_analyzer.py` | ~535 | OpenAI resume analysis |
-| `resume_parser.py` | ~150 | PDF/DOCX text extraction |
-| `email_service.py` | ~800 | Email notifications |
-| `questions_bank.py` | ~200 | Assessment questions |
-| `init_db.py` | ~100 | Database initialization |
+| `app.py` | ~1,080 | Main Flask application, blueprints, resume endpoints |
+| `auth.py` | ~390 | JWT authentication blueprint |
+| `admin_routes.py` | ~1,815 | Admin dashboard API (users, jobs, sectors, analytics) |
+| `interviewer_routes.py` | ~770 | Interviewer dashboard API |
+| `interviewee_routes.py` | ~1,220 | Candidate assessment API |
+| `proctor_routes.py` | ~340 | Proctoring API |
+| `job_routes.py` | ~660 | Job listings and matching API |
+
+### Database Layer
+
+> **Note:** `db_helpers.py` was split into focused domain modules in May 2026.
+> It is now a thin re-export hub — all existing imports continue to work unchanged.
+
+| File | Functions | Purpose |
+|------|-----------|---------|
+| `db_helpers.py` | re-exports all | Backward-compatible re-export hub |
+| `user_db.py` | 3 | User auth queries (`create_user`, `get_user_by_email`, `get_user_by_id`) |
+| `candidate_db.py` | 6 | Candidate CRUD (`insert_candidate`, `get_candidate_by_id`, `get_all_candidates`, etc.) |
+| `assessment_db.py` | 25 | Assessments, responses, scoring, scheduling, token access |
+| `proctoring_db.py` | 4 | Violation recording (`record_proctoring_violation`, `count_violations_for_assessment`, etc.) |
+| `email_db.py` | 2 | Email log reads/writes (`log_email`, `get_candidate_emails`) |
+| `db_config.py` | — | PostgreSQL connection via `DATABASE_URL` |
+
+### Services & Utilities
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `resume_analyzer.py` | ~545 | OpenAI resume analysis (pros/cons, match scoring) |
+| `resume_parser.py` | ~150 | PDF/DOCX text extraction (PyPDF2, python-docx) |
+| `email_service.py` | ~800 | Email notifications (Resend API + SMTP fallback) |
+| `ai_question_generator.py` | ~810 | GPT-4o-mini question generation for assessments |
+| `job_matcher.py` | ~400 | Rule-based + AI job-candidate matching |
+| `questions_bank.py` | ~200 | Static fallback question bank |
+| `websocket_server.py` | ~350 | Socket.IO signaling server for WebRTC proctoring |
+| `rate_limiter.py` | — | Per-endpoint rate limiting (Flask-Limiter) |
+| `security_headers.py` | — | HTTP security header middleware |
+| `request_logger.py` | — | Request logging middleware |
 
 ---
 
@@ -701,6 +727,114 @@ if __name__ == '__main__':
 
 ---
 
+## Database Domain Modules
+
+> Added in May 2026. Previously all of this lived in `db_helpers.py`.
+
+### user_db.py
+
+Authentication and user lookup. All other modules import `DatabaseError` from here.
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `create_user(email, password_hash, role, name)` | `int` | Insert user, return new user ID |
+| `get_user_by_email(email)` | `dict \| None` | Cached lookup by email (LRU 128) |
+| `get_user_by_id(user_id)` | `dict \| None` | Cached lookup by ID (LRU 256) |
+
+### candidate_db.py
+
+Candidate CRUD operations.
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `get_candidate_by_email(email)` | `dict \| None` | Case-insensitive email lookup |
+| `insert_candidate(name, email, phone, resume_path, parsed_data, pros, cons, status)` | `int` | Insert candidate, return ID |
+| `get_candidate_by_id(candidate_id)` | `dict \| None` | Fetch candidate with parsed skills list |
+| `get_all_candidates()` | `list[dict]` | All candidates ordered by created_at DESC |
+| `update_candidate_shortlist(candidate_id, status, score)` | — | Update shortlist status and match score |
+| `update_candidate_status(candidate_id, status, pros, cons)` | `bool` | Update status, optionally update pros/cons |
+
+### assessment_db.py
+
+Assessment lifecycle, response tracking, scoring, scheduling, and token access.
+
+**Core assessment:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `create_assessment(candidate_id, job_id)` | `int` | Create in-progress assessment |
+| `get_assessment_by_id(assessment_id)` | `dict \| None` | Fetch assessment record |
+| `get_assessment_by_candidate_id(candidate_id)` | `dict \| None` | Most recent assessment for a candidate |
+| `update_assessment_scores(assessment_id, technical_score, psychometric_score, decision, rationale)` | — | Finalize scores and mark completed |
+
+**Response tracking:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `save_mcq_response(assessment_id, question_id, selected_answer, is_correct, time_spent)` | — | Upsert MCQ answer |
+| `get_saved_mcq_answers(assessment_id)` | `dict` | `{question_id: selected_answer}` |
+| `save_coding_submission(assessment_id, problem_id, language, code, test_cases_passed, total_test_cases)` | — | Upsert coding submission |
+| `get_saved_coding_submission(assessment_id)` | `dict \| None` | Latest coding submission |
+| `save_psychometric_response(assessment_id, question_id, trait, score, scenario_response)` | — | Upsert psychometric response |
+| `get_saved_psychometric_answers(assessment_id)` | `dict` | `{question_id: selected_option_index}` |
+
+**Scoring:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `get_mcq_score(assessment_id)` | `float` | Percentage correct (0-100) |
+| `get_coding_score(assessment_id)` | `float` | Test cases passed percentage |
+| `get_psychometric_scores(assessment_id)` | `dict` | `{trait: avg_score}` |
+
+**Scheduling:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time, is_technical_role, questions_data)` | `int` | Schedule an assessment, return ID |
+| `get_scheduled_assessment(candidate_id)` | `dict \| None` | Scheduled assessment for a candidate |
+| `update_scheduled_assessment_status(scheduled_assessment_id, status, assessment_id)` | `bool` | Update status (scheduled/in_progress/completed) |
+| `check_assessment_time_valid(candidate_id, current_time, window_minutes)` | `tuple(bool, str, str)` | Check ±30 min window validity |
+
+**Token access:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `generate_assessment_token()` | `str` | Secure random URL-safe token |
+| `set_assessment_token(scheduled_assessment_id, token)` | `bool` | Assign token to scheduled assessment |
+| `get_assessment_by_token(token)` | `dict \| None` | Fetch assessment and candidate info by token |
+| `start_assessment_by_token(token)` | `bool` | Mark as in_progress and record start time |
+
+**Questions and time:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `save_assessment_questions(assessment_id, questions_data)` | — | Store pre-generated questions |
+| `get_assessment_questions(assessment_id)` | `dict \| None` | Retrieve stored questions |
+| `update_assessment_time_elapsed(assessment_id, time_elapsed_seconds)` | — | Update elapsed time |
+| `get_assessment_time_elapsed(assessment_id)` | `int` | Seconds elapsed since started_at |
+
+### proctoring_db.py
+
+Proctoring event logging and violation tracking.
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `log_proctoring_event(assessment_id, event_type, severity, details)` | — | Log event and increment violation counter |
+| `record_proctoring_violation(assessment_id, violation_type, description, severity, screenshot_url)` | `int` | Record violation, return violation ID |
+| `get_violations_for_assessment(assessment_id)` | `list[dict]` | All violations ordered by timestamp DESC |
+| `count_violations_for_assessment(assessment_id)` | `int` | Total violation count |
+
+### email_db.py
+
+Email log persistence (used by `email_service.py`).
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `log_email(recipient_email, recipient_name, email_type, subject, status, error_message)` | `int` | Insert email log entry, return ID |
+| `get_candidate_emails(candidate_email)` | `list[dict]` | All emails sent to a candidate, newest first |
+
+---
+
 ## Related Documentation
 
 - [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) - System architecture
@@ -709,5 +843,4 @@ if __name__ == '__main__':
 
 ---
 
-*Last Updated: January 2026*
-*Version: 1.0*
+*Last Updated: May 2026*

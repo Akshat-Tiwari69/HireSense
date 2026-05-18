@@ -1,145 +1,189 @@
-# 🚀 CYGNUSA Elite-Hire - AI-Enabled HR Evaluation System
+# HireSense — AI-Powered Recruitment Platform
 
 > **Team:** Akshat (Backend) | Shaivi (Frontend) | Prashanth (Database)
 
----
-
-## 🎯 PROJECT STATUS: COMPLETE (v1.0) 🟢
-
-We have successfully built and integrated the full **High-Fidelity Two-Sided Platform** for AI-enabled hiring.
-
-### **Core Features Implemented:**
-- **🎨 Modern UI/UX**: Complete redesign with Tailwind CSS, Shadcn UI, and Lucide icons.
-- **🔐 Authentication**: Secure JWT-based login for interviewers.
-- **📊 Interviewer Dashboard**: Real-time tracking of candidates, AI match scores, and status updates.
-- **🤖 AI Integration**:
-    - **Resume Parsing**: Auto-extracts skills, experience, and education.
-    - **AI Analysis**: Generates Pros/Cons and Match Scores.
-    - **Recommendations**: Providing hiring recommendations based on assessment results.
-- **📝 Assessments**: Full flow for MCQ, Coding, and Psychometric tests.
-- **📧 Email System**: Automated notifications for applications, scheduling, and decisions.
+HireSense is a full-stack AI-enabled hiring platform that handles the complete recruitment pipeline — from resume submission and AI analysis through technical assessments with live proctoring to final hiring decisions.
 
 ---
 
-## 🏗️ SYSTEM ARCHITECTURE & FLOW
+## Tech Stack
 
-### **1. Candidate Flow (Interviewee)**
-1.  **Landing Page**: Users choose "I'm a Candidate".
-2.  **Apply**: Fill details and upload resume (PDF/DOCX).
-    -   *System*: Parses resume, runs AI analysis, saves to DB.
-3.  **Wait**: Receive acknowledgment email.
-4.  **Assessment**: If shortlisted, receive email with link.
-    -   *System*: Validates access time window.
-5.  **Take Test**: Complete MCQs, Coding Challenge, and Psychometric questions.
-6.  **Results**: Submit and wait for final decision.
-
-### **2. Recruiter Flow (Interviewer)**
-1.  **Login**: Secure access via `/login`.
-2.  **Dashboard**: View all applicants with **AI Match Scores**.
-3.  **Review**: Click candidate to see detailed AI insights (Pros/Cons).
-4.  **Action**:
-    -   **Shortlist/Schedule**: Triggers assessment email.
-    -   **Reject**: Triggers rejection email.
-5.  **Decision**: View assessment results and make final Hire/No-Hire decision.
+| Layer | Technologies |
+|-------|-------------|
+| Frontend | React 18, Vite, Tailwind CSS, shadcn/ui, Recharts |
+| Backend | Flask 3.0, Flask-JWT-Extended, Flask-Limiter, Flask-CORS |
+| Database | PostgreSQL 15 (Supabase compatible) |
+| AI | OpenAI GPT-4o-mini (resume analysis, question generation, job matching) |
+| Realtime | Socket.IO + WebRTC (live proctoring) |
+| Email | Resend API with SMTP fallback |
 
 ---
 
-## 📊 Project Completion Report
+## What It Does
 
-| Phase | Status | Completion |
-|-------|--------|------------|
-| 🏗️ Database Architecture | 🟢 COMPLETE | 100% |
-| 🔐 Backend Authentication | 🟢 COMPLETE | 100% |
-| 🤖 AI Resume Analyzer | 🟢 COMPLETE | 100% |
-| 📝 Assessment Engine | 🟢 COMPLETE | 100% |
-| 📧 Email Notification Service | 🟢 COMPLETE | 100% |
-| 🎨 Frontend UI (High Fidelity) | 🟢 COMPLETE | 100% |
-| 🔌 Frontend-Backend Integration | 🟢 COMPLETE | 100% |
-| 🚀 Deployment Ready | 🟢 COMPLETE | 100% |
+| Feature | Description |
+|---------|-------------|
+| Resume Parsing & AI Analysis | Extracts skills/experience, generates pros/cons and match scores |
+| Job Matching | Rule-based + AI re-ranking of candidate-to-job fit |
+| Assessment Engine | MCQ, coding challenges (multi-language), psychometric tests |
+| Live Proctoring | WebRTC video stream with violation detection (face, tab-switch, copy-paste) |
+| Role-Based Dashboards | Admin, Sector Admin, Interviewer, Proctor, Candidate |
+| Email Automation | Assessment invitations, rejections, final decisions |
 
 ---
 
-## 🔧 SETUP INSTRUCTIONS
+## User Roles
+
+| Role | Access |
+|------|--------|
+| Admin | Full system — users, candidates, jobs, sectors, analytics |
+| Sector Admin | Scoped to their sector's jobs and candidates |
+| Interviewer | Candidate review, assessment scheduling, final decisions |
+| Proctor | Live session monitoring, violation reporting |
+| Candidate | Job listings, application submission, assessment |
+
+---
+
+## Setup
 
 ### Prerequisites
-- Python 3.8+
-- Node.js 16+
-- SQLite
 
-### 1. Backend Setup
+- Python 3.9+
+- Node.js 18+
+- PostgreSQL 15+ (or a Supabase project)
+- OpenAI API key
+
+### Backend
+
 ```bash
 cd backend
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate    # Windows: venv\Scripts\activate
+
 # Install dependencies
 pip install -r requirements.txt
 
-# Initialize Database
-python init_db.py
+# Create .env file — see docs/ENVIRONMENT_CONFIG.md for all variables
+cp .env.example .env        # then fill in values
 
-# Seed Database (Creates default Admin/Interviewer)
-python seed_db.py
-# Default User: interviewer@company.com / password123
+# Run database migrations
+python scripts/run_migration.py
 
-# Run Server
+# Start server (development)
 python app.py
 ```
-*Server runs on http://localhost:5000*
 
-### 2. Frontend Setup
+Server runs at `http://localhost:5000`
+
+### Frontend
+
 ```bash
 cd frontend
+
 # Install dependencies
 npm install
 
-# Run Development Server
+# Create .env.local — minimum required:
+# VITE_API_BASE_URL=http://localhost:5000
 npm run dev
 ```
-*App runs on http://localhost:5173*
+
+App runs at `http://localhost:5173`
 
 ---
 
-## 🧪 TESTING THE FLOW
+## Documentation
 
-1.  **Open Landing Page**: http://localhost:5173
-2.  **Apply**: Go to "Apply Now", upload a resume.
-3.  **Login as Recruiter**:
-    -   Go to `/login`
-    -   Creds: `interviewer@company.com` / `password123`
-4.  **Check Dashboard**: You should see the new candidate.
-5.  **View Details**: Check AI score and insights.
+All documentation lives in `docs/`. Start with the index:
 
----
-
-## 📚 DOCUMENTATION
-
-Comprehensive documentation is available in the `docs/` folder:
-
-### 📖 Complete Index
-- **[Documentation Index](docs/DOCUMENTATION_INDEX.md)** - Start here for all documentation
-
-### 🏗️ Architecture & Design
-| Document | Description |
-|----------|-------------|
-| [Project Architecture](docs/PROJECT_ARCHITECTURE.md) | System design and data flow |
-| [Database Schema](docs/DATABASE_SCHEMA.md) | Complete database documentation |
-| [Backend File Reference](docs/BACKEND_FILE_REFERENCE.md) | All backend Python files documented |
-| [Frontend Guide](docs/FRONTEND_GUIDE.md) | React components and pages |
-
-### 🔌 API & Features
-| Document | Description |
-|----------|-------------|
-| [API Documentation](docs/API_DOCS.md) | Complete REST API reference with auth |
-| [Assessment System](docs/ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, Coding, Psychometric tests |
-| [Proctoring System](docs/PROCTOR_GUIDE.md) | Face detection and monitoring |
-| [Admin Dashboard](docs/ADMIN_DASHBOARD_GUIDE.md) | User and job management |
-
-### 🚀 Deployment & Configuration
-| Document | Description |
-|----------|-------------|
-| [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) | Production deployment |
-| [Environment Config](docs/ENVIRONMENT_CONFIG.md) | All environment variables |
+| Document | What it covers |
+|----------|----------------|
+| [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) | Full doc index + quick API reference |
+| [docs/PROJECT_ARCHITECTURE.md](docs/PROJECT_ARCHITECTURE.md) | System design, data flows, module responsibilities |
+| [docs/BACKEND_FILE_REFERENCE.md](docs/BACKEND_FILE_REFERENCE.md) | Every backend Python file and its functions |
+| [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) | All 12 tables, relationships, indexes |
+| [docs/API_DOCS.md](docs/API_DOCS.md) | Complete REST API reference with examples |
+| [docs/ASSESSMENT_SYSTEM_GUIDE.md](docs/ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, coding, psychometric tests |
+| [docs/PROCTOR_GUIDE.md](docs/PROCTOR_GUIDE.md) | WebRTC proctoring, face detection, violations |
+| [docs/ADMIN_DASHBOARD_GUIDE.md](docs/ADMIN_DASHBOARD_GUIDE.md) | Admin panel, user/job management |
+| [docs/FRONTEND_GUIDE.md](docs/FRONTEND_GUIDE.md) | React pages, components, routing |
+| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Railway / Render / Vercel deployment |
+| [docs/ENVIRONMENT_CONFIG.md](docs/ENVIRONMENT_CONFIG.md) | All environment variables |
 
 ---
 
-## 📄 License
-MIT License
+## Current Development Status
 
+### What's Working (on `main`)
+- Full candidate application flow
+- AI resume analysis and job matching
+- Assessment engine (MCQ, coding, psychometric)
+- Live proctoring with WebRTC
+- Role-based access for all 5 roles
+- Email automation (Resend + SMTP fallback)
+- Admin dashboard with analytics
+
+### Active Refactoring (on `dev`)
+The codebase is being restructured to make it maintainable long-term.
+See the [refactoring plan](#refactoring-plan) below.
+
+---
+
+## Refactoring Plan
+
+The project has several large files that are hard to maintain. We are splitting them into focused modules, one phase at a time. All changes go to `dev` branch first.
+
+### Phase 1 — Backend DB split (done)
+
+`backend/db_helpers.py` was 1,820 lines containing every database query for every domain. It has been split into:
+
+| Module | Responsibility |
+|--------|---------------|
+| `backend/user_db.py` | User auth queries |
+| `backend/candidate_db.py` | Candidate CRUD |
+| `backend/assessment_db.py` | Assessments, responses, scoring, scheduling, token access |
+| `backend/proctoring_db.py` | Violation recording and event logging |
+| `backend/email_db.py` | Email log reads/writes |
+
+`db_helpers.py` is now a thin re-export hub — all existing imports in other files continue to work unchanged.
+
+### Phase 2 — Backend route split (upcoming)
+
+| File | Lines | Plan |
+|------|-------|------|
+| `admin_routes.py` | 1,815 | Split into `routes/admin_users.py`, `routes/admin_jobs.py`, `routes/admin_analytics.py` |
+| `interviewee_routes.py` | 1,217 | Split by assessment section |
+| `app.py` | 1,081 | Extract resume endpoints into their own blueprint |
+
+### Phase 3 — Frontend component split (upcoming)
+
+| File | Lines | Plan |
+|------|-------|------|
+| `AdminDashboardPage.jsx` | 2,602 | Extract 6 tab-level sub-components |
+| `AssessmentPage.jsx` | 1,654 | Extract `MCQSection`, `CodingSection`, `PsychometricSection` |
+| `InterviewerDashboardPage.jsx` | 1,025 | Extract modal and list components |
+
+### Phase 4 — Tests and CI (upcoming)
+
+- Backend: `pytest` fixtures for every route file
+- Frontend: Vitest for critical components
+- GitHub Actions: lint → test → build pipeline
+
+---
+
+## Branch Strategy
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Production-stable code only |
+| `dev` | Integration branch — all features and refactoring go here first |
+
+PRs from `dev` → `main` are reviewed before merging.
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.

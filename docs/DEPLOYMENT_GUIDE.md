@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Complete guide for deploying CYGNUSA Elite-Hire to production environments.
+Complete guide for deploying HireSense to production environments.
 
 ---
 
@@ -221,9 +221,12 @@ GRANT ALL PRIVILEGES ON DATABASE elite_hire_prod TO elite_hire_user;
 # Set DATABASE_URL
 export DATABASE_URL="postgresql://user:pass@host:5432/elite_hire_prod"
 
-# Initialize schema
+# Apply schema
 cd backend
-python init_db.py
+python scripts/run_migration.py
+
+# Or apply the SQL directly:
+psql $DATABASE_URL < database/schema_postgres.sql
 ```
 
 #### 3. Create Initial Admin
@@ -482,5 +485,4 @@ psql $DATABASE_URL < backup_20260125.sql
 
 ---
 
-*Last Updated: January 2026*
-*Version: 1.0*
+*Last Updated: May 2026*

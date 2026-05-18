@@ -1,6 +1,6 @@
-# CYGNUSA Elite-Hire Documentation Index
+# HireSense Documentation Index
 
-Complete documentation for the AI-Enabled HR Evaluation System.
+Complete documentation for the AI-Powered Recruitment Platform.
 
 ---
 
@@ -22,40 +22,41 @@ Complete documentation for the AI-Enabled HR Evaluation System.
 
 ### Features
 - [Assessment System](ASSESSMENT_SYSTEM_GUIDE.md) - MCQ, Coding, Psychometric tests
-- [Proctoring System](PROCTOR_GUIDE.md) - Face detection and violation monitoring
+- [Proctoring System](PROCTOR_GUIDE.md) - WebRTC face detection and violation monitoring
 - [Admin Dashboard](ADMIN_DASHBOARD_GUIDE.md) - User and job management
 
 ### Deployment
-- [Deployment Guide](DEPLOYMENT_GUIDE.md) - Production deployment
+- [Deployment Guide](DEPLOYMENT_GUIDE.md) - Production deployment (Railway, Render, Vercel)
 - [Environment Configuration](ENVIRONMENT_CONFIG.md) - All environment variables
 
 ---
 
 ## Project Overview
 
-CYGNUSA Elite-Hire is a comprehensive AI-enabled hiring platform that streamlines the recruitment process from resume submission to final hiring decision.
+HireSense is a full-stack AI-enabled hiring platform that covers the complete recruitment pipeline — from resume submission and AI analysis through technical assessments with live proctoring to final hiring decisions.
 
 ### Key Features
 
 | Feature | Description |
 |---------|-------------|
-| AI Resume Analysis | OpenAI-powered pros/cons generation |
-| Multi-Role System | Interviewer, Admin, Proctor roles |
-| Assessment System | MCQ, Coding, Psychometric tests |
-| Proctoring | Browser-based face detection |
-| Email Notifications | Automated candidate communication |
-| Time-Windowed Access | ±30 minute assessment windows |
+| AI Resume Analysis | OpenAI GPT-4o-mini pros/cons generation and match scoring |
+| Job Matching | Rule-based + AI re-ranking of candidate-to-job fit |
+| Multi-Role System | Admin, Sector Admin, Interviewer, Proctor, Candidate roles |
+| Assessment Engine | MCQ, Coding challenges (multi-language), Psychometric tests |
+| Live Proctoring | WebRTC video with face detection and violation tracking |
+| Email Automation | Assessment invitations, rejections, final decisions |
+| Time-Windowed Access | ±30 minute assessment access windows |
 
 ### Technology Stack
 
 | Layer | Technologies |
 |-------|-------------|
-| Frontend | React 18, Vite, Tailwind CSS, Shadcn UI |
-| Backend | Flask, Flask-JWT-Extended, Flask-CORS |
-| Database | SQLite (dev), PostgreSQL (prod) |
+| Frontend | React 18, Vite, Tailwind CSS, shadcn/ui, Recharts, Socket.IO client |
+| Backend | Flask 3.0, Flask-JWT-Extended, Flask-Limiter, Flask-CORS, Socket.IO |
+| Database | PostgreSQL 15 (Supabase compatible) |
 | AI | OpenAI GPT-4o-mini |
-| Email | Resend API, SMTP |
-| Code Execution | Piston API |
+| Realtime | Socket.IO + WebRTC (simple-peer) |
+| Email | Resend API, SMTP fallback |
 
 ---
 
@@ -63,8 +64,9 @@ CYGNUSA Elite-Hire is a comprehensive AI-enabled hiring platform that streamline
 
 ### Prerequisites
 
-- Python 3.8+
-- Node.js 16+
+- Python 3.9+
+- Node.js 18+
+- PostgreSQL 15+ (or Supabase)
 - OpenAI API key
 
 ### 1. Backend Setup
@@ -74,23 +76,22 @@ cd backend
 
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate    # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure environment
+# Configure environment (see ENVIRONMENT_CONFIG.md for all variables)
 cp .env.example .env
-# Edit .env with your API keys
 
-# Initialize database
-python init_db.py
+# Run database migrations
+python scripts/run_migration.py
 
 # Start server
 python app.py
 ```
 
-Server runs at: http://localhost:5000
+Server runs at: `http://localhost:5000`
 
 ### 2. Frontend Setup
 
@@ -101,20 +102,20 @@ cd frontend
 npm install
 
 # Configure environment
-echo "VITE_API_BASE_URL=http://localhost:5000" > .env
+echo "VITE_API_BASE_URL=http://localhost:5000" > .env.local
 
 # Start development server
 npm run dev
 ```
 
-App runs at: http://localhost:5173
+App runs at: `http://localhost:5173`
 
 ### 3. Test the Application
 
-1. Open http://localhost:5173
-2. Click "I'm a Candidate" → Apply with resume
-3. Login as interviewer: `interviewer@company.com` / `password123`
-4. Review candidate in dashboard
+1. Open `http://localhost:5173`
+2. Click "I'm a Candidate" → Apply with a resume
+3. Login as an interviewer using credentials created via the admin panel
+4. Review the candidate in the interviewer dashboard
 
 ---
 
@@ -124,9 +125,9 @@ App runs at: http://localhost:5173
 
 | Document | Description |
 |----------|-------------|
-| [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) | Complete system architecture, data flow, security |
-| [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | All database tables, relationships, indexes |
-| [BACKEND_FILE_REFERENCE.md](BACKEND_FILE_REFERENCE.md) | All Python files with function documentation |
+| [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) | Complete system architecture, data flow, module responsibilities |
+| [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | All tables, relationships, indexes |
+| [BACKEND_FILE_REFERENCE.md](BACKEND_FILE_REFERENCE.md) | All Python files and their functions |
 | [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md) | React components, pages, routing |
 
 ### API & Features
@@ -134,7 +135,7 @@ App runs at: http://localhost:5173
 | Document | Description |
 |----------|-------------|
 | [API_DOCS.md](API_DOCS.md) | Complete REST API reference with authentication |
-| [ASSESSMENT_SYSTEM_GUIDE.md](ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, coding, psychometric tests, time validation |
+| [ASSESSMENT_SYSTEM_GUIDE.md](ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, coding, psychometric tests |
 | [PROCTOR_GUIDE.md](PROCTOR_GUIDE.md) | Proctoring, face detection, violation monitoring |
 | [ADMIN_DASHBOARD_GUIDE.md](ADMIN_DASHBOARD_GUIDE.md) | Admin panel, user management, job descriptions |
 
@@ -144,6 +145,7 @@ App runs at: http://localhost:5173
 |----------|-------------|
 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Production deployment (Railway, Render, Vercel) |
 | [ENVIRONMENT_CONFIG.md](ENVIRONMENT_CONFIG.md) | All environment variables reference |
+| [PROCTOR_USER_SETUP.md](PROCTOR_USER_SETUP.md) | Creating proctor accounts |
 
 ---
 
@@ -152,55 +154,56 @@ App runs at: http://localhost:5173
 ### Candidate Flow
 
 ```
-Landing Page → Apply → Upload Resume → Receive Email
-                               ↓
-              Wait for Assessment Invitation
-                               ↓
-              Assessment Link (±30 min window)
-                               ↓
-              Take Assessment (MCQ → Coding → Psychometric)
-                               ↓
-              Receive Decision Email
+Landing Page → Apply → Upload Resume → Acknowledgement Email
+                                              ↓
+                              Wait for Assessment Invitation
+                                              ↓
+                              Click Assessment Link (±30 min window)
+                                              ↓
+                              Complete Assessment (MCQ → Coding → Psychometric)
+                                              ↓
+                              Receive Final Decision Email
 ```
 
 ### Interviewer Flow
 
 ```
 Login → Dashboard → Review Candidates
-                         ↓
-           View AI Scores & Pros/Cons
-                         ↓
-        ┌────────────────┴────────────────┐
-        ↓                                 ↓
-   Reject (Email)              Schedule Assessment (Email)
-                                          ↓
-                              View Assessment Results
-                                          ↓
-                              Make Final Decision (Email)
+                          ↓
+            View AI Match Scores & Pros/Cons
+                          ↓
+         ┌────────────────┴────────────────┐
+         ↓                                 ↓
+    Reject (Email sent)         Schedule Assessment (Email sent)
+                                           ↓
+                               View Assessment Results
+                                           ↓
+                               Make Final Decision (Email sent)
 ```
 
 ### Admin Flow
 
 ```
 Login → Admin Dashboard
-              ↓
-    ┌─────────┴─────────┐
-    ↓                   ↓
-User Management    Job Descriptions
-    ↓                   ↓
-CRUD Users         CRUD Jobs
+               ↓
+     ┌─────────┼──────────┐
+     ↓         ↓          ↓
+User Mgmt  Job Mgmt   Analytics
+     ↓         ↓
+  CRUD       CRUD
+  Users      Jobs
 ```
 
 ### Proctor Flow
 
 ```
 Login → Proctor Dashboard
-              ↓
-    View Active Assessments
-              ↓
-    Monitor Violations
-              ↓
-    Flag for Review
+               ↓
+   View Active Assessment Sessions
+               ↓
+   Monitor Live Video Feeds
+               ↓
+   Review & Record Violations
 ```
 
 ---
@@ -242,7 +245,7 @@ POST /api/interviewer/assessments/:id/final-decision
 Body: {"decision": "hire", "rationale": "..."}
 ```
 
-### Assessment
+### Assessment (Candidate)
 
 ```bash
 # Verify token
@@ -251,11 +254,11 @@ GET /api/interviewee/assessment/verify/:token
 # Start assessment
 POST /api/interviewee/assessment/start-by-token/:token
 
-# Submit MCQ
+# Submit MCQ answer
 POST /api/assessment/mcq/submit
 Body: {"assessment_id": 1, "question_id": 1, "answer": 0}
 
-# Complete
+# Complete assessment
 POST /api/assessment/complete
 Body: {"assessment_id": 1}
 ```
@@ -267,42 +270,33 @@ Body: {"assessment_id": 1}
 ### Required
 
 ```bash
-JWT_SECRET_KEY=<32+ char secret>
+DATABASE_URL=postgresql://user:pass@host:5432/dbname
+JWT_SECRET_KEY=<32+ character random string>
 OPENAI_API_KEY=sk-...
 ```
 
 ### Optional
 
 ```bash
-DATABASE_URL=postgresql://...  # Default: SQLite
-RESEND_API_KEY=re_...          # Email via Resend
-SMTP_HOST=smtp.gmail.com       # Email via SMTP
-CORS_ORIGINS=https://...       # Production frontend
+RESEND_API_KEY=re_...          # Email via Resend API
+SMTP_HOST=smtp.gmail.com       # Email via SMTP (fallback)
+CORS_ORIGINS=https://...       # Restrict CORS in production
 ```
 
-See [ENVIRONMENT_CONFIG.md](ENVIRONMENT_CONFIG.md) for complete reference.
+See [ENVIRONMENT_CONFIG.md](ENVIRONMENT_CONFIG.md) for the complete reference.
 
 ---
 
-## Support
-
-### Common Issues
+## Common Issues
 
 | Issue | Solution |
 |-------|----------|
-| CORS error | Check `CORS_ORIGINS` matches frontend URL |
-| JWT invalid | Verify `JWT_SECRET_KEY` is set |
-| AI not working | Check `OPENAI_API_KEY` is valid |
-| Email not sent | Configure Resend or SMTP |
-
-### Getting Help
-
-1. Check relevant documentation
-2. Review error logs
-3. Check environment configuration
-4. Verify database connection
+| CORS error | Check `CORS_ORIGINS` matches the frontend URL |
+| JWT invalid | Verify `JWT_SECRET_KEY` is set and matches between restarts |
+| AI not working | Check `OPENAI_API_KEY` is valid and has credits |
+| Email not sending | Configure either `RESEND_API_KEY` or SMTP variables |
+| DB connection failed | Verify `DATABASE_URL` format: `postgresql://user:pass@host/db` |
 
 ---
 
-*Documentation Version: 1.0*
-*Last Updated: January 2026*
+*Last Updated: May 2026*
