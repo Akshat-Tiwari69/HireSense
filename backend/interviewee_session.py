@@ -30,7 +30,15 @@ from db_helpers import (
     get_saved_mcq_answers,
     get_saved_psychometric_answers,
     get_saved_coding_submission,
+    verify_assessment_access_token,
 )
+
+
+def _check_assessment_token(assessment_id: int):
+    token = request.headers.get('X-Assessment-Token', '')
+    if not verify_assessment_access_token(token, assessment_id):
+        return jsonify({'status': 'error', 'message': 'Invalid or missing assessment token'}), 403
+    return None
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
 from ai_question_generator import get_ai_question_generator
 
@@ -49,6 +57,10 @@ def get_remaining_time(assessment_id):
     Calculated from started_at so the client cannot inflate it.
     """
     try:
+        err = _check_assessment_token(assessment_id)
+        if err:
+            return err
+
         assessment = get_assessment_by_id(assessment_id)
         if not assessment:
             return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
@@ -70,117 +82,21 @@ def get_remaining_time(assessment_id):
 
 
 @interviewee_session_bp.route('/my-assessment/<int:candidate_id>', methods=['GET'])
-@connection_pool
 def get_my_assessment(candidate_id):
-    try:
-        candidate = get_candidate_by_id(candidate_id)
-        if not candidate:
-            return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
-
-        scheduled = get_scheduled_assessment(candidate_id)
-        if not scheduled:
-            return jsonify({'status': 'error', 'message': 'No assessment scheduled yet'}), 404
-
-        current_time = f"{datetime.utcnow().isoformat()}Z"
-        is_valid, scheduled_time, message = check_assessment_time_valid(
-            candidate_id=candidate_id, current_time=current_time, window_minutes=30
-        )
-
-        scheduled_dt = datetime.fromisoformat(scheduled['scheduled_time'].replace('Z', '+00:00'))
-        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
-        minutes_until = int(((scheduled_dt - current_dt).total_seconds()) / 60)
-
-        return jsonify({'status': 'success', 'data': {
-            'candidate_id': candidate_id,
-            'candidate_name': candidate['name'],
-            'scheduled_time': scheduled['scheduled_time'],
-            'window_minutes': 30,
-            'current_time': current_time,
-            'minutes_until_start': minutes_until,
-            'can_start': is_valid,
-            'message': message,
-            'status': scheduled['status'],
-            'assessment_id': scheduled.get('assessment_id')
-        }}), 200
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': 'Failed to fetch assessment info'}), 500
+    """REMOVED: Exposed schedule info by guessable candidate ID. Use token-based flow."""
+    return jsonify({
+        'status': 'error',
+        'message': 'This endpoint has been removed. Use /api/interviewee/assessment/verify/<token>'
+    }), 410
 
 
 @interviewee_session_bp.route('/assessment/start/<int:candidate_id>', methods=['POST'])
-@connection_pool
 def start_assessment(candidate_id):
-    try:
-        candidate = get_candidate_by_id(candidate_id)
-        if not candidate:
-            return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
-
-        scheduled = get_scheduled_assessment(candidate_id)
-        if not scheduled:
-            return jsonify({'status': 'error', 'message': 'No assessment scheduled. Please contact your recruiter.'}), 404
-
-        current_time = f"{datetime.utcnow().isoformat()}Z"
-        is_valid, scheduled_time, time_message = check_assessment_time_valid(
-            candidate_id=candidate_id, current_time=current_time, window_minutes=30
-        )
-
-        if not is_valid:
-            scheduled_dt = datetime.fromisoformat(scheduled_time.replace('Z', '+00:00'))
-            current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
-            minutes_diff = int(abs((current_dt - scheduled_dt).total_seconds()) / 60)
-            return jsonify({
-                'status': 'error',
-                'message': f'Assessment not available yet. {time_message}',
-                'data': {'scheduled_time': scheduled_time, 'current_time': current_time,
-                         'minutes_away': minutes_diff, 'allowed_window': 30}
-            }), 403
-
-        if scheduled.get('assessment_id'):
-            existing = get_assessment_by_id(scheduled['assessment_id'])
-            if existing and existing['status'] in ['started', 'in_progress']:
-                assessment_id = existing['id']
-                mcq_questions = get_mcq_questions(count=10)
-                mcq_for_frontend = [{"id": q["id"], "question": q["question"], "options": q["options"],
-                                      "time_limit": q["time_limit"], "category": q["category"],
-                                      "difficulty": q["difficulty"]} for q in mcq_questions]
-                coding_problem = get_coding_problem(difficulty="easy")
-                psychometric_scenarios = get_psychometric_scenarios(count=3)
-                return jsonify({'status': 'success', 'message': 'Assessment resumed', 'data': {
-                    'assessment_id': assessment_id, 'candidate_id': candidate_id,
-                    'mcq_questions': mcq_for_frontend,
-                    'coding_problem': {'id': coding_problem['id'], 'title': coding_problem['title'],
-                                       'description': coding_problem['description'],
-                                       'example': coding_problem['example'],
-                                       'difficulty': coding_problem['difficulty']},
-                    'psychometric_scenarios': psychometric_scenarios, 'resumed': True
-                }}), 200
-
-        assessment_id = create_assessment(candidate_id)
-        update_scheduled_assessment_status(
-            scheduled_assessment_id=scheduled['id'], status='in_progress', assessment_id=assessment_id
-        )
-
-        candidate = get_candidate_by_id(candidate_id)
-        candidate_skills = _extract_candidate_skills(candidate)
-
-        applied_job_title, job_required_skills = _fetch_job_for_candidate(candidate_id)
-        logger.info(f"Generating AI questions for candidate {candidate_id} (role: {applied_job_title or 'unknown'})")
-
-        mcq_questions, coding_problem, psychometric_scenarios = _generate_questions(
-            candidate_skills, job_required_skills, applied_job_title, is_technical=True
-        )
-
-        mcq_for_frontend = _strip_answers(mcq_questions)
-
-        return jsonify({'status': 'success', 'message': 'Assessment started successfully', 'data': {
-            'assessment_id': assessment_id, 'candidate_id': candidate_id,
-            'scheduled_time': scheduled_time, 'mcq_questions': mcq_for_frontend,
-            'coding_problem': _format_coding_problem(coding_problem),
-            'psychometric_scenarios': psychometric_scenarios,
-            'ai_generated': bool(candidate_skills)
-        }}), 201
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': 'Failed to start assessment'}), 500
+    """REMOVED: Allowed starting assessments by guessable ID. Use token-based flow."""
+    return jsonify({
+        'status': 'error',
+        'message': 'This endpoint has been removed. Use /api/interviewee/assessment/start-by-token/<token>'
+    }), 410
 
 
 @interviewee_session_bp.route('/assessment/verify/<token>', methods=['GET'])
@@ -231,6 +147,9 @@ def start_assessment_with_token(token):
 
         if assessment['status'] == 'completed':
             return jsonify({'status': 'error', 'message': 'This assessment has already been completed.'}), 400
+        if assessment['status'] == 'cancelled':
+            return jsonify({'status': 'error',
+                            'message': 'This assessment has been cancelled. Please contact your recruiter.'}), 400
 
         ist = pytz.timezone('Asia/Kolkata')
         scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
@@ -261,8 +180,14 @@ def start_assessment_with_token(token):
                 coding_problem = stored_questions.get('coding_problem', {})
                 psychometric_scenarios = stored_questions.get('psychometric_scenarios', [])
         else:
-            start_assessment_by_token(token)
-            assessment_id = create_assessment(assessment['candidate_id'])
+            # start_assessment_by_token updates WHERE status='scheduled'; if it returns
+            # False the row no longer exists in a startable state — abort rather than
+            # creating an orphaned assessment record.
+            started = start_assessment_by_token(token)
+            if not started:
+                return jsonify({'status': 'error',
+                                'message': 'Assessment cannot be started. It may have been cancelled or already used.'}), 400
+            assessment_id = create_assessment(assessment['candidate_id'], scheduled_assessment_id=assessment['id'])
             update_scheduled_assessment_status(
                 scheduled_assessment_id=assessment['id'], status='in_progress', assessment_id=assessment_id
             )
@@ -309,6 +234,7 @@ def start_assessment_with_token(token):
             logger.info(f"Stored questions for assessment {assessment_id}")
 
         mcq_for_frontend = _strip_answers(mcq_questions)
+        psychometric_scenarios = _strip_optimal_choice(psychometric_scenarios)
         total_duration_seconds = 60 * 60
         remaining_seconds = max(0, total_duration_seconds - time_elapsed)
 
@@ -426,6 +352,10 @@ def _generate_questions(candidate_skills, job_required_skills, job_title, is_tec
             get_coding_problem(difficulty="easy") if is_technical else None,
             get_psychometric_scenarios(count=3)
         )
+
+
+def _strip_optimal_choice(scenarios):
+    return [{k: v for k, v in s.items() if k != 'optimal_choice'} for s in (scenarios or [])]
 
 
 def _strip_answers(mcq_questions):

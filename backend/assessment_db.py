@@ -14,18 +14,18 @@ from user_db import DatabaseError
 #                            ASSESSMENT CORE
 # ============================================================================
 
-def create_assessment(candidate_id, job_id=None):
+def create_assessment(candidate_id, job_id=None, scheduled_assessment_id=None):
     try:
         conn = get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
             """
-            INSERT INTO assessments (candidate_id, job_id, status, started_at)
-            VALUES (%s, %s, 'in_progress', CURRENT_TIMESTAMP)
+            INSERT INTO assessments (candidate_id, job_id, scheduled_assessment_id, status, started_at)
+            VALUES (%s, %s, %s, 'in_progress', CURRENT_TIMESTAMP)
             RETURNING id
             """,
-            (candidate_id, job_id)
+            (candidate_id, job_id, scheduled_assessment_id)
         )
         assessment_id = cursor.fetchone()[0]
 
@@ -72,7 +72,7 @@ def get_assessment_by_id(assessment_id):
         cursor.execute("""
             SELECT id, candidate_id, job_id, technical_score, psychometric_score,
                    overall_score, decision, rationale, proctoring_violations, status,
-                   started_at, completed_at
+                   started_at, completed_at, scheduled_assessment_id
             FROM assessments WHERE id = %s
         """, (assessment_id,))
 
@@ -94,7 +94,8 @@ def get_assessment_by_id(assessment_id):
             'proctoring_violations': row[8],
             'status': row[9],
             'started_at': row[10],
-            'completed_at': row[11]
+            'completed_at': row[11],
+            'scheduled_assessment_id': row[12],
         }
 
     except Exception as e:
@@ -118,7 +119,7 @@ def get_assessment_by_candidate_id(candidate_id):
                 FROM mcq_responses GROUP BY assessment_id
             ) m ON a.id = m.assessment_id
             LEFT JOIN (
-                SELECT assessment_id, ROUND(test_cases_passed * 100.0 / test_cases_total, 2) as score
+                SELECT assessment_id, ROUND(SUM(test_cases_passed) * 100.0 / NULLIF(SUM(total_test_cases), 0), 2) as score
                 FROM coding_submissions GROUP BY assessment_id
             ) c ON a.id = c.assessment_id
             WHERE a.candidate_id = %s
@@ -441,6 +442,41 @@ def create_scheduled_assessment(candidate_id, interviewer_id, scheduled_time, is
         raise DatabaseError(f"Error creating scheduled assessment: {str(e)}")
 
 
+def get_scheduled_assessment_by_id(scheduled_assessment_id):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT id, candidate_id, interviewer_id, scheduled_time, status, assessment_id,
+                      is_technical_role, questions_data, created_at, updated_at
+               FROM scheduled_assessments WHERE id = %s""",
+            (scheduled_assessment_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        scheduled_time_raw = row[3]
+        scheduled_time = (
+            scheduled_time_raw.replace(' ', 'T') if isinstance(scheduled_time_raw, str)
+            else (scheduled_time_raw.strftime('%Y-%m-%dT%H:%M:%S') if scheduled_time_raw else None)
+        )
+        questions_data = row[7]
+        if isinstance(questions_data, str):
+            try:
+                questions_data = json.loads(questions_data)
+            except Exception:
+                questions_data = None
+        return {
+            'id': row[0], 'candidate_id': row[1], 'interviewer_id': row[2],
+            'scheduled_time': scheduled_time, 'status': row[4], 'assessment_id': row[5],
+            'is_technical_role': row[6] if row[6] is not None else True,
+            'questions_data': questions_data, 'created_at': row[8], 'updated_at': row[9]
+        }
+    except Exception as e:
+        raise DatabaseError(f"Error retrieving scheduled assessment by id: {str(e)}") from e
+
+
 def get_scheduled_assessment(candidate_id):
     try:
         conn = get_connection()
@@ -640,6 +676,26 @@ def start_assessment_by_token(token):
 
     except Exception as e:
         raise DatabaseError(f"Error starting assessment: {str(e)}") from e
+
+
+def verify_assessment_access_token(token: str, assessment_id: int) -> bool:
+    """Return True if token is valid for the given assessment_id."""
+    if not token:
+        return False
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT 1 FROM scheduled_assessments
+               WHERE access_token = %s AND assessment_id = %s
+               AND status NOT IN ('cancelled')""",
+            (token, assessment_id)
+        )
+        result = cursor.fetchone()
+        conn.close()
+        return bool(result)
+    except Exception:
+        return False
 
 
 # ============================================================================
