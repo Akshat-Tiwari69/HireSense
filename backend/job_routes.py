@@ -295,8 +295,8 @@ def create_job_posting():
             }), 400
 
         claims = get_jwt()
-        admin_email = get_jwt_identity()
-        user_id = int(admin_email)
+        user_identity = get_jwt_identity()  # JWT identity is str(user_id) set at login
+        user_id = int(user_identity)
         role = claims.get('role')
         user_sector_id = claims.get('sector_id')
 
@@ -342,12 +342,12 @@ def create_job_posting():
         conn.commit()
 
         # Audit
-        audit_log(conn, admin_email, 'create_job_posting', 'job_posting', job_id,
+        audit_log(conn, user_identity, 'create_job_posting', 'job_posting', job_id,
                   {'title': data['title'], 'sector_id': data.get('sector_id')},
                   request.remote_addr)
         conn.commit()
 
-        logger.info(f"[JOBS] {admin_email} created job posting #{job_id}: {data['title']}")
+        logger.info(f"[JOBS] user:{user_id} created job posting #{job_id}: {data['title']}")
         return jsonify({'status': 'success', 'data': {'id': job_id}, 'message': 'Job posting created'}), 201
     except Exception as e:
         if conn:
