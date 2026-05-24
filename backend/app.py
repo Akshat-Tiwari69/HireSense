@@ -30,14 +30,7 @@ else:
 from request_logger import init_request_logging
 from security_headers import add_security_headers
 from datetime import timedelta, datetime
-from db_helpers import (
-    create_assessment, save_mcq_response,
-    save_coding_submission, save_psychometric_response,
-    update_assessment_scores, get_assessment_by_id,
-    get_mcq_score, get_coding_score, get_psychometric_scores,
-    update_candidate_status,
-)
-from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
+from db_helpers import update_candidate_status
 from auth import auth_bp
 from interviewer_routes import interviewer_bp
 from interviewee_routes import interviewee_bp
@@ -131,7 +124,7 @@ CORS(app, resources={
             "http://10.9.200.2:5174"
         ],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-        "allow_headers": ["Content-Type", "Authorization"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Assessment-Token"],
         "supports_credentials": True
     }
 })
@@ -236,327 +229,47 @@ def upload_resume_legacy():
 
 @app.route('/api/assessment/start', methods=['POST'])
 def start_assessment():
-    """
-    Start assessment for a candidate
-    
-    Expects JSON:
-        - candidate_id: ID of the candidate
-    
-    Returns:
-        - assessment_id
-        - MCQ questions
-        - Coding problem
-        - Psychometric scenarios
-    """
-    data = request.get_json()
-    
-    if not data or 'candidate_id' not in data:
-        return jsonify({
-            "status": "error",
-            "message": "candidate_id is required"
-        }), 400
-    
-    candidate_id = data['candidate_id']
-    
-    try:
-        # Create assessment in database
-        assessment_id = create_assessment(candidate_id)
-        
-        # Get questions
-        mcq_questions = get_mcq_questions(count=10)
-        coding_problem = get_coding_problem(difficulty="easy")
-        psychometric_scenarios = get_psychometric_scenarios(count=3)
-        
-        # Remove correct answers from MCQ questions before sending
-        mcq_for_frontend = [{
-            "id": q["id"],
-            "question": q["question"],
-            "options": q["options"],
-            "time_limit": q["time_limit"],
-            "category": q["category"],
-            "difficulty": q["difficulty"]
-        } for q in mcq_questions]
-        
-        return jsonify({
-            "status": "success",
-            "message": "Assessment started successfully",
-            "data": {
-                "assessment_id": assessment_id,
-                "mcq_questions": mcq_for_frontend,
-                "coding_problem": {
-                    "id": coding_problem["id"],
-                    "title": coding_problem["title"],
-                    "description": coding_problem["description"],
-                    "example": coding_problem["example"],
-                    "difficulty": coding_problem["difficulty"]
-                },
-                "psychometric_scenarios": psychometric_scenarios
-            }
-        }), 201
-        
-    except Exception as e:
-        app.logger.exception("Error starting assessment")
-        return jsonify({
-            "status": "error",
-            "message": "Failed to start assessment"
-        }), 500
+    """REMOVED: Use /api/interviewee/assessment/start-by-token/<token> instead."""
+    return jsonify({
+        "status": "error",
+        "message": "This endpoint has been removed. Use /api/interviewee/assessment/start-by-token/<token>"
+    }), 410
 
 
 @app.route('/api/assessment/mcq/submit', methods=['POST'])
 def submit_mcq():
-    """
-    DEPRECATED: Use /api/interviewee/assessment/<id>/submit-answer instead.
-    This endpoint is kept for backward compatibility but redirects to the proper handler.
-    """
-    data = request.get_json()
-    if not data:
-        return jsonify({"status": "error", "message": "Missing request body"}), 400
-    
-    assessment_id = data.get('assessment_id')
-    if not assessment_id:
-        return jsonify({"status": "error", "message": "assessment_id is required"}), 400
-    
-    # Forward to the proper interviewee route handler
-    question_id = data.get('question_id')
-    answer = data.get('answer')
-    time_taken = data.get('time_taken', 0)
-    
-    # Convert numeric answer index to letter if needed
-    if isinstance(answer, int) and 0 <= answer <= 3:
-        answer = ['A', 'B', 'C', 'D'][answer]
-    
-    try:
-        from interviewee_routes import interviewee_bp
-        # Use the proper submit-answer logic
-        from db_helpers import get_assessment_questions, get_assessment_by_id, save_mcq_response
-        from questions_bank import get_mcq_questions
-        
-        assessment = get_assessment_by_id(assessment_id)
-        if not assessment:
-            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
-        
-        stored_questions = get_assessment_questions(assessment_id)
-        questions = stored_questions.get('mcq_questions', []) if stored_questions else get_mcq_questions(count=20)
-        
-        correct_answer = None
-        for q in questions:
-            q_id = int(q['id']) if isinstance(q['id'], str) else q['id']
-            if q_id == question_id:
-                correct_text = q.get('correct_answer', '')
-                for idx, option in enumerate(q['options']):
-                    if option.strip().lower() == correct_text.strip().lower():
-                        correct_answer = ['A', 'B', 'C', 'D'][idx]
-                        break
-                break
-        
-        is_correct = (answer == correct_answer) if correct_answer else None
-        
-        save_mcq_response(
-            assessment_id=assessment_id,
-            question_id=question_id,
-            selected_answer=answer,
-            is_correct=is_correct,
-            time_spent=time_taken
-        )
-        
-        return jsonify({
-            "status": "success",
-            "data": {"is_correct": is_correct}
-        }), 200
-        
-    except Exception as e:
-        app.logger.exception("Error submitting MCQ answer")
-        return jsonify({"status": "error", "message": "Failed to submit answer"}), 500
+    """REMOVED: Use /api/interviewee/assessment/<id>/submit-answer instead."""
+    return jsonify({
+        "status": "error",
+        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/submit-answer"
+    }), 410
 
 
 @app.route('/api/assessment/code/submit', methods=['POST'])
 def submit_code():
-    """
-    DEPRECATED: Use /api/interviewee/assessment/<id>/submit-answer instead.
-    Kept for backward compatibility.
-    """
-    data = request.get_json()
-    
-    required_fields = ['assessment_id', 'problem_id', 'code', 'language']
-    if not data or any(field not in data for field in required_fields):
-        return jsonify({
-            "status": "error",
-            "message": f"Missing required fields: {', '.join(required_fields)}"
-        }), 400
-    
-    try:
-        assessment_id = data['assessment_id']
-        problem_id = data['problem_id']
-        code = data['code']
-        language = data['language']
-        tests_passed = data.get('testsPassed', 0)
-        total_tests = data.get('totalTests', 0)
-        
-        # Save submission to database with actual test results from client
-        save_coding_submission(
-            assessment_id=assessment_id,
-            problem_id=problem_id,
-            language=language,
-            code=code,
-            test_cases_passed=tests_passed,
-            total_test_cases=total_tests
-        )
-        
-        return jsonify({
-            "status": "success",
-            "data": {
-                "passed_count": tests_passed,
-                "total_count": total_tests,
-                "score": round((tests_passed / max(total_tests, 1)) * 100, 2)
-            }
-        }), 200
-        
-    except Exception as e:
-        app.logger.exception("Error submitting code")
-        return jsonify({
-            "status": "error",
-            "message": "Failed to submit code"
-        }), 500
+    """REMOVED: Use /api/interviewee/assessment/<id>/submit-answer instead."""
+    return jsonify({
+        "status": "error",
+        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/submit-answer"
+    }), 410
 
 
 @app.route('/api/assessment/psychometric/submit', methods=['POST'])
 def submit_psychometric():
-    """
-    Submit psychometric response
-    
-    Expects JSON:
-        - assessment_id: ID of the assessment
-        - scenario_id: ID of the scenario
-        - trait_scores: Dict of trait names to scores (1-10)
-        - response_text: Written response to scenario
-    
-    Returns:
-        - success message
-    """
-    data = request.get_json()
-    
-    required_fields = ['assessment_id', 'scenario_id', 'trait_scores']
-    if not data or any(field not in data for field in required_fields):
-        return jsonify({
-            "status": "error",
-            "message": f"Missing required fields: {', '.join(required_fields)}"
-        }), 400
-    
-    try:
-        assessment_id = data['assessment_id']
-        scenario_id = data['scenario_id']
-        trait_scores = data['trait_scores']
-        response_text = data.get('response_text', '')
-        
-        # Save each trait score
-        for trait, score in trait_scores.items():
-            save_psychometric_response(
-                assessment_id=assessment_id,
-                question_id=scenario_id,
-                trait=trait,
-                score=score,
-                scenario_response=response_text
-            )
-        
-        return jsonify({
-            "status": "success",
-            "message": "Psychometric response saved successfully"
-        }), 200
-        
-    except Exception as e:
-        app.logger.exception("Error submitting psychometric response")
-        return jsonify({
-            "status": "error",
-            "message": "Failed to submit response"
-        }), 500
+    """REMOVED: Use /api/interviewee/assessment/<id>/submit-answer instead."""
+    return jsonify({
+        "status": "error",
+        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/submit-answer"
+    }), 410
 
 
 @app.route('/api/assessment/complete', methods=['POST'])
 def complete_assessment():
-    """
-    Complete assessment and calculate final scores
-    
-    Expects JSON:
-        - assessment_id: ID of the assessment
-    
-    Returns:
-        - technical_score: Combined MCQ + coding score
-        - psychometric_scores: Average scores for each trait
-        - overall_score: Weighted combination
-        - decision: Preliminary decision
-    """
-    data = request.get_json()
-    
-    if not data or 'assessment_id' not in data:
-        return jsonify({
-            "status": "error",
-            "message": "assessment_id is required"
-        }), 400
-    
-    try:
-        assessment_id = data['assessment_id']
-        
-        # Calculate scores
-        mcq_score = get_mcq_score(assessment_id)
-        coding_score = get_coding_score(assessment_id)
-        psychometric_scores = get_psychometric_scores(assessment_id)
-        
-        # Calculate technical score (60% MCQ, 40% Coding)
-        technical_score = (mcq_score * 0.6) + (coding_score * 0.4)
-        
-        # Calculate average psychometric score
-        if psychometric_scores:
-            avg_psychometric = sum(psychometric_scores.values()) / len(psychometric_scores)
-        else:
-            avg_psychometric = 0
-        
-        # Calculate overall score (70% technical, 30% psychometric)
-        overall_score = (technical_score * 0.7) + (avg_psychometric * 10 * 0.3)
-        
-        # Determine preliminary decision
-        if overall_score >= 70:
-            decision = "Recommend for Hire"
-            rationale = "Strong technical and soft skills demonstrated"
-        elif overall_score >= 50:
-            decision = "Consider for Interview"
-            rationale = "Moderate performance, needs further evaluation"
-        else:
-            decision = "Not Recommended"
-            rationale = "Performance below threshold"
-        
-        # Update assessment in database
-        update_assessment_scores(
-            assessment_id=assessment_id,
-            technical_score=technical_score,
-            psychometric_score=avg_psychometric * 10,
-            decision=decision,
-            rationale=rationale
-        )
-        
-        return jsonify({
-            "status": "success",
-            "message": "Assessment completed successfully",
-            "data": {
-                "assessment_id": assessment_id,
-                "scores": {
-                    "mcq": round(mcq_score, 2),
-                    "coding": round(coding_score, 2),
-                    "technical": round(technical_score, 2),
-                    "psychometric": round(avg_psychometric * 10, 2),
-                    "overall": round(overall_score, 2)
-                },
-                "psychometric_traits": {k: round(v, 2) for k, v in psychometric_scores.items()},
-                "decision": decision,
-                "rationale": rationale
-            }
-        }), 200
-        
-    except Exception as e:
-        app.logger.exception("Error completing assessment")
-        return jsonify({
-            "status": "error",
-            "message": "Failed to complete assessment"
-        }), 500
+    """REMOVED: Use /api/interviewee/assessment/<id>/complete instead."""
+    return jsonify({
+        "status": "error",
+        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/complete"
+    }), 410
 
 
 if __name__ == '__main__':

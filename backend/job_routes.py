@@ -224,9 +224,21 @@ def get_job_postings():
         conn = get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Check if authenticated user with sector restriction
+        # Unauthenticated callers may only see active postings.
+        from flask_jwt_extended import verify_jwt_in_request, get_jwt
+        try:
+            verify_jwt_in_request(optional=True)
+            caller_claims = get_jwt()
+            caller_role = caller_claims.get('role') if caller_claims else None
+        except Exception:
+            caller_role = None
+
         status_filter = request.args.get('status', 'active')
         sector_filter = request.args.get('sector_id')
+
+        # Non-staff callers cannot request non-active listings
+        if caller_role not in ('super_admin', 'admin', 'sector_admin', 'recruiter', 'interviewer'):
+            status_filter = 'active'
 
         query = "SELECT j.*, s.name as sector_name FROM job_descriptions j LEFT JOIN sectors s ON j.sector_id = s.id WHERE 1=1"
         params = []
@@ -283,7 +295,8 @@ def create_job_posting():
             }), 400
 
         claims = get_jwt()
-        user_id = int(get_jwt_identity())
+        admin_email = get_jwt_identity()
+        user_id = int(admin_email)
         role = claims.get('role')
         user_sector_id = claims.get('sector_id')
 
