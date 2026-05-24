@@ -36,7 +36,7 @@ def _verify_candidate_token(access_token, assessment_id):
         cursor = conn.cursor()
         cursor.execute(
             """SELECT id FROM scheduled_assessments
-               WHERE access_token = %s AND id = %s AND status != 'cancelled'""",
+               WHERE access_token = %s AND assessment_id = %s AND status = 'in_progress'""",
             (access_token, assessment_id)
         )
         row = cursor.fetchone()
@@ -227,6 +227,10 @@ def webrtc_answer(sid, data):
         assessment_id = data.get('assessment_id')
         answer = data.get('answer')
 
+        conn_info = connections.get(sid, {})
+        if conn_info.get('type') != 'interviewer' or conn_info.get('assessment_id') != assessment_id:
+            return
+
         if assessment_id not in active_rooms:
             return
 
@@ -240,21 +244,27 @@ def webrtc_answer(sid, data):
 
 @sio.event
 def ice_candidate(sid, data):
-    """Forward ICE candidate between peers."""
+    """Forward ICE candidate between peers, enforcing role-direction."""
     try:
         assessment_id = data.get('assessment_id')
         ice = data.get('candidate')
         target = data.get('target', 'interviewer')
+
+        conn_info = connections.get(sid, {})
+        sender_type = conn_info.get('type')
+        if conn_info.get('assessment_id') != assessment_id:
+            return
 
         if assessment_id not in active_rooms:
             return
 
         room = active_rooms[assessment_id]
 
-        if target == 'interviewer':
+        # Only candidates may send ICE to interviewers; only interviewers to candidates.
+        if target == 'interviewer' and sender_type == 'candidate':
             for interviewer_sid in room.get('interviewers', []):
                 sio.emit('ice_candidate', {'assessment_id': assessment_id, 'candidate': ice}, room=interviewer_sid)
-        else:
+        elif target == 'candidate' and sender_type == 'interviewer':
             candidate_sid = room.get('candidate')
             if candidate_sid:
                 sio.emit('ice_candidate', {'assessment_id': assessment_id, 'candidate': ice}, room=candidate_sid)

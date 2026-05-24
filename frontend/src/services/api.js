@@ -10,11 +10,16 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-// Attach token if available
+// Attach bearer token (for clients that don't receive the HttpOnly cookie)
+// and the assessment token for candidate-facing routes.
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("authToken");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  const assessmentToken = sessionStorage.getItem("assessmentToken");
+  if (assessmentToken) {
+    config.headers["X-Assessment-Token"] = assessmentToken;
   }
   return config;
 });

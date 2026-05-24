@@ -17,7 +17,15 @@ except ImportError:
 from db_helpers import (
     record_proctoring_violation, count_violations_for_assessment,
     update_assessment_time_elapsed, get_assessment_by_id, get_assessment_time_elapsed,
+    verify_assessment_access_token,
 )
+
+
+def _check_assessment_token(assessment_id: int):
+    token = request.headers.get('X-Assessment-Token', '')
+    if not verify_assessment_access_token(token, assessment_id):
+        return jsonify({'status': 'error', 'message': 'Invalid or missing assessment token'}), 403
+    return None
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +36,10 @@ interviewee_monitoring_bp = Blueprint('interviewee_monitoring', __name__)
 @connection_pool
 def report_violation(assessment_id):
     try:
+        err = _check_assessment_token(assessment_id)
+        if err:
+            return err
+
         assessment = get_assessment_by_id(assessment_id)
         if not assessment:
             return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
@@ -80,6 +92,10 @@ def report_violation(assessment_id):
 @connection_pool
 def sync_assessment_time(assessment_id):
     try:
+        err = _check_assessment_token(assessment_id)
+        if err:
+            return err
+
         assessment = get_assessment_by_id(assessment_id)
         if not assessment:
             return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404

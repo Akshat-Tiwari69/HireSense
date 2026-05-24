@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../co
 import { Badge } from '../components/ui/badge';
 import {
   Clock, CheckCircle, Loader2, Video, VideoOff,
-  Eye, ShieldAlert, Timer, Code, Brain, FileText
+  Eye, ShieldAlert, Timer, Code, Brain, FileText, AlertTriangle
 } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import { useProctorStream } from '../hooks/useProctorStream';
@@ -14,6 +14,7 @@ import { api } from '../services/api';
 import MCQSection from '../components/assessment/MCQSection';
 import CodingSection from '../components/assessment/CodingSection';
 import PsychometricSection from '../components/assessment/PsychometricSection';
+import { Progress } from '../components/ui/progress';
 
 // Code execution is proxied through our backend to prevent direct external API calls
 const CODE_EXEC_URL = '/api/interviewee/run-code';
@@ -136,6 +137,10 @@ const AssessmentPage = () => {
       // Start or resume assessment
       const startRes = await api.post(`/api/interviewee/assessment/start-by-token/${token}`);
       const { data } = startRes.data;
+
+      // Store URL token in sessionStorage so api.js interceptor can attach
+      // X-Assessment-Token to all subsequent interviewee route requests.
+      sessionStorage.setItem('assessmentToken', token);
 
       setAssessmentData(data);
       setAssessmentId(data.assessment_id);
@@ -771,23 +776,14 @@ const AssessmentPage = () => {
   const handlePsychometricAnswer = useCallback(async (scenarioId, answerIndex) => {
     setPsychometricAnswers(prev => ({ ...prev, [scenarioId]: answerIndex }));
 
-    // Auto-save the answer to backend
+    // Auto-save the answer to backend; score is calculated server-side
     try {
       const scenario = assessmentData?.psychometric_scenarios?.find(s => s.id === scenarioId);
       if (scenario) {
-        // Calculate score based on optimal_choice from scenario data
-        // optimal_choice is the index of the best answer (0-3)
-        const optimalChoice = scenario.optimal_choice ?? 0;
-        const distance = Math.abs(answerIndex - optimalChoice);
-        // Score mapping: exact match = 10, 1 away = 6, 2 away = 3, 3 away = 1
-        const scoreMap = { 0: 10, 1: 6, 2: 3, 3: 1 };
-        const calculatedScore = scoreMap[distance] ?? 1;
-
         await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
           type: 'psychometric',
           questionId: scenarioId,
           trait: scenario.trait,
-          score: calculatedScore,
           selectedOption: answerIndex,
         });
       }
@@ -852,6 +848,8 @@ const AssessmentPage = () => {
         console.log(' Assessment status is success');
         console.log(' Current submitted state before setSubmitted:', submitted);
         console.log(' About to call setSubmitted(true)');
+
+        sessionStorage.removeItem('assessmentToken');
 
         // Use a callback to verify state was set
         setSubmitted(true);

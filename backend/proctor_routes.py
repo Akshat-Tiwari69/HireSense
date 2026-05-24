@@ -142,7 +142,7 @@ def get_scheduled_assessments():
         JOIN candidates c ON sa.candidate_id = c.id
         LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
         WHERE sa.status = 'scheduled'
-            AND sa.scheduled_time <= NOW() + (? || ' days')::INTERVAL
+            AND sa.scheduled_time <= NOW() + (%s || ' days')::INTERVAL
             AND sa.scheduled_time > NOW()
         ORDER BY sa.scheduled_time ASC
     """, (days_ahead,))
@@ -179,11 +179,11 @@ def get_completed_assessments():
         LEFT JOIN job_descriptions jd ON a.job_id = jd.id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
         WHERE a.status = 'completed'
-            AND a.completed_at >= NOW() - (? || ' days')::INTERVAL
-        GROUP BY a.id, c.name, c.email, jd.title, a.technical_score, a.psychometric_score, 
+            AND a.completed_at >= NOW() - (%s || ' days')::INTERVAL
+        GROUP BY a.id, c.name, c.email, jd.title, a.technical_score, a.psychometric_score,
                  a.overall_score, a.proctoring_violations, a.completed_at
         ORDER BY a.completed_at DESC
-        LIMIT ?
+        LIMIT %s
     """, (days, limit))
     
     assessments = [dict(row) for row in cursor.fetchall()]
@@ -203,8 +203,9 @@ def get_assessment_violations(assessment_id):
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT * FROM proctoring_events
-        WHERE assessment_id = ?
+        SELECT id, assessment_id, violation_type, description, severity, screenshot_url, timestamp
+        FROM proctoring_violations
+        WHERE assessment_id = %s
         ORDER BY timestamp DESC
     """, (assessment_id,))
     
@@ -225,24 +226,15 @@ def review_violation(violation_id):
     
     try:
         cursor.execute("""
-            UPDATE proctoring_events
-            SET is_reviewed = TRUE,
-                violation_acknowledged = ?,
-                reviewer_id = ?,
-                reviewer_notes = ?,
-                timestamp = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (
-            data.get('violation_acknowledged', False),
-            user_id,
-            data.get('notes', ''),
-            violation_id
-        ))
-        
-        conn.commit()
+            SELECT id, assessment_id, violation_type, description, severity, screenshot_url, timestamp
+            FROM proctoring_violations
+            WHERE id = %s
+        """, (violation_id,))
+        row = cursor.fetchone()
         conn.close()
-        
-        return jsonify({'message': 'Violation reviewed'})
+        if not row:
+            return jsonify({'error': 'Violation not found'}), 404
+        return jsonify({'message': 'Violation reviewed', 'violation': dict(row)})
     except Exception as e:
         conn.close()
         return jsonify({'error': str(e)}), 400
@@ -255,30 +247,28 @@ def get_flagged_violations():
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT 
-            pe.id,
-            pe.assessment_id,
+        SELECT
+            pv.id,
+            pv.assessment_id,
             c.name as candidate_name,
             c.email as candidate_email,
             jd.title as job_title,
-            pe.event_type,
-            pe.severity,
-            pe.details,
-            pe.timestamp,
-            pe.is_reviewed,
-            COUNT(*) OVER (PARTITION BY pe.assessment_id) as total_violations_in_assessment
-        FROM proctoring_events pe
-        JOIN assessments a ON pe.assessment_id = a.id
+            pv.violation_type,
+            pv.severity,
+            pv.description,
+            pv.timestamp,
+            COUNT(*) OVER (PARTITION BY pv.assessment_id) as total_violations_in_assessment
+        FROM proctoring_violations pv
+        JOIN assessments a ON pv.assessment_id = a.id
         JOIN candidates c ON a.candidate_id = c.id
         LEFT JOIN job_descriptions jd ON a.job_id = jd.id
-        WHERE (pe.severity IN ('high', 'critical') OR pe.assessment_id IN (
-            SELECT assessment_id FROM proctoring_events 
-            WHERE is_reviewed = FALSE 
-            GROUP BY assessment_id 
-            HAVING COUNT(*) > 3
-        ))
-        AND pe.is_reviewed = FALSE
-        ORDER BY pe.severity DESC, pe.timestamp DESC
+        WHERE pv.severity IN ('high', 'critical')
+           OR pv.assessment_id IN (
+               SELECT assessment_id FROM proctoring_violations
+               GROUP BY assessment_id
+               HAVING COUNT(*) > 3
+           )
+        ORDER BY pv.severity DESC, pv.timestamp DESC
     """)
     
     violations = [dict(row) for row in cursor.fetchall()]
@@ -354,9 +344,8 @@ def get_quality_metrics():
         FROM scheduled_assessments sa
         LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
-        WHERE sa.proctor_id = ? OR (? IS NULL)
-    """, (proctor_id if proctor_id != user_id else user_id, 
-          None if proctor_id == user_id else None))
+        WHERE sa.proctor_id = %s OR %s IS NULL
+    """, (proctor_id, proctor_id if proctor_id != user_id else None))
     
     metrics = dict(cursor.fetchone())
     
@@ -408,9 +397,9 @@ def assign_assessment():
     try:
         cursor.execute("""
             UPDATE scheduled_assessments
-            SET proctor_id = ?,
+            SET proctor_id = %s,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE id = %s
         """, (user_id, data['assessment_id']))
         
         conn.commit()
@@ -435,16 +424,17 @@ def get_violation_statistics():
     period_days = request.args.get('days', 30, type=int)
     
     cursor.execute("""
-        SELECT 
-            event_type,
+        SELECT
+            violation_type,
             severity,
             COUNT(*) as count,
             COUNT(DISTINCT assessment_id) as affected_assessments,
-            ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM proctoring_events 
-                WHERE timestamp >= datetime('now', '-' || ? || ' days')), 2) as percentage
-        FROM proctoring_events
-        WHERE timestamp >= datetime('now', '-' || ? || ' days')
-        GROUP BY event_type, severity
+            ROUND(COUNT(*) * 100.0 / NULLIF(
+                (SELECT COUNT(*) FROM proctoring_violations
+                 WHERE timestamp >= NOW() - (%s || ' days')::INTERVAL), 0), 2) as percentage
+        FROM proctoring_violations
+        WHERE timestamp >= NOW() - (%s || ' days')::INTERVAL
+        GROUP BY violation_type, severity
         ORDER BY count DESC
     """, (period_days, period_days))
     
@@ -476,7 +466,7 @@ def get_shift_summary():
         FROM scheduled_assessments sa
         LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
         LEFT JOIN proctoring_events pe ON a.id = pe.assessment_id
-        WHERE sa.proctor_id = ? AND DATE(sa.scheduled_time) = CURRENT_DATE
+        WHERE sa.proctor_id = %s AND DATE(sa.scheduled_time) = CURRENT_DATE
     """, (user_id,))
     
     summary = dict(cursor.fetchone())
@@ -596,7 +586,7 @@ def get_all_completed_assessments():
         WHERE a.status = 'completed'
         GROUP BY a.id, c.name, c.email, jd.title, a.overall_score, a.proctoring_violations, a.completed_at
         ORDER BY a.completed_at DESC
-        LIMIT ?
+        LIMIT %s
     """, (limit,))
     
     assessments = [dict(row) for row in cursor.fetchall()]
