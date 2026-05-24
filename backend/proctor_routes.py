@@ -226,18 +226,15 @@ def review_violation(violation_id):
     
     try:
         cursor.execute("""
-            UPDATE proctoring_violations
-            SET description = COALESCE(%s, description)
+            SELECT id, assessment_id, violation_type, description, severity, screenshot_url, timestamp
+            FROM proctoring_violations
             WHERE id = %s
-        """, (
-            data.get('notes') or None,
-            violation_id,
-        ))
-        
-        conn.commit()
+        """, (violation_id,))
+        row = cursor.fetchone()
         conn.close()
-        
-        return jsonify({'message': 'Violation reviewed'})
+        if not row:
+            return jsonify({'error': 'Violation not found'}), 404
+        return jsonify({'message': 'Violation reviewed', 'violation': dict(row)})
     except Exception as e:
         conn.close()
         return jsonify({'error': str(e)}), 400

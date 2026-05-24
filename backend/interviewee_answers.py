@@ -323,17 +323,46 @@ def _extract_func_name(starter_code: str, language: str):
         m = re.search(r'^def\s+(\w+)\s*\(', starter_code, re.MULTILINE)
     elif language == 'javascript':
         m = re.search(r'function\s+(\w+)\s*\(', starter_code)
+    elif language in ('cpp', 'c'):
+        m = re.search(
+            r'\b(?:int|void|float|double|bool|char|long|string|auto)\s+(\w+)\s*\(',
+            starter_code, re.MULTILINE
+        )
+    elif language == 'java':
+        m = re.search(
+            r'(?:public|private|protected)\s+(?:static\s+)?(?:[\w<>\[\]]+)\s+(\w+)\s*\(',
+            starter_code, re.MULTILINE
+        )
     else:
         return None
     return m.group(1) if m else None
 
 
 def _build_wrapper(code: str, language: str, tc_input: str, func_name: str):
-    """Append a call that invokes func_name with tc_input and prints the result."""
+    """Append a harness call that invokes func_name with tc_input and prints the result."""
     if language == 'python':
         return f"{code}\n\n# __test__\nprint({func_name}({tc_input}))"
     if language == 'javascript':
         return f"{code}\n\n// __test__\nconsole.log(JSON.stringify({func_name}({tc_input})));"
+    if language in ('cpp', 'c'):
+        preamble = '#include <iostream>\n#include <string>\nusing namespace std;\n'
+        return (
+            f"{preamble}{code}\n"
+            f"int main(){{\n"
+            f"    auto _r = {func_name}({tc_input});\n"
+            f"    std::cout << _r << std::endl;\n"
+            f"    return 0;\n}}"
+        )
+    if language == 'java':
+        # Assumes the candidate's class is named Solution (standard for this platform)
+        return (
+            f"{code}\n"
+            f"class Main{{\n"
+            f"    public static void main(String[] args){{\n"
+            f"        Solution _sol = new Solution();\n"
+            f"        System.out.println(_sol.{func_name}({tc_input}));\n"
+            f"    }}\n}}"
+        )
     return None
 
 
@@ -372,8 +401,8 @@ def _evaluate_server_side(code: str, language: str, test_cases: list, starter_ma
 
     func_name = _extract_func_name(starter_map.get(language, ''), language)
     if not func_name:
-        logger.info(f"[CODE EVAL] Cannot extract function name for {language!r}; defaulting to 0 score")
-        return 0, len(all_cases)
+        logger.info(f"[CODE EVAL] Cannot extract function name for {language!r}; skipping server-side eval")
+        return 0, 0
 
     def _eval_one(tc):
         wrapper = _build_wrapper(code, language, tc.get('input', ''), func_name)
