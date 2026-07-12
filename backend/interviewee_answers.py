@@ -6,39 +6,35 @@ import logging
 import re
 import json as _json
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from flask import Blueprint, request, jsonify
 
-try:
-    from db_config import connection_pool
-except ImportError:
-    def connection_pool(f):
-        return f
-
-from db_helpers import (
+from assessment_db import (
+    ASSESSMENT_DURATION_SECONDS,
+    AssessmentStateError,
+    finalize_assessment,
     get_assessment_by_id,
-    get_scheduled_assessment,
-    get_scheduled_assessment_by_id,
     get_assessment_questions,
     save_mcq_response,
     save_coding_submission,
     save_psychometric_response,
-    update_assessment_scores,
-    update_scheduled_assessment_status,
-    update_candidate_status,
-    get_mcq_score,
-    get_coding_score,
-    get_psychometric_scores,
     verify_assessment_access_token,
     get_assessment_by_token,
 )
-from questions_bank import get_mcq_questions
-
-
-def _check_assessment_token(assessment_id: int):
+def _check_assessment_token(
+    assessment_id: int,
+    *,
+    allow_expired: bool = False,
+    allow_completed: bool = False,
+):
     """Return a 403 response if the X-Assessment-Token header is missing or invalid, else None."""
     token = request.headers.get('X-Assessment-Token', '')
-    if not verify_assessment_access_token(token, assessment_id):
+    if not verify_assessment_access_token(
+        token,
+        assessment_id,
+        allow_expired=allow_expired,
+        allow_completed=allow_completed,
+    ):
         return jsonify({'status': 'error', 'message': 'Invalid or missing assessment token'}), 403
     return None
 
@@ -47,8 +43,38 @@ logger = logging.getLogger(__name__)
 interviewee_answers_bp = Blueprint('interviewee_answers', __name__)
 
 
+def _positive_integer(value, field_name):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be greater than zero")
+    return parsed
+
+
+def _non_negative_integer(value, field_name):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+    if parsed < 0:
+        raise ValueError(f"{field_name} cannot be negative")
+    return parsed
+
+
+def _find_question(question_id, questions):
+    for question in questions or []:
+        try:
+            stored_id = int(question.get('id'))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if stored_id == question_id:
+            return question
+    return None
+
+
 @interviewee_answers_bp.route('/assessment/<int:assessment_id>/submit-answer', methods=['POST'])
-@connection_pool
 def submit_answer(assessment_id):
     try:
         err = _check_assessment_token(assessment_id)
@@ -62,35 +88,60 @@ def submit_answer(assessment_id):
         if assessment.get('status') not in ('started', 'in_progress'):
             return jsonify({'status': 'error', 'message': 'Assessment is not active'}), 400
 
-        data = request.json
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'status': 'error', 'message': 'A JSON request body is required'}), 400
         answer_type = data.get('type')
 
         if answer_type == 'mcq':
-            question_id = data.get('questionId')
-            selected = data.get('answer')
-            time_spent = data.get('timeSpent', 0)
+            question_id = _positive_integer(data.get('questionId'), 'questionId')
+            selected = str(data.get('answer', '')).strip().upper()
+            if selected not in ('A', 'B', 'C', 'D'):
+                return jsonify({
+                    'status': 'error',
+                    'message': 'answer must be one of A, B, C, or D'
+                }), 400
+            time_spent = _non_negative_integer(data.get('timeSpent', 0), 'timeSpent')
 
             stored_questions = get_assessment_questions(assessment_id)
-            questions = (stored_questions.get('mcq_questions', []) if stored_questions else get_mcq_questions(count=20))
+            questions = stored_questions.get('mcq_questions', []) if stored_questions else []
+            if not questions:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Assessment questions are unavailable; please reload the assessment'
+                }), 409
 
-            question_id_int = int(question_id) if isinstance(question_id, str) else question_id
-            correct_answer = _resolve_correct_answer(question_id_int, questions)
-            is_correct = (selected == correct_answer) if correct_answer is not None else None
+            correct_answer = _resolve_correct_answer(question_id, questions)
+            if correct_answer is None:
+                return jsonify({'status': 'error', 'message': 'Unknown MCQ question'}), 400
+            is_correct = selected == correct_answer
 
             save_mcq_response(
-                assessment_id=assessment_id, question_id=question_id_int,
+                assessment_id=assessment_id, question_id=question_id,
                 selected_answer=selected, is_correct=is_correct, time_spent=time_spent
             )
             return jsonify({'status': 'success', 'message': 'MCQ answer saved'}), 200
 
         elif answer_type == 'coding':
             submitted_code = data.get('code', '')
-            language = data.get('language', 'python')
+            language = str(data.get('language', 'python')).strip().lower()
+            if language not in _LANG_RUNTIME:
+                return jsonify({'status': 'error', 'message': 'Unsupported coding language'}), 400
+            if not isinstance(submitted_code, str) or not submitted_code.strip():
+                return jsonify({'status': 'error', 'message': 'code is required'}), 400
+            if len(submitted_code) > 100_000:
+                return jsonify({'status': 'error', 'message': 'code exceeds 100,000 characters'}), 413
 
             # Look up stored problem to get server-authoritative test cases and
             # starter code (needed to extract the function name for the harness).
             stored_q = get_assessment_questions(assessment_id)
             coding_problem = stored_q.get('coding_problem') if stored_q else None
+            if not coding_problem:
+                return jsonify({'status': 'error', 'message': 'No coding problem is assigned'}), 400
+            problem_id = _positive_integer(data.get('questionId'), 'questionId')
+            expected_problem_id = _positive_integer(coding_problem.get('id'), 'coding problem id')
+            if problem_id != expected_problem_id:
+                return jsonify({'status': 'error', 'message': 'Unknown coding problem'}), 400
             test_cases = coding_problem.get('test_cases', []) if coding_problem else []
             starter_map = coding_problem.get('starter_code', {}) if coding_problem else {}
 
@@ -109,7 +160,7 @@ def submit_answer(assessment_id):
 
             save_coding_submission(
                 assessment_id=assessment_id,
-                problem_id=data.get('questionId'),
+                problem_id=problem_id,
                 language=language,
                 code=submitted_code,
                 test_cases_passed=tests_passed,
@@ -118,31 +169,37 @@ def submit_answer(assessment_id):
             return jsonify({'status': 'success', 'message': 'Coding solution saved'}), 200
 
         elif answer_type == 'psychometric':
-            selected_option = data.get('selectedOption')
-            scenario_response = data.get('scenarioResponse') or (
-                str(selected_option) if selected_option is not None else None
+            selected_option = _non_negative_integer(
+                data.get('selectedOption'), 'selectedOption'
             )
+            question_id = _positive_integer(data.get('questionId'), 'questionId')
+            scenario_response = str(selected_option)
 
             # Calculate score server-side from stored scenarios (never trust client score)
-            trait = data.get('trait')
+            trait = None
             score = None
-            if selected_option is not None:
-                stored_q = get_assessment_questions(assessment_id)
-                scenarios = (stored_q.get('psychometric_scenarios', []) if stored_q else [])
-                q_id = data.get('questionId')
-                for sc in scenarios:
-                    if sc.get('id') == q_id:
-                        trait = sc.get('trait', trait)
-                        optimal = sc.get('optimal_choice')
-                        if optimal is not None:
-                            distance = abs(int(selected_option) - int(optimal))
-                            score_map = {0: 10, 1: 6, 2: 3, 3: 1}
-                            score = score_map.get(min(distance, 3), 1)
-                        break
+            stored_q = get_assessment_questions(assessment_id)
+            scenarios = stored_q.get('psychometric_scenarios', []) if stored_q else []
+            scenario = _find_question(question_id, scenarios)
+            if not scenario:
+                return jsonify({'status': 'error', 'message': 'Unknown psychometric question'}), 400
+            options = scenario.get('options') or []
+            if selected_option >= len(options):
+                return jsonify({'status': 'error', 'message': 'selectedOption is out of range'}), 400
+            trait = str(scenario.get('trait') or 'general').strip()
+            optimal = scenario.get('optimal_choice')
+            if optimal is None:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Psychometric scoring data is unavailable'
+                }), 409
+            distance = abs(selected_option - int(optimal))
+            score_map = {0: 10, 1: 6, 2: 3, 3: 1}
+            score = score_map.get(min(distance, 3), 1)
 
             save_psychometric_response(
                 assessment_id=assessment_id,
-                question_id=data.get('questionId'),
+                question_id=question_id,
                 trait=trait,
                 score=score,
                 scenario_response=scenario_response
@@ -151,103 +208,39 @@ def submit_answer(assessment_id):
 
         return jsonify({'status': 'error', 'message': 'Invalid answer type'}), 400
 
-    except Exception as e:
+    except AssessmentStateError as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 409
+    except (TypeError, ValueError) as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 400
+    except Exception:
+        logger.exception("Failed to save answer for assessment %s", assessment_id)
         return jsonify({'status': 'error', 'message': 'Failed to save answer'}), 500
 
 
 @interviewee_answers_bp.route('/assessment/<int:assessment_id>/complete', methods=['POST'])
-@connection_pool
 def complete_assessment(assessment_id):
     try:
-        err = _check_assessment_token(assessment_id)
+        err = _check_assessment_token(
+            assessment_id,
+            allow_expired=True,
+            allow_completed=True,
+        )
         if err:
             return err
 
-        logger.info(f"Assessment {assessment_id}: Starting completion process")
-
-        assessment = get_assessment_by_id(assessment_id)
-        if not assessment:
-            return jsonify({'status': 'error', 'message': 'Assessment not found'}), 404
-
-        candidate_id = assessment['candidate_id']
-        scheduled_assessment_id = assessment.get('scheduled_assessment_id')
-
-        is_technical_role = True
-        scheduled = None
-        try:
-            if scheduled_assessment_id:
-                scheduled = get_scheduled_assessment_by_id(scheduled_assessment_id)
-            else:
-                scheduled = get_scheduled_assessment(candidate_id)
-            if scheduled:
-                val = scheduled.get('is_technical_role')
-                if val is not None:
-                    is_technical_role = bool(val)
-        except Exception as e:
-            logger.warning(f"Could not determine is_technical_role: {e}")
-
-        mcq_score = get_mcq_score(assessment_id)
-        coding_score = get_coding_score(assessment_id) if is_technical_role else 0
-        psychometric_scores = get_psychometric_scores(assessment_id)
-
-        if is_technical_role:
-            technical_score = (float(mcq_score) * 0.6) + (float(coding_score) * 0.4)
-        else:
-            technical_score = float(mcq_score)
-
-        avg_psychometric = (
-            sum(float(v) for v in psychometric_scores.values()) / len(psychometric_scores)
-            if psychometric_scores else 0
+        result = finalize_assessment(assessment_id)
+        logger.info(
+            "Assessment %s completed with overall score %.2f",
+            assessment_id,
+            result['scores']['overall'],
         )
-
-        overall_score = (float(technical_score) * 0.7) + (float(avg_psychometric) * 10 * 0.3)
-
-        if overall_score >= 70:
-            decision = "Recommend for Hire"
-            rationale = "Strong technical and soft skills demonstrated."
-            recommendation = "Proceed to HR discussion"
-        elif overall_score >= 50:
-            decision = "Consider for Interview"
-            rationale = "Moderate technical performance with decent soft skills."
-            recommendation = "Conduct follow-up technical interview"
-        else:
-            decision = "Not Recommended"
-            rationale = "Performance below acceptable threshold."
-            recommendation = "Archive application"
-
-        update_assessment_scores(
-            assessment_id=assessment_id,
-            technical_score=technical_score,
-            psychometric_score=avg_psychometric * 10,
-            decision=decision,
-            rationale=rationale
-        )
-
-        if scheduled_assessment_id:
-            update_scheduled_assessment_status(
-                scheduled_assessment_id=scheduled_assessment_id, status='completed', assessment_id=assessment_id
-            )
-        elif scheduled:
-            update_scheduled_assessment_status(
-                scheduled_assessment_id=scheduled['id'], status='completed', assessment_id=assessment_id
-            )
-
-        update_candidate_status(candidate_id, 'completed')
-
-        logger.info(f"Assessment {assessment_id}: COMPLETED — Overall: {overall_score}, Decision: {decision}")
 
         return jsonify({'status': 'success', 'message': 'Assessment completed successfully', 'data': {
-            'assessment_id': assessment_id, 'candidate_id': candidate_id,
-            'scores': {
-                'mcq': round(mcq_score, 2), 'coding': round(coding_score, 2),
-                'technical': round(technical_score, 2),
-                'psychometric': round(avg_psychometric * 10, 2),
-                'overall': round(overall_score, 2)
-            },
-            'psychometric_breakdown': {k: round(v, 2) for k, v in psychometric_scores.items()} if psychometric_scores else {},
-            'decision': decision, 'rationale': rationale, 'ai_recommendation': recommendation
+            **result,
         }}), 200
 
+    except AssessmentStateError as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 409
     except Exception as e:
         logger.error(f"Assessment {assessment_id}: FAILED to complete — {str(e)}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Failed to complete assessment'}), 500
@@ -265,20 +258,37 @@ def run_code():
     assessment_record = get_assessment_by_token(token)
     if not assessment_record or assessment_record.get('status') not in ('in_progress',):
         return jsonify({'status': 'error', 'message': 'Invalid or inactive assessment token'}), 403
+    if assessment_record.get('deadline_reached'):
+        return jsonify({
+            'status': 'error',
+            'message': (
+                'Assessment time limit has expired after '
+                f'{ASSESSMENT_DURATION_SECONDS // 60} minutes'
+            ),
+        }), 409
 
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'status': 'error', 'message': 'A JSON object is required'}), 400
     language = data.get('language')
-    version = data.get('version', '*')
     code = data.get('code', '')
-    filename = data.get('filename', 'main')
     stdin = data.get('stdin', '')
 
-    if not language or not code:
+    if not isinstance(language, str) or language not in _LANG_RUNTIME:
+        return jsonify({'status': 'error', 'message': 'Unsupported language'}), 400
+    if not isinstance(code, str) or not code.strip():
         return jsonify({'status': 'error', 'message': 'language and code are required'}), 400
+    if len(code) > 100_000:
+        return jsonify({'status': 'error', 'message': 'Code exceeds the 100 KB limit'}), 400
+    if not isinstance(stdin, str) or len(stdin) > 10_000:
+        return jsonify({'status': 'error', 'message': 'stdin exceeds the allowed limit'}), 400
+
+    runtime, version = _LANG_RUNTIME[language]
+    filename = f'main.{_LANG_FILE_EXTENSIONS[language]}'
 
     try:
         payload = _json.dumps({
-            'language': language,
+            'language': runtime,
             'version': version,
             'files': [{'name': filename, 'content': code}],
             'stdin': stdin,
@@ -290,13 +300,18 @@ def run_code():
             headers={'Content-Type': 'application/json'},
             method='POST'
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = _json.loads(resp.read().decode('utf-8'))
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            response_body = resp.read(1_000_001)
+        if len(response_body) > 1_000_000:
+            raise ValueError('Code execution response exceeded the size limit')
+        result = _json.loads(response_body.decode('utf-8'))
+        if not isinstance(result, dict):
+            raise ValueError('Code execution service returned an invalid response')
 
         logger.info(f"[CODE EXEC] lang={language} exit={result.get('run', {}).get('code')}")
         return jsonify({'status': 'success', 'data': result}), 200
-    except Exception as e:
-        logger.error(f"[CODE EXEC] Piston error: {e}")
+    except Exception:
+        logger.warning("[CODE EXEC] Piston request failed", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Code execution service unavailable'}), 503
 
 
@@ -312,6 +327,14 @@ _LANG_RUNTIME = {
     'java':       ('java',       '15.0.2'),
     'cpp':        ('c++',        '10.2.0'),
     'c':          ('c',          '10.2.0'),
+}
+
+_LANG_FILE_EXTENSIONS = {
+    'python': 'py',
+    'javascript': 'js',
+    'java': 'java',
+    'cpp': 'cpp',
+    'c': 'c',
 }
 
 
@@ -372,6 +395,8 @@ def _normalise_output(s: str) -> str:
 
 def _run_one_piston(wrapped_code: str, language: str) -> str | None:
     """Execute wrapped_code via Piston; return stripped stdout or None on error."""
+    if not isinstance(wrapped_code, str) or len(wrapped_code) > 120_000:
+        return None
     runtime, version = _LANG_RUNTIME.get(language, (language, '*'))
     payload = _json.dumps({
         'language': runtime, 'version': version,
@@ -381,8 +406,13 @@ def _run_one_piston(wrapped_code: str, language: str) -> str | None:
         _PISTON_URL, data=payload,
         headers={'Content-Type': 'application/json'}, method='POST'
     )
-    with urllib.request.urlopen(req, timeout=12) as resp:
-        result = _json.loads(resp.read().decode())
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        response_body = resp.read(1_000_001)
+    if len(response_body) > 1_000_000:
+        return None
+    result = _json.loads(response_body.decode())
+    if not isinstance(result, dict):
+        return None
     run = result.get('run', {})
     return run.get('stdout', '').strip() if run.get('code') == 0 else None
 
@@ -395,7 +425,7 @@ def _evaluate_server_side(code: str, language: str, test_cases: list, starter_ma
     Returns (tests_passed, total_cases).
     Falls back to (0, total_cases) if the language/problem isn't supported.
     """
-    all_cases = test_cases  # score against every case, including is_hidden ones
+    all_cases = test_cases[:10] if isinstance(test_cases, list) else []
     if not all_cases:
         return 0, 0
 
@@ -421,12 +451,17 @@ def _evaluate_server_side(code: str, language: str, test_cases: list, starter_ma
     passed = 0
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {pool.submit(_eval_one, tc): tc for tc in all_cases}
-        for fut in as_completed(futures, timeout=40):
-            try:
-                if fut.result():
-                    passed += 1
-            except Exception:
-                pass
+        try:
+            for fut in as_completed(futures, timeout=30):
+                try:
+                    if fut.result():
+                        passed += 1
+                except Exception:
+                    pass
+        except FuturesTimeoutError:
+            logger.warning("[CODE EVAL] Timed out before every test case completed")
+            for future in futures:
+                future.cancel()
 
     logger.info(f"[CODE EVAL] Server-side result: {passed}/{len(all_cases)}")
     return passed, len(all_cases)
@@ -434,30 +469,33 @@ def _evaluate_server_side(code: str, language: str, test_cases: list, starter_ma
 
 def _resolve_correct_answer(question_id_int, questions):
     """Try 5 matching strategies to find the correct answer letter (A/B/C/D)."""
-    for q in questions:
-        q_id = int(q['id']) if isinstance(q['id'], str) else q['id']
-        if q_id != question_id_int:
-            continue
-        ct = q.get('correct_answer')
-        if not ct:
-            return None
-        ct_upper = ct.strip().upper()
-        if ct_upper in ('A', 'B', 'C', 'D'):
-            return ct_upper
-        if ct.strip() in ('0', '1', '2', '3'):
-            return ('A', 'B', 'C', 'D')[int(ct.strip())]
-        ct_lower = ct.strip().lower()
-        letters = ('A', 'B', 'C', 'D')
-        for idx, option in enumerate(q['options']):
-            if option.strip().lower() == ct_lower:
-                return letters[idx]
-        for idx, option in enumerate(q['options']):
-            opt = option.strip().lower()
-            if ct_lower in opt or opt in ct_lower:
-                return letters[idx]
-        for idx, option in enumerate(q['options']):
-            opt = option.strip().lower()
-            if opt.startswith(ct_lower[:20]) or ct_lower.startswith(opt[:20]):
-                return letters[idx]
+    question = _find_question(question_id_int, questions)
+    if not question:
         return None
+    correct = question.get('correct_answer')
+    if not isinstance(correct, str) or not correct.strip():
+        return None
+    correct_upper = correct.strip().upper()
+    if correct_upper in ('A', 'B', 'C', 'D'):
+        return correct_upper
+    if correct.strip() in ('0', '1', '2', '3'):
+        return ('A', 'B', 'C', 'D')[int(correct.strip())]
+
+    correct_lower = correct.strip().lower()
+    letters = ('A', 'B', 'C', 'D')
+    options = question.get('options') or []
+    for idx, option in enumerate(options[:4]):
+        if str(option).strip().lower() == correct_lower:
+            return letters[idx]
+    for idx, option in enumerate(options[:4]):
+        option_lower = str(option).strip().lower()
+        if correct_lower in option_lower or option_lower in correct_lower:
+            return letters[idx]
+    for idx, option in enumerate(options[:4]):
+        option_lower = str(option).strip().lower()
+        if (
+            option_lower.startswith(correct_lower[:20])
+            or correct_lower.startswith(option_lower[:20])
+        ):
+            return letters[idx]
     return None

@@ -6,25 +6,22 @@ Protected routes requiring JWT authentication with 'interviewer' role
 
 import os
 import json
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
-from datetime import datetime
 import logging
-from functools import lru_cache
 from db_config import get_connection, return_connection
-from db_helpers import (
+from candidate_db import (
     get_all_candidates,
     get_candidate_by_id,
     update_candidate_status,
+)
+from assessment_db import (
+    AssessmentStateError,
     get_assessment_by_candidate_id,
-    update_assessment_scores,
-    get_assessment_by_id,
     create_scheduled_assessment,
-    get_scheduled_assessment,
-    update_scheduled_assessment_status,
-    check_assessment_time_valid,
     generate_assessment_token,
-    set_assessment_token
+    record_final_decision,
 )
 from email_service import (
     send_rejection_email,
@@ -103,7 +100,7 @@ def get_candidates():
             candidates = [c for c in candidates if c.get('status') == status_filter]
         
         # Ensure pros/cons are always lists
-        # (get_all_candidates already returns them as lists after the db_helpers fix)
+        # get_all_candidates already returns JSON-compatible lists.
         for candidate in candidates:
             if not isinstance(candidate.get('pros'), list):
                 candidate['pros'] = []
@@ -182,7 +179,7 @@ def get_candidate_details(candidate_id):
             'data': candidate
         }), 200
         
-    except Exception as e:
+    except Exception:
         return jsonify({
             'status': 'error',
             'message': 'Internal server error'
@@ -222,7 +219,7 @@ def download_resume(candidate_id):
         filename = os.path.basename(resume_path)
         return send_file(resume_path, as_attachment=True, download_name=filename)
         
-    except Exception as e:
+    except Exception:
         return jsonify({
             'status': 'error',
             'message': 'Internal server error'
@@ -284,7 +281,7 @@ def reject_candidate(candidate_id):
             }
         }), 200
         
-    except Exception as e:
+    except Exception:
         return jsonify({
             'status': 'error',
             'message': 'Internal server error'
@@ -319,8 +316,33 @@ def schedule_assessment(candidate_id):
             }), 400
         
         scheduled_time_input = data['scheduled_time']
+        if not isinstance(scheduled_time_input, str) or not scheduled_time_input.strip():
+            return jsonify({
+                'status': 'error',
+                'message': 'scheduled_time must be a valid ISO datetime string'
+            }), 400
+        try:
+            datetime.fromisoformat(scheduled_time_input.strip().replace('Z', '+00:00'))
+        except ValueError:
+            return jsonify({
+                'status': 'error',
+                'message': 'scheduled_time must be a valid ISO datetime string'
+            }), 400
+
         additional_info = data.get('additional_info', None)
         is_technical_role = data.get('is_technical_role', True)  # Default to technical
+        if not isinstance(is_technical_role, bool):
+            return jsonify({
+                'status': 'error',
+                'message': 'is_technical_role must be a boolean'
+            }), 400
+
+        requested_job_id = data.get('job_id')
+        if requested_job_id is not None:
+            try:
+                requested_job_id = int(requested_job_id)
+            except (TypeError, ValueError):
+                return jsonify({'status': 'error', 'message': 'job_id must be an integer'}), 400
         
         # Store the time as-is (local time) - no timezone conversion
         scheduled_time = scheduled_time_input
@@ -362,29 +384,55 @@ def schedule_assessment(candidate_id):
         # Fetch job details for better question generation
         applied_job_title = ""
         job_required_skills = []
+        selected_job_id = None
         jconn = None
         try:
             jconn = get_connection()
             cursor = jconn.cursor()
             cursor.execute(
-                """SELECT jd.title, jd.required_skills 
-                FROM job_descriptions jd 
-                JOIN candidates c ON c.best_match_job_id = jd.id 
-                WHERE c.id = %s""",
-                (candidate_id,)
+                """
+                SELECT jd.id, jd.title, jd.required_skills
+                FROM candidates c
+                LEFT JOIN job_descriptions jd
+                  ON jd.id = COALESCE(%s, c.best_match_job_id)
+                WHERE c.id = %s
+                """,
+                (requested_job_id, candidate_id),
             )
             jrow = cursor.fetchone()
             if jrow:
-                applied_job_title = jrow[0] or ""
-                if jrow[1]:
-                    job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
-        except Exception as e:
-            logger.warning(f"Could not fetch job details: {e}")
+                selected_job_id = jrow[0]
+                applied_job_title = jrow[1] or ""
+                raw_job_skills = jrow[2]
+                if isinstance(raw_job_skills, list):
+                    job_required_skills = [
+                        str(skill).strip() for skill in raw_job_skills if str(skill).strip()
+                    ]
+                elif raw_job_skills:
+                    try:
+                        parsed_job_skills = json.loads(raw_job_skills)
+                    except (json.JSONDecodeError, TypeError):
+                        parsed_job_skills = None
+                    if isinstance(parsed_job_skills, list):
+                        job_required_skills = [
+                            str(skill).strip()
+                            for skill in parsed_job_skills
+                            if str(skill).strip()
+                        ]
+                    else:
+                        job_required_skills = [
+                            skill.strip()
+                            for skill in str(raw_job_skills).replace('\n', ',').split(',')
+                            if skill.strip()
+                        ]
         finally:
             if jconn:
                 import contextlib
                 with contextlib.suppress(Exception):
                     return_connection(jconn)
+
+        if requested_job_id is not None and selected_job_id is None:
+            return jsonify({'status': 'error', 'message': 'Selected job not found'}), 400
         
         # Generate UNIQUE AI questions at schedule time (pre-cached for fast assessment start)
         print("[SCHEDULE] Generating unique AI questions for candidate...", flush=True)
@@ -472,20 +520,20 @@ def schedule_assessment(candidate_id):
         interviewer_id = int(get_jwt_identity())
         print(f"[SCHEDULE] Interviewer ID: {interviewer_id}", flush=True)
         
-        # Create scheduled assessment with pre-generated questions
+        # Create the schedule and token together so an invitation can never point
+        # at a partially-created schedule.
+        access_token = generate_assessment_token()
         print("[SCHEDULE] Creating scheduled assessment with unique questions...", flush=True)
         scheduled_assessment_id = create_scheduled_assessment(
             candidate_id=candidate_id,
             interviewer_id=interviewer_id,
             scheduled_time=scheduled_time,
             is_technical_role=is_technical_role,
-            questions_data=questions_data
+            questions_data=questions_data,
+            job_id=selected_job_id,
+            access_token=access_token,
         )
         print(f"[SCHEDULE] Assessment ID: {scheduled_assessment_id}", flush=True)
-        
-        # Generate secure access token for this assessment
-        access_token = generate_assessment_token()
-        set_assessment_token(scheduled_assessment_id, access_token)
         print("[SCHEDULE] Access token generated", flush=True)
         
         # Generate assessment link with token
@@ -506,7 +554,8 @@ def schedule_assessment(candidate_id):
         
         assessment_link = f"{frontend_url}/assessment/{access_token}"
         print(f"[SCHEDULE] Frontend URL: {frontend_url}", flush=True)
-        print(f"[SCHEDULE] Assessment link: {assessment_link}", flush=True)
+        # The link contains the candidate's bearer-style assessment token and
+        # must never be written to application or platform logs.
         
         # Get interviewer name from JWT claims
         claims = get_jwt()
@@ -514,19 +563,22 @@ def schedule_assessment(candidate_id):
         
         # Send invitation email (use original IST time for display)
         print(f"[SCHEDULE] Sending invitation email to {candidate['email']}...", flush=True)
-        email_sent = send_assessment_invitation(
-            candidate_email=candidate['email'],
-            candidate_name=candidate['name'],
-            assessment_link=assessment_link,
-            scheduled_time=scheduled_time_input,  # Use original IST time for email
-            interviewer_name=interviewer_name,
-            additional_info=additional_info
-        )
+        try:
+            email_sent = send_assessment_invitation(
+                candidate_email=candidate['email'],
+                candidate_name=candidate['name'],
+                assessment_link=assessment_link,
+                scheduled_time=scheduled_time_input,
+                interviewer_name=interviewer_name,
+                additional_info=additional_info
+            )
+        except Exception:
+            logger.exception(
+                "Assessment %s was scheduled but its invitation email failed",
+                scheduled_assessment_id,
+            )
+            email_sent = False
         print(f"[SCHEDULE] Email result: {email_sent}", flush=True)
-        
-        # Update candidate status
-        print("[SCHEDULE] Updating candidate status...", flush=True)
-        update_candidate_status(candidate_id, 'under_review', candidate.get('pros'), candidate.get('cons'))
         
         print("[SCHEDULE] Done! Returning success.", flush=True)
         return jsonify({
@@ -536,6 +588,7 @@ def schedule_assessment(candidate_id):
                 'candidate_id': candidate_id,
                 'candidate_name': candidate['name'],
                 'scheduled_assessment_id': scheduled_assessment_id,
+                'job_id': selected_job_id,
                 'scheduled_time': scheduled_time_input,  # Return original IST time for frontend display
                 'scheduled_time_utc': scheduled_time,    # Also provide UTC time
                 'assessment_link': assessment_link,
@@ -578,7 +631,7 @@ def get_assessment_results(candidate_id):
             'data': assessment
         }), 200
         
-    except Exception as e:
+    except Exception:
         return jsonify({
             'status': 'error',
             'message': 'Internal server error'
@@ -609,7 +662,13 @@ def make_final_decision(assessment_id):
                 'message': 'decision is required (hire or no-hire)'
             }), 400
         
-        decision = data['decision'].lower()
+        raw_decision = data['decision']
+        if not isinstance(raw_decision, str):
+            return jsonify({
+                'status': 'error',
+                'message': 'decision must be "hire" or "no-hire"'
+            }), 400
+        decision = raw_decision.strip().lower()
         if decision not in ['hire', 'no-hire', 'hired', 'selected']:
             return jsonify({
                 'status': 'error',
@@ -618,73 +677,74 @@ def make_final_decision(assessment_id):
         
         rationale = data.get('rationale', None)
         next_steps = data.get('next_steps', None)
-        
-        # Get assessment
-        assessment = get_assessment_by_id(assessment_id)
-        if not assessment:
+        if rationale is not None and (
+            not isinstance(rationale, str) or len(rationale) > 4000
+        ):
+            return jsonify({
+                'status': 'error',
+                'message': 'rationale must be text up to 4000 characters'
+            }), 400
+        if next_steps is not None and (
+            not isinstance(next_steps, str) or len(next_steps) > 4000
+        ):
+            return jsonify({
+                'status': 'error',
+                'message': 'next_steps must be text up to 4000 characters'
+            }), 400
+
+        normalized_decision = (
+            'hire' if decision in ['hire', 'hired', 'selected'] else 'no-hire'
+        )
+        result = record_final_decision(
+            assessment_id,
+            normalized_decision,
+            rationale.strip() if rationale else None,
+        )
+        if not result:
             return jsonify({
                 'status': 'error',
                 'message': 'Assessment not found'
             }), 404
-        
-        # Get candidate info
-        candidate_id = assessment.get('candidate_id')
-        candidate = get_candidate_by_id(candidate_id)
-        if not candidate:
-            return jsonify({
-                'status': 'error',
-                'message': 'Candidate not found'
-            }), 404
-        
-        # Update assessment with decision
-        final_status = 'hired' if decision in ['hire', 'hired', 'selected'] else 'rejected'
-        update_assessment_scores(
-            assessment_id=assessment_id,
-            technical_score=assessment.get('technical_score'),
-            psychometric_score=assessment.get('psychometric_score'),
-            decision="Hire" if decision in ['hire', 'hired', 'selected'] else "No-Hire",
-            rationale=rationale or assessment.get('rationale', 'Decision made after assessment review')
-        )
-        
-        # Update candidate status
-        update_candidate_status(candidate_id, final_status, candidate.get('pros'), candidate.get('cons'))
-        
+
         # Prepare scores for email
         scores = {
-            'technical': round(assessment.get('technical_score', 0), 2),
-            'psychometric': round(assessment.get('psychometric_score', 0), 2),
-            'overall': round(
-                (assessment.get('technical_score', 0) * 0.7) + 
-                (assessment.get('psychometric_score', 0) * 0.3),
-                2
-            )
+            'technical': round(result['technical_score'], 2),
+            'psychometric': round(result['psychometric_score'], 2),
+            'overall': round(result['overall_score'], 2),
         }
         
         # Send final decision email
-        email_sent = send_final_decision_email(
-            candidate_email=candidate['email'],
-            candidate_name=candidate['name'],
-            decision=decision,
-            rationale=rationale,
-            next_steps=next_steps,
-            scores=scores
-        )
+        email_sent = False
+        if result['should_notify']:
+            email_sent = send_final_decision_email(
+                candidate_email=result['candidate_email'],
+                candidate_name=result['candidate_name'],
+                decision=normalized_decision,
+                rationale=result['rationale'],
+                next_steps=next_steps.strip() if next_steps else None,
+                scores=scores
+            )
         
         return jsonify({
             'status': 'success',
             'message': 'Final decision recorded successfully',
             'data': {
                 'assessment_id': assessment_id,
-                'candidate_id': candidate_id,
-                'candidate_name': candidate['name'],
-                'decision': 'Hire' if decision in ['hire', 'hired', 'selected'] else 'No-Hire',
-                'status': final_status,
+                'candidate_id': result['candidate_id'],
+                'candidate_name': result['candidate_name'],
+                'decision': result['decision'],
+                'status': result['status'],
                 'scores': scores,
                 'email_sent': email_sent
             }
         }), 200
         
-    except Exception as e:
+    except AssessmentStateError as error:
+        return jsonify({
+            'status': 'error',
+            'message': str(error)
+        }), 409
+    except Exception:
         return jsonify({
             'status': 'error',
             'message': 'Internal server error'
@@ -721,50 +781,11 @@ def get_dashboard_stats():
             'data': stats
         }), 200
         
-    except Exception as e:
+    except Exception:
         return jsonify({
             'status': 'error',
             'message': 'Internal server error'
         }), 500
-
-
-@interviewer_bp.route('/candidates/<int:candidate_id>/notes', methods=['POST', 'GET'])
-@jwt_required()
-@require_interviewer_role
-def manage_candidate_notes(candidate_id):
-    """
-    Get or add notes for a candidate (for future implementation)
-    
-    Currently returns placeholder response
-    """
-    try:
-        candidate = get_candidate_by_id(candidate_id)
-        if not candidate:
-            return jsonify({
-                'status': 'error',
-                'message': 'Candidate not found'
-            }), 404
-        
-        if request.method == 'GET':
-            return jsonify({
-                'status': 'success',
-                'data': {
-                    'candidate_id': candidate_id,
-                    'notes': []
-                }
-            }), 200
-        else:  # POST
-            return jsonify({
-                'status': 'success',
-                'message': 'Note saved successfully'
-            }), 201
-        
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': 'Internal server error'
-        }), 500
-
 
 # Export blueprint
 __all__ = ['interviewer_bp']

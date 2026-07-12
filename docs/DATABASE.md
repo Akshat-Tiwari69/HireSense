@@ -5,8 +5,8 @@ including all tables, relationships, indexes, and migrations.
 
 > **Naming note:** The database table is called `job_descriptions` for historical reasons.
 > The API routes, UI, and documentation all refer to these records as **job postings**.
-> A future migration should rename the table to `job_postings` for consistency.
-> Until then, treat `job_descriptions` and "job postings" as the same concept.
+> `job_descriptions` is the canonical database name; treat it and "job postings"
+> as the same concept.
 
 ## Entity-relationship diagram
 
@@ -438,25 +438,21 @@ The schema includes indexes for query performance:
 
 ## Migrations
 
-Database migrations are stored in `database/migrations/` and are applied
-incrementally after the base schema.
+The repository has one supported artifact for each database starting state:
 
-| Migration | Description |
-|-----------|------------|
-| `add_assessment_token.sql` | Adds token-based assessment access links |
-| `add_job_postings_sectors_rbac.sql` | Adds sectors, RBAC extensions, job posting fields, candidate-job matching, and audit logging |
+| Starting state | Command | Artifact |
+|----------------|---------|----------|
+| Fresh, empty PostgreSQL database | `python backend/scripts/run_migration.py --schema` | `database/schema_postgres.sql` |
+| Existing legacy HireSense database | `python backend/scripts/run_migration.py --reconcile` | `database/migrations/20260713_reconcile_canonical_schema.sql` |
 
-Apply migrations in order:
-
-```bash
-psql "$DATABASE_URL" -f database/migrations/add_assessment_token.sql
-psql "$DATABASE_URL" -f database/migrations/add_job_postings_sectors_rbac.sql
-```
+The runner refuses the wrong mode, applies the SQL transactionally, and checks
+the canonical runtime columns before committing. Other migration files are
+historical records, not an ordered fresh-install procedure.
 
 ## Schema files
 
 | File | Description |
 |------|-------------|
-| `database/schema_postgresql.sql` | Full base schema (recommended for new installations) |
-| `database/schema.sql` | SQLite-compatible schema (legacy) |
-| `backend/schema_postgres.sql` | Backend copy of the PostgreSQL schema |
+| `database/schema_postgres.sql` | Canonical PostgreSQL schema for fresh installations |
+| `database/migrations/20260713_reconcile_canonical_schema.sql` | Non-destructive reconciliation for known legacy variants |
+| `database/validate_schema.py` | Static validator for canonical schema contracts |

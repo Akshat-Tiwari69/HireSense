@@ -68,8 +68,10 @@ The **Admin** has full control over the entire HireSense system. They manage use
 
 ### System Settings
 - View status of environment variables (API keys, SMTP config)
-- Update environment variables (OpenAI API key, SMTP settings, etc.)
-- Changes persist to `.env` file
+- A `super_admin` may update allowlisted variables only in local development
+  when `APP_ENV=development` and `ALLOW_RUNTIME_ENV_MUTATION=true`
+- Production configuration is read-only in the application and must be changed
+  through the hosting platform or deployment secret store
 
 ### Analytics
 - System-wide statistics: total candidates, assessments, hiring rates

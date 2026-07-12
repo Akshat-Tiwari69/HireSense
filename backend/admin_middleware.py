@@ -22,3 +22,17 @@ def require_admin_role(f):
             }), 403
         return f(*args, **kwargs)
     return check_admin_role
+
+
+def require_super_admin_role(f):
+    """Decorator: restricts infrastructure-level operations to super admins."""
+    @wraps(f)
+    def check_super_admin_role(*args, **kwargs):
+        claims = get_jwt()
+        if claims.get('role') != 'super_admin':
+            return jsonify({
+                'status': 'error',
+                'message': 'Access denied. Super admin role required.'
+            }), 403
+        return f(*args, **kwargs)
+    return check_super_admin_role

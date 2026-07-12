@@ -136,7 +136,7 @@ Validate that the current JWT token is still valid. Requires JWT.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/admin/settings/env` | Get environment variable status (values masked) |
-| `POST` | `/api/admin/settings/env` | Set or update an environment variable (`name`, `value`) |
+| `POST` | `/api/admin/settings/env` | Development-only allowlisted update; requires `super_admin`, `APP_ENV=development`, and `ALLOW_RUNTIME_ENV_MUTATION=true` (production returns 403) |
 
 ### Analytics and logs
 

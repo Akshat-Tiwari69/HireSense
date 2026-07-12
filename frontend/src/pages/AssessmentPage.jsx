@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import {
-  Clock, CheckCircle, Loader2, Video, VideoOff,
-  Eye, ShieldAlert, Timer, Code, Brain, FileText, AlertTriangle
+  CheckCircle, Loader2, Video, VideoOff,
+  Eye, ShieldAlert, Timer, AlertTriangle
 } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import { useProctorStream } from '../hooks/useProctorStream';
@@ -81,6 +81,9 @@ const AssessmentPage = () => {
   const faceDetectionIntervalRef = useRef(null);
   const noFaceCountRef = useRef(0);
   const multipleFaceCountRef = useRef(0);
+  const verifyAssessmentRef = useRef(null);
+  const reportViolationRef = useRef(null);
+  const autoSubmitRef = useRef(null);
 
   // Live streaming to interviewer
   const { isStreaming, streamError } = useProctorStream(
@@ -97,7 +100,7 @@ const AssessmentPage = () => {
       return;
     }
 
-    verifyAndLoadAssessment();
+    verifyAssessmentRef.current?.();
   }, [token]);
 
   // Log submitted state changes
@@ -200,6 +203,7 @@ const AssessmentPage = () => {
       setLoading(false);
     }
   };
+  verifyAssessmentRef.current = verifyAndLoadAssessment;
 
   const getStarterCode = (problem, lang) => {
     if (problem.starter_code && problem.starter_code[lang]) {
@@ -473,13 +477,6 @@ const AssessmentPage = () => {
     }
   };
 
-  const analyzeForFace = (imageData) => {
-    // Deprecated - kept for backwards compatibility
-    // Use detectFaces instead
-    const result = detectFaces(imageData, imageData.width, imageData.height);
-    return result.count > 0;
-  };
-
   const reportViolation = async (type, description, severity = 'medium', screenshot = null) => {
     if (!assessmentId) return;
 
@@ -529,13 +526,14 @@ const AssessmentPage = () => {
       console.error('Failed to report violation:', err);
     }
   };
+  reportViolationRef.current = reportViolation;
 
   // Tab visibility monitoring
   useEffect(() => {
     const handleVisibilityChange = async () => {
       if (document.hidden && assessmentId && !submitted) {
         const screenshot = await captureScreenshot();
-        reportViolation('tab_switch', 'Candidate switched away from assessment tab', 'high', screenshot);
+        reportViolationRef.current?.('tab_switch', 'Candidate switched away from assessment tab', 'high', screenshot);
       }
     };
 
@@ -551,7 +549,7 @@ const AssessmentPage = () => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleAutoSubmit();
+          autoSubmitRef.current?.();
           return 0;
         }
         return prev - 1;
@@ -600,6 +598,7 @@ const AssessmentPage = () => {
     });
     handleSubmit();
   };
+  autoSubmitRef.current = handleAutoSubmit;
 
   // Code execution using Piston API
   const handleRunCode = useCallback(async () => {

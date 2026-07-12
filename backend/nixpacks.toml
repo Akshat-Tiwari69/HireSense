@@ -14,4 +14,4 @@ commands = [
 
 [start]
 # Use gunicorn with explicit LD_LIBRARY_PATH for PostgreSQL; Railway provides $PORT
-cmd = "LD_LIBRARY_PATH=/nix/var/nix/profiles/default/lib:$LD_LIBRARY_PATH gunicorn app:app --bind 0.0.0.0:$PORT --timeout 90"
+cmd = "LD_LIBRARY_PATH=/nix/var/nix/profiles/default/lib:$LD_LIBRARY_PATH gunicorn --worker-class eventlet --workers 1 app:app_with_socketio --bind 0.0.0.0:$PORT --timeout 90"

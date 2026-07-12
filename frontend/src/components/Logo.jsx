@@ -1,4 +1,3 @@
-import React from 'react';
 
 const Logo = ({ className = '', size = 'default', variant = 'full' }) => {
   const sizes = {

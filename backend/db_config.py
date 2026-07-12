@@ -1,58 +1,21 @@
 import os
+import logging
 import psycopg2
 import psycopg2.extras
-from psycopg2 import pool
-import threading
 from contextlib import contextmanager
 
-# Thread-local storage for connection pool (ensures pool is per-thread for thread safety)
-_thread_local = threading.local()
+logger = logging.getLogger(__name__)
 
 
-class QmarkCursor(psycopg2.extras.DictCursor):
-    """Custom cursor that uses ? placeholders instead of %s."""
-    def execute(self, query, vars=None):
-        if vars:
-            query = query.replace("?", "%s")
-        return super().execute(query, vars)
-
-    def executemany(self, query, vars_list):
-        query = query.replace("?", "%s")
-        return super().executemany(query, vars_list)
-
-
-def _get_connection_pool():
-    """Get or create a connection pool for better performance.
-    
-    Connection pooling reduces overhead of creating new connections for each query.
-    This can provide 10-50x speedup for high-frequency API endpoints.
-    """
-    if not hasattr(_thread_local, 'pool') or _thread_local.pool is None:
-        database_url = os.environ.get("DATABASE_URL")
-        if not database_url:
-            raise RuntimeError(
-                "DATABASE_URL environment variable is required. "
-                "Please set it to your PostgreSQL connection string."
-            )
-        
-        # Fix postgres:// to postgresql://
-        if database_url.startswith("postgres://"):
-            database_url = database_url.replace("postgres://", "postgresql://", 1)
-        
-        try:
-            # Create connection pool with 2 minimum and 5 maximum connections
-            # Supabase free tier has limited connection slots, so keep this low
-            _thread_local.pool = pool.SimpleConnectionPool(
-                2,  # minconn - minimum connections to keep open
-                5,  # maxconn - maximum connections in pool
-                database_url,
-                cursor_factory=QmarkCursor
-            )
-        except Exception as e:
-            print(f"Connection pool creation error: {e}")
-            raise
-    
-    return _thread_local.pool
+def _statement_timeout_ms():
+    raw_value = os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000")
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise RuntimeError("DB_STATEMENT_TIMEOUT_MS must be an integer") from error
+    if not 1_000 <= value <= 600_000:
+        raise RuntimeError("DB_STATEMENT_TIMEOUT_MS must be between 1000 and 600000")
+    return value
 
 
 def get_connection():
@@ -73,10 +36,19 @@ def get_connection():
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
         
-        conn = psycopg2.connect(database_url, cursor_factory=QmarkCursor)
+        conn = psycopg2.connect(
+            database_url,
+            cursor_factory=psycopg2.extras.DictCursor,
+            connect_timeout=10,
+            application_name="hiresense-api",
+            options=(
+                f"-c statement_timeout={_statement_timeout_ms()} "
+                "-c idle_in_transaction_session_timeout=30000"
+            ),
+        )
         return conn
-    except Exception as e:
-        print(f"Database connection error: {e}")
+    except Exception:
+        logger.exception("Database connection failed")
         raise
 
 
@@ -91,8 +63,8 @@ def return_connection(conn):
     
     try:
         conn.close()
-    except Exception as e:
-        print(f"Error closing connection: {e}")
+    except Exception:
+        logger.warning("Failed to close database connection", exc_info=True)
 
 
 @contextmanager
@@ -123,7 +95,7 @@ def db_connection():
 
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
-    """Execute a query and optionally return results using pooled connection."""
+    """Execute a query and optionally return results using a managed connection."""
     conn = get_connection()
     if not conn:
         return None
@@ -141,17 +113,16 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         
         conn.commit()
         return result
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        print(f"Query error: {e}")
+        logger.exception("Database query failed")
         raise
     finally:
-        # Return connection to pool instead of closing (connection pooling optimization)
         return_connection(conn)
 
 
 def execute_many(query, params_list):
-    """Execute a query with multiple parameter sets using pooled connection."""
+    """Execute a query with multiple parameter sets using a managed connection."""
     conn = get_connection()
     if not conn:
         return False
@@ -161,10 +132,9 @@ def execute_many(query, params_list):
         cursor.executemany(query, params_list)
         conn.commit()
         return True
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        print(f"Batch query error: {e}")
+        logger.exception("Database batch query failed")
         raise
     finally:
-        # Return connection to pool instead of closing (connection pooling optimization)
         return_connection(conn)

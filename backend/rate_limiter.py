@@ -4,6 +4,7 @@ Prevents API abuse and ensures fair usage
 """
 
 import os
+from flask import jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -12,6 +13,9 @@ def _limit_if_present(limiter, app, endpoint_name, limit):
     endpoint = app.view_functions.get(endpoint_name)
     if endpoint is not None:
         limiter.limit(limit)(endpoint)
+        return True
+    app.logger.warning("[RATE LIMIT] Endpoint not found: %s", endpoint_name)
+    return False
 
 
 def init_rate_limiting(app):
@@ -29,7 +33,7 @@ def init_rate_limiting(app):
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
-        default_limits=["200 per day", "50 per hour"],
+        default_limits=["5000 per day", "1000 per hour"],
         storage_uri=storage_uri,
     )
 
@@ -39,5 +43,22 @@ def init_rate_limiting(app):
 
     # File upload - limited
     _limit_if_present(limiter, app, 'resume.upload_resume', "10 per hour")
+    _limit_if_present(limiter, app, 'admin.admin_content.bulk_upload_resumes', "5 per hour")
+    _limit_if_present(limiter, app, 'admin.admin_content.ai_enhance_text', "30 per hour")
+    _limit_if_present(limiter, app, 'admin.admin_content.upload_question_bank', "10 per hour")
+    _limit_if_present(limiter, app, 'interviewee.interviewee_answers.run_code', "30 per minute")
+    _limit_if_present(
+        limiter,
+        app,
+        'interviewee.interviewee_monitoring.report_violation',
+        "120 per minute",
+    )
+
+    @app.errorhandler(429)
+    def rate_limit_exceeded(_error):
+        return jsonify({
+            'status': 'error',
+            'message': 'Too many requests. Please try again later.'
+        }), 429
 
     return limiter

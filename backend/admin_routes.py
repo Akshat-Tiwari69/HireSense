@@ -17,7 +17,7 @@ Sub-module responsibilities:
                          question bank CRUD (/question-bank/*)
 """
 
-from flask import Blueprint, jsonify
+from flask import Blueprint
 from flask_jwt_extended import jwt_required
 from admin_middleware import require_admin_role
 

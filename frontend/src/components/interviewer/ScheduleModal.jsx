@@ -1,9 +1,8 @@
-import React from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
-import { Calendar, Clock, Code, CheckCircle, XCircle, FileText, Upload, BookOpen, Loader } from 'lucide-react';
+import { Calendar, Clock, Code, CheckCircle, Loader } from 'lucide-react';
 
 const ScheduleModal = ({
   open,
@@ -15,9 +14,6 @@ const ScheduleModal = ({
   setScheduleTime,
   isTechnicalRole,
   setIsTechnicalRole,
-  customQFile,
-  setCustomQFile,
-  customQUploading,
   schedulingLoading,
   onSchedule,
 }) => (
@@ -81,40 +77,6 @@ const ScheduleModal = ({
           </div>
           <div className={`w-12 h-6 rounded-full transition-colors relative ${isTechnicalRole ? 'bg-indigo-600' : 'bg-slate-300'}`}>
             <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${isTechnicalRole ? 'left-7' : 'left-1'}`} />
-          </div>
-        </div>
-
-        <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
-          <div className="flex items-center gap-2 mb-2">
-            <BookOpen className="w-4 h-4 text-indigo-500" />
-            <span className="text-sm font-semibold text-slate-700">Custom Questions (Optional)</span>
-          </div>
-          <p className="text-xs text-slate-500 mb-2">Upload a PDF/DOCX with your own questions. AI will blend them into the assessment.</p>
-          <div
-            className={`border border-dashed rounded-md p-3 text-center cursor-pointer transition-colors ${customQFile ? 'border-indigo-400 bg-indigo-50' : 'border-slate-300 hover:border-indigo-300'}`}
-            onClick={() => document.getElementById('schedule-qb-file').click()}
-          >
-            <input
-              id="schedule-qb-file"
-              type="file"
-              accept=".pdf,.docx"
-              className="hidden"
-              onChange={(e) => setCustomQFile(e.target.files[0] || null)}
-            />
-            {customQFile ? (
-              <div className="flex items-center justify-center gap-2 text-sm text-indigo-700">
-                <FileText className="w-4 h-4" />
-                <span className="font-medium">{customQFile.name}</span>
-                <button onClick={(e) => { e.stopPropagation(); setCustomQFile(null); }} className="ml-1 text-slate-400 hover:text-red-500">
-                  <XCircle className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
-                <Upload className="w-4 h-4" />
-                <span>Drop PDF/DOCX or click to browse</span>
-              </div>
-            )}
           </div>
         </div>
 

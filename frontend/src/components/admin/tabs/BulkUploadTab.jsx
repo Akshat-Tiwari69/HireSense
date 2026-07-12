@@ -1,4 +1,3 @@
-import React from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
@@ -76,18 +75,18 @@ const BulkUploadTab = ({
                 e.stopPropagation();
                 const file = e.dataTransfer.files[0];
                 const name = file?.name?.toLowerCase() || '';
-                if (file && (name.endsWith('.zip') || name.endsWith('.rar'))) {
+                if (file && name.endsWith('.zip')) {
                   setBulkFile(file);
                   setBulkResults(null);
                 } else {
-                  toast({ title: 'Invalid file', description: 'Please drop a .zip or .rar file', variant: 'destructive' });
+                  toast({ title: 'Invalid file', description: 'Please drop a .zip file', variant: 'destructive' });
                 }
               }}
             >
               <input
                 id="bulk-zip-input"
                 type="file"
-                accept=".zip,.rar"
+                accept=".zip"
                 className="hidden"
                 onChange={(e) => {
                   if (e.target.files[0]) {
@@ -108,8 +107,8 @@ const BulkUploadTab = ({
               ) : (
                 <div className="space-y-2">
                   <Upload className="w-12 h-12 mx-auto text-slate-400" />
-                  <p className="text-lg font-medium text-slate-600">Drop ZIP or RAR file here or click to browse</p>
-                  <p className="text-sm text-slate-400">Supports .zip and .rar archives containing .pdf and .docx resumes</p>
+                  <p className="text-lg font-medium text-slate-600">Drop a ZIP file here or click to browse</p>
+                  <p className="text-sm text-slate-400">Supports .zip archives containing .pdf and .docx resumes</p>
                 </div>
               )}
             </div>

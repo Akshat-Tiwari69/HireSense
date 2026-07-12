@@ -1,18 +1,13 @@
-# IMPORTANT: eventlet monkey_patch MUST be first, before any other imports
-import eventlet
-eventlet.monkey_patch()
-
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager, jwt_required
-from werkzeug.utils import secure_filename
+from flask_jwt_extended import JWTManager, get_jwt, jwt_required
 from dotenv import load_dotenv
 import socketio
 import os
-import re
 import logging
-import contextlib
 from pathlib import Path
+from werkzeug.exceptions import HTTPException
+from storage_config import get_upload_root
 
 # Load environment variables
 # Priority: local.env (for local development) > .env (for production)
@@ -29,8 +24,7 @@ else:
 # Trigger reload for updated SMTP credentials
 from request_logger import init_request_logging
 from security_headers import add_security_headers
-from datetime import timedelta, datetime
-from db_helpers import update_candidate_status
+from datetime import timedelta
 from auth import auth_bp
 from interviewer_routes import interviewer_bp
 from interviewee_routes import interviewee_bp
@@ -38,7 +32,8 @@ from admin_routes import admin_bp
 from proctor_routes import proctor_bp
 from job_routes import jobs_bp
 from resume_routes import resume_bp
-import time
+from db_config import get_connection, return_connection
+from user_db import get_user_by_id, user_auth_version
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -74,13 +69,41 @@ def _get_jwt_secret():
 
 app.config['JWT_SECRET_KEY'] = _get_jwt_secret()
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
-# Accept JWT from both HttpOnly cookie AND Authorization header so the browser
-# gets the cookie automatically while API clients can still use Bearer tokens.
-app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']
-app.config['JWT_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
-app.config['JWT_COOKIE_SAMESITE'] = 'Lax'
-app.config['JWT_COOKIE_CSRF_PROTECT'] = False  # CORS + SameSite=Lax is sufficient for non-state-changing GETs; enable CSRF protection for mutations once frontend is ready
+# The frontend uses Authorization: Bearer. Keeping a second cookie-based JWT
+# path would require CSRF tokens on every mutation and creates inconsistent auth.
+app.config['JWT_TOKEN_LOCATION'] = ['headers']
 jwt = JWTManager(app)
+app.config.setdefault('JWT_SKIP_USER_VERSION_CHECK', False)
+
+
+def _is_staff_token_revoked(jwt_payload):
+    """Fail closed when a staff account changed or disappeared after login."""
+    try:
+        user = get_user_by_id(jwt_payload.get('sub'))
+        if not user:
+            return True
+        if user.get('role') != jwt_payload.get('role'):
+            return True
+        issued_version = jwt_payload.get('user_auth_version')
+        return not issued_version or issued_version != user_auth_version(user)
+    except Exception:
+        logger.exception("Unable to validate the current JWT user state")
+        return True
+
+
+@jwt.token_in_blocklist_loader
+def staff_token_revocation_callback(_jwt_header, jwt_payload):
+    if app.config.get('JWT_SKIP_USER_VERSION_CHECK'):
+        return False
+    return _is_staff_token_revoked(jwt_payload)
+
+
+@jwt.revoked_token_loader
+def revoked_token_callback(_jwt_header, _jwt_payload):
+    return jsonify({
+        'status': 'error',
+        'message': 'Your account or permissions changed. Please login again.'
+    }), 401
 
 # JWT error handlers
 @jwt.expired_token_loader
@@ -107,25 +130,21 @@ def unauthorized_callback(error):
         'message': 'Authorization token is missing. Please login.'
     }), 401
 
-# Configure CORS properly for frontend
+# Configure CORS from one environment variable instead of machine-specific IPs.
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CORS_ORIGINS',
+        'http://localhost:5173,http://localhost:5174,http://localhost:3000'
+    ).split(',')
+    if origin.strip()
+]
 CORS(app, resources={
     r"/api/*": {
-        "origins": [
-            "http://localhost:5173",
-            "http://localhost:5174",
-            "http://localhost:3000",
-            "http://10.39.35.52:5173",
-            "http://10.39.35.52:5174",
-            "http://10.39.150.52:5173",
-            "http://10.39.150.52:5174",
-            "http://10.9.199.182:5173",
-            "http://10.9.199.182:5174",
-            "http://10.9.200.2:5173",
-            "http://10.9.200.2:5174"
-        ],
+        "origins": cors_origins,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
         "allow_headers": ["Content-Type", "Authorization", "X-Assessment-Token"],
-        "supports_credentials": True
+        "supports_credentials": False
     }
 })
 
@@ -168,9 +187,9 @@ app.register_blueprint(resume_bp, url_prefix='/api')
 from rate_limiter import init_rate_limiting
 init_rate_limiting(app)
 
-# Ensure uploads folder exists
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Ensure the shared upload root exists. Production deployments should point
+# UPLOAD_FOLDER at a persistent mounted volume or durable storage adapter.
+UPLOAD_FOLDER = str(get_upload_root(create=True))
 logger.info(f"[UPLOAD] Folder configured: {UPLOAD_FOLDER}")
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -191,6 +210,25 @@ def request_entity_too_large(error):
     }), 413
 
 
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    """Keep framework-level failures on the same JSON contract as API routes."""
+    return jsonify({
+        'status': 'error',
+        'message': error.description,
+    }), error.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """Return a safe response while retaining the full exception in server logs."""
+    logger.exception("Unhandled request error", exc_info=error)
+    return jsonify({
+        'status': 'error',
+        'message': 'Internal server error',
+    }), 500
+
+
 
 
 
@@ -209,7 +247,11 @@ def root():
 @app.route('/uploads/<path:filename>')
 @jwt_required()
 def serve_uploaded_file(filename):
-    """Serve uploaded files — requires a valid JWT to prevent unauthenticated PII access."""
+    """Serve uploaded PII only to recruiting roles."""
+    if get_jwt().get('role') not in {
+        'interviewer', 'recruiter', 'sector_admin', 'admin', 'super_admin'
+    }:
+        return jsonify({'status': 'error', 'message': 'Access denied'}), 403
     try:
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
     except FileNotFoundError:
@@ -218,61 +260,23 @@ def serve_uploaded_file(filename):
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint to verify API is running"""
+    """Liveness check: verifies that the API process can serve requests."""
     return jsonify({"status": "ok"})
 
 
-@app.route('/api/resume/upload-legacy', methods=['POST'])
-def upload_resume_legacy():
-    """Deprecated: resume upload now handled by resume_routes.py at /api/resume/upload."""
-    return jsonify({"status": "error", "message": "Use /api/resume/upload instead"}), 410
-
-@app.route('/api/assessment/start', methods=['POST'])
-def start_assessment():
-    """REMOVED: Use /api/interviewee/assessment/start-by-token/<token> instead."""
-    return jsonify({
-        "status": "error",
-        "message": "This endpoint has been removed. Use /api/interviewee/assessment/start-by-token/<token>"
-    }), 410
-
-
-@app.route('/api/assessment/mcq/submit', methods=['POST'])
-def submit_mcq():
-    """REMOVED: Use /api/interviewee/assessment/<id>/submit-answer instead."""
-    return jsonify({
-        "status": "error",
-        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/submit-answer"
-    }), 410
-
-
-@app.route('/api/assessment/code/submit', methods=['POST'])
-def submit_code():
-    """REMOVED: Use /api/interviewee/assessment/<id>/submit-answer instead."""
-    return jsonify({
-        "status": "error",
-        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/submit-answer"
-    }), 410
-
-
-@app.route('/api/assessment/psychometric/submit', methods=['POST'])
-def submit_psychometric():
-    """REMOVED: Use /api/interviewee/assessment/<id>/submit-answer instead."""
-    return jsonify({
-        "status": "error",
-        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/submit-answer"
-    }), 410
-
-
-@app.route('/api/assessment/complete', methods=['POST'])
-def complete_assessment():
-    """REMOVED: Use /api/interviewee/assessment/<id>/complete instead."""
-    return jsonify({
-        "status": "error",
-        "message": "This endpoint has been removed. Use /api/interviewee/assessment/<id>/complete"
-    }), 410
-
-
-if __name__ == '__main__':
-    # Run with Socket.IO WSGI app
-    import eventlet.wsgi
-    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app_with_socketio)
+@app.route('/api/health/ready', methods=['GET'])
+def readiness_check():
+    """Readiness check: verifies that the required PostgreSQL dependency is reachable."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        return jsonify({'status': 'ready', 'database': 'ok'}), 200
+    except Exception:
+        logger.warning("Readiness check failed: database unavailable", exc_info=True)
+        return jsonify({'status': 'not_ready', 'database': 'unavailable'}), 503
+    finally:
+        if conn:
+            return_connection(conn)

@@ -1,7 +1,6 @@
-import React from 'react';
 import { Navigate } from 'react-router-dom';
 
-const ProtectedRoute = ({ element, requiredRole }) => {
+const ProtectedRoute = ({ element, allowedRoles = [] }) => {
   const token = localStorage.getItem('authToken');
   const userRole = localStorage.getItem('userRole');
 
@@ -9,7 +8,7 @@ const ProtectedRoute = ({ element, requiredRole }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (requiredRole && userRole !== requiredRole) {
+  if (allowedRoles.length > 0 && !allowedRoles.includes(userRole)) {
     return <Navigate to="/login" replace />;
   }
 

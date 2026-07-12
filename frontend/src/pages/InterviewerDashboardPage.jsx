@@ -1,20 +1,17 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '../components/ui/dialog';
-import { Label } from '../components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { LogOut, Search, Filter, Calendar, CheckCircle, XCircle, Clock, ThumbsUp, ThumbsDown, Users, BarChart3, Settings, X, Plus, Download, LayoutDashboard, Shield, Eye, Loader, TrendingUp, Activity, AlertCircle, Code, FileText, Upload, BookOpen } from 'lucide-react';
+import { LogOut, Search, Filter, Calendar, CheckCircle, Users, Settings, X, Plus, Loader, TrendingUp, Activity } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import Logo from '../components/Logo';
 import { api } from '../services/api';
 import ProctorMonitor from '../components/ProctorMonitor';
-import { useRealtimeTable } from '../hooks/useRealtimeTable';
-import RealtimeIndicator from '../components/common/RealtimeIndicator';
 import ScheduleModal from '../components/interviewer/ScheduleModal';
 import CandidateDetailsModal from '../components/interviewer/CandidateDetailsModal';
 
@@ -22,20 +19,7 @@ const InterviewerDashboardPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Realtime subscription for candidates
-  const {
-    data: realtimeCandidates,
-    setData: setRealtimeCandidates,
-    isConnected: candidatesConnected
-  } = useRealtimeTable('candidates', [], {
-    onUpdate: (newCandidate) => {
-      toast({
-        title: " Candidate Updated",
-        description: `${newCandidate.name}'s status changed`,
-        duration: 3000
-      });
-    }
-  });
+  const [realtimeCandidates, setRealtimeCandidates] = useState([]);
 
   const [filteredCandidates, setFilteredCandidates] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,8 +30,6 @@ const InterviewerDashboardPage = () => {
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
   const [isTechnicalRole, setIsTechnicalRole] = useState(true);
-  const [customQFile, setCustomQFile] = useState(null);
-  const [customQUploading, setCustomQUploading] = useState(false);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const [desiredSkills, setDesiredSkills] = useState([]);
   const [newSkill, setNewSkill] = useState('');
@@ -64,22 +46,6 @@ const InterviewerDashboardPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [rejectingCandidateId, setRejectingCandidateId] = useState(null);
   const [schedulingLoading, setSchedulingLoading] = useState(false);
-
-  useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    // Load desired skills from localStorage
-    const saved = localStorage.getItem('desiredSkills');
-    if (saved) {
-      setDesiredSkills(JSON.parse(saved));
-    }
-
-    fetchCandidates();
-  }, [navigate, toast]);
 
   // Memoized stats calculations - Vercel React Best Practices
   const stats = useMemo(() => ({
@@ -136,7 +102,22 @@ const InterviewerDashboardPage = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [setRealtimeCandidates, toast]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    const saved = localStorage.getItem('desiredSkills');
+    if (saved) {
+      setDesiredSkills(JSON.parse(saved));
+    }
+
+    fetchCandidates();
+  }, [navigate, fetchCandidates]);
 
   const handleDownloadResume = useCallback(async (candidateId) => {
     try {
@@ -195,6 +176,8 @@ const InterviewerDashboardPage = () => {
   const handleLogout = useCallback(() => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userEmail');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('user_id');
     navigate('/login');
   }, [navigate]);
 
@@ -234,7 +217,7 @@ const InterviewerDashboardPage = () => {
     } finally {
       setRejectingCandidateId(null);
     }
-  }, [toast]);
+  }, [setRealtimeCandidates, toast]);
 
   const handleSchedule = useCallback(async () => {
     if (!scheduleDate || !scheduleTime) {
@@ -249,24 +232,6 @@ const InterviewerDashboardPage = () => {
     setSchedulingLoading(true);
     const scheduledDateTime = `${scheduleDate}T${scheduleTime}:00`;
     try {
-      // If a custom question file was attached, upload it first
-      if (customQFile) {
-        setCustomQUploading(true);
-        const formData = new FormData();
-        formData.append('file', customQFile);
-        formData.append('description', `Uploaded during scheduling for ${selectedCandidate?.name}`);
-        formData.append('tags', 'schedule-upload');
-        try {
-          await api.post('/api/admin/question-bank/upload', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          });
-        } catch (qErr) {
-          console.warn('Custom question upload failed, proceeding with schedule:', qErr);
-        } finally {
-          setCustomQUploading(false);
-        }
-      }
-
       await api.post(`/api/interviewer/candidates/${selectedCandidate.id}/schedule`, {
         scheduled_time: scheduledDateTime,
         is_technical_role: isTechnicalRole,
@@ -289,10 +254,9 @@ const InterviewerDashboardPage = () => {
       setScheduleDate('');
       setScheduleTime('');
       setIsTechnicalRole(true);
-      setCustomQFile(null);
       setSelectedCandidate(null);
     }
-  }, [selectedCandidate, scheduleDate, scheduleTime, toast]);
+  }, [isTechnicalRole, scheduleDate, scheduleTime, selectedCandidate, setRealtimeCandidates, toast]);
 
   const handleOpenDetails = useCallback(async (candidate) => {
     setSelectedCandidate(candidate);
@@ -363,12 +327,6 @@ const InterviewerDashboardPage = () => {
           <div className="flex items-center gap-3">
             <Logo size="default" />
             <Badge className="bg-indigo-600 text-white font-semibold">INTERVIEWER</Badge>
-            {candidatesConnected && (
-              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 ml-2">
-                <div className="w-2 h-2 bg-emerald-600 rounded-full animate-pulse" />
-                Live
-              </div>
-            )}
           </div>
           <div className="flex gap-2 items-center">
             <Dialog open={skillsModalOpen} onOpenChange={setSkillsModalOpen}>
@@ -689,9 +647,6 @@ const InterviewerDashboardPage = () => {
         setScheduleTime={setScheduleTime}
         isTechnicalRole={isTechnicalRole}
         setIsTechnicalRole={setIsTechnicalRole}
-        customQFile={customQFile}
-        setCustomQFile={setCustomQFile}
-        customQUploading={customQUploading}
         schedulingLoading={schedulingLoading}
         onSchedule={handleSchedule}
       />

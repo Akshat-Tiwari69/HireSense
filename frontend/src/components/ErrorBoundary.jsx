@@ -1,21 +1,21 @@
-import React from 'react';
+import { Component } from 'react';
 import { AlertTriangle, Home, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 
-class ErrorBoundary extends React.Component {
+class ErrorBoundary extends Component {
     constructor(props) {
         super(props);
         this.state = { hasError: false, error: null, errorInfo: null };
     }
 
-    static getDerivedStateFromError(error) {
+    static getDerivedStateFromError() {
         return { hasError: true };
     }
 
     componentDidCatch(error, errorInfo) {
         console.error('Error caught by boundary:', error, errorInfo);
-        this.state = { hasError: true, error, errorInfo };
+        this.setState({ hasError: true, error, errorInfo });
     }
 
     handleReset = () => {
@@ -40,7 +40,7 @@ class ErrorBoundary extends React.Component {
                                 An unexpected error occurred. Don't worry, we've logged it and our team will look into it.
                             </p>
 
-                            {process.env.NODE_ENV === 'development' && this.state.error && (
+                            {import.meta.env.DEV && this.state.error && (
                                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-left">
                                     <p className="text-xs font-mono text-red-800 break-all">
                                         {this.state.error.toString()}

@@ -8,22 +8,16 @@ from datetime import datetime
 import pytz
 from flask import Blueprint, request, jsonify
 
-try:
-    from db_config import connection_pool, get_connection, return_connection
-except ImportError:
-    from db_config import get_connection, return_connection
-    def connection_pool(f):
-        return f
+from db_config import get_connection, return_connection
 
-from db_helpers import (
-    get_candidate_by_id,
-    get_scheduled_assessment,
-    check_assessment_time_valid,
+from candidate_db import get_candidate_by_id
+from assessment_db import (
+    ASSESSMENT_DURATION_SECONDS,
+    AssessmentStateError,
+    finalize_assessment,
     get_assessment_by_id,
     get_assessment_by_token,
     start_assessment_by_token,
-    create_assessment,
-    update_scheduled_assessment_status,
     save_assessment_questions,
     get_assessment_questions,
     get_assessment_time_elapsed,
@@ -32,32 +26,32 @@ from db_helpers import (
     get_saved_coding_submission,
     verify_assessment_access_token,
 )
-
-
-def _check_assessment_token(assessment_id: int):
-    token = request.headers.get('X-Assessment-Token', '')
-    if not verify_assessment_access_token(token, assessment_id):
-        return jsonify({'status': 'error', 'message': 'Invalid or missing assessment token'}), 403
-    return None
 from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
 from ai_question_generator import get_ai_question_generator
+
+
+def _check_assessment_token(assessment_id: int, *, allow_expired: bool = False):
+    token = request.headers.get('X-Assessment-Token', '')
+    if not verify_assessment_access_token(
+        token,
+        assessment_id,
+        allow_expired=allow_expired,
+    ):
+        return jsonify({'status': 'error', 'message': 'Invalid or missing assessment token'}), 403
+    return None
 
 logger = logging.getLogger(__name__)
 
 interviewee_session_bp = Blueprint('interviewee_session', __name__)
 
-ASSESSMENT_DURATION_SECONDS = 60 * 60  # 1 hour
-
-
 @interviewee_session_bp.route('/assessment/<int:assessment_id>/remaining-time', methods=['GET'])
-@connection_pool
 def get_remaining_time(assessment_id):
     """
     Return server-authoritative remaining time for an active assessment.
     Calculated from started_at so the client cannot inflate it.
     """
     try:
-        err = _check_assessment_token(assessment_id)
+        err = _check_assessment_token(assessment_id, allow_expired=True)
         if err:
             return err
 
@@ -100,7 +94,6 @@ def start_assessment(candidate_id):
 
 
 @interviewee_session_bp.route('/assessment/verify/<token>', methods=['GET'])
-@connection_pool
 def verify_assessment_token(token):
     try:
         assessment = get_assessment_by_token(token)
@@ -113,6 +106,12 @@ def verify_assessment_token(token):
         if assessment['status'] == 'cancelled':
             return jsonify({'status': 'error',
                             'message': 'This assessment has been cancelled. Please contact your recruiter.'}), 400
+        if assessment.get('deadline_reached'):
+            return jsonify({
+                'status': 'error',
+                'message': 'This assessment has reached its time limit.',
+                'data': {'can_start': False, 'assessment_status': assessment['status']},
+            }), 409
 
         ist = pytz.timezone('Asia/Kolkata')
         scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
@@ -132,15 +131,14 @@ def verify_assessment_token(token):
             'assessment_status': assessment['status'],
             'already_started': assessment['status'] == 'in_progress'
         }}), 200
-    except Exception as e:
+    except Exception:
         return jsonify({'status': 'error', 'message': 'Failed to verify assessment'}), 500
 
 
 @interviewee_session_bp.route('/assessment/start-by-token/<token>', methods=['POST'])
-@connection_pool
 def start_assessment_with_token(token):
+    assessment = None
     try:
-        logger.info(f"Token verification requested: {token[:10]}...")
         assessment = get_assessment_by_token(token)
         if not assessment:
             return jsonify({'status': 'error', 'message': 'Invalid assessment link.'}), 404
@@ -150,6 +148,14 @@ def start_assessment_with_token(token):
         if assessment['status'] == 'cancelled':
             return jsonify({'status': 'error',
                             'message': 'This assessment has been cancelled. Please contact your recruiter.'}), 400
+        if assessment.get('deadline_reached'):
+            assessment_id = assessment.get('assessment_id')
+            if assessment_id:
+                finalize_assessment(assessment_id)
+            return jsonify({
+                'status': 'error',
+                'message': 'This assessment has reached its time limit and was completed.',
+            }), 409
 
         ist = pytz.timezone('Asia/Kolkata')
         scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
@@ -165,32 +171,28 @@ def start_assessment_with_token(token):
                 'data': {'scheduled_time': str(assessment['scheduled_time']), 'minutes_away': abs(minutes_diff)}
             }), 403
 
-        is_resume = False
+        start_result = start_assessment_by_token(token)
+        if not start_result:
+            return jsonify({
+                'status': 'error',
+                'message': 'Assessment cannot be started. It may have been cancelled or already completed.'
+            }), 409
+
+        assessment_id = start_result['assessment_id']
+        is_resume = start_result['is_resume']
         time_elapsed = 0
         stored_questions = None
+        questions_loaded_from_assessment = False
         is_technical_role = True
 
-        if assessment['status'] == 'in_progress' and assessment['assessment_id']:
-            assessment_id = assessment['assessment_id']
-            is_resume = True
+        if is_resume:
             time_elapsed = get_assessment_time_elapsed(assessment_id)
             stored_questions = get_assessment_questions(assessment_id)
             if stored_questions:
+                questions_loaded_from_assessment = True
                 mcq_questions = stored_questions.get('mcq_questions', [])
                 coding_problem = stored_questions.get('coding_problem', {})
                 psychometric_scenarios = stored_questions.get('psychometric_scenarios', [])
-        else:
-            # start_assessment_by_token updates WHERE status='scheduled'; if it returns
-            # False the row no longer exists in a startable state — abort rather than
-            # creating an orphaned assessment record.
-            started = start_assessment_by_token(token)
-            if not started:
-                return jsonify({'status': 'error',
-                                'message': 'Assessment cannot be started. It may have been cancelled or already used.'}), 400
-            assessment_id = create_assessment(assessment['candidate_id'], scheduled_assessment_id=assessment['id'])
-            update_scheduled_assessment_status(
-                scheduled_assessment_id=assessment['id'], status='in_progress', assessment_id=assessment_id
-            )
 
         if not stored_questions:
             pconn = None
@@ -220,10 +222,15 @@ def start_assessment_with_token(token):
                     with contextlib.suppress(Exception):
                         return_connection(pconn)
 
+        if stored_questions and not questions_loaded_from_assessment:
+            save_assessment_questions(assessment_id, stored_questions)
+
         if not stored_questions:
             candidate = get_candidate_by_id(assessment['candidate_id'])
             candidate_skills = _extract_candidate_skills(candidate)
-            applied_job_title, job_required_skills = _fetch_job_for_candidate(assessment['candidate_id'])
+            applied_job_title, job_required_skills = _fetch_job_for_candidate(
+                assessment['candidate_id'], start_result.get('job_id')
+            )
             mcq_questions, coding_problem, psychometric_scenarios = _generate_questions(
                 candidate_skills, job_required_skills, applied_job_title, is_technical=is_technical_role
             )
@@ -235,8 +242,7 @@ def start_assessment_with_token(token):
 
         mcq_for_frontend = _strip_answers(mcq_questions)
         psychometric_scenarios = _strip_optimal_choice(psychometric_scenarios)
-        total_duration_seconds = 60 * 60
-        remaining_seconds = max(0, total_duration_seconds - time_elapsed)
+        remaining_seconds = max(0, ASSESSMENT_DURATION_SECONDS - time_elapsed)
 
         saved_mcq_answers, saved_psychometric_answers, saved_coding = {}, {}, None
         if is_resume:
@@ -258,7 +264,7 @@ def start_assessment_with_token(token):
                             'coding_problem': _format_coding_problem(coding_problem),
                             'psychometric_scenarios': psychometric_scenarios,
                             'is_technical_role': is_technical_role,
-                            'duration_minutes': 60,
+                            'duration_minutes': ASSESSMENT_DURATION_SECONDS // 60,
                             'remaining_seconds': remaining_seconds,
                             'is_resume': is_resume,
                             'ai_generated': bool(not is_resume or not stored_questions),
@@ -267,7 +273,22 @@ def start_assessment_with_token(token):
                             'saved_coding': saved_coding
                         }}), 200
 
-    except Exception as e:
+    except AssessmentStateError as exc:
+        if (
+            'time limit' in str(exc).lower()
+            and assessment
+            and assessment.get('assessment_id')
+        ):
+            try:
+                finalize_assessment(assessment['assessment_id'])
+            except Exception:
+                logger.exception(
+                    "Failed to finalize expired assessment %s",
+                    assessment['assessment_id'],
+                )
+        return jsonify({'status': 'error', 'message': str(exc)}), 409
+    except Exception:
+        logger.exception("Failed to start assessment for the supplied token")
         return jsonify({'status': 'error', 'message': 'Failed to start assessment'}), 500
 
 
@@ -297,7 +318,7 @@ def _extract_candidate_skills(candidate):
     return []
 
 
-def _fetch_job_for_candidate(candidate_id):
+def _fetch_job_for_candidate(candidate_id, job_id=None):
     applied_job_title, job_required_skills = "", []
     jconn = None
     try:
@@ -305,16 +326,36 @@ def _fetch_job_for_candidate(candidate_id):
         jcur = jconn.cursor()
         jcur.execute(
             """SELECT jd.title, jd.required_skills
-               FROM job_descriptions jd
-               JOIN candidates c ON c.best_match_job_id = jd.id
+               FROM candidates c
+               JOIN job_descriptions jd
+                 ON jd.id = COALESCE(%s, c.best_match_job_id)
                WHERE c.id = %s""",
-            (candidate_id,)
+            (job_id, candidate_id),
         )
         jrow = jcur.fetchone()
         if jrow:
             applied_job_title = jrow[0] or ""
-            if jrow[1]:
-                job_required_skills = [s.strip() for s in jrow[1].replace('\n', ',').split(',') if s.strip()]
+            raw_skills = jrow[1]
+            if isinstance(raw_skills, list):
+                job_required_skills = [
+                    str(skill).strip() for skill in raw_skills if str(skill).strip()
+                ]
+            elif raw_skills:
+                import json as _json
+                try:
+                    parsed = _json.loads(raw_skills)
+                except (TypeError, _json.JSONDecodeError):
+                    parsed = None
+                if isinstance(parsed, list):
+                    job_required_skills = [
+                        str(skill).strip() for skill in parsed if str(skill).strip()
+                    ]
+                else:
+                    job_required_skills = [
+                        skill.strip()
+                        for skill in str(raw_skills).replace('\n', ',').split(',')
+                        if skill.strip()
+                    ]
     except Exception as e:
         logger.warning(f"Could not fetch applied job details: {e}")
     finally:

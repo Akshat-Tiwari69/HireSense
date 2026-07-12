@@ -9,25 +9,24 @@ Complete documentation for the AI-Powered Recruitment Platform.
 ### Getting Started
 - [Project Overview](#project-overview)
 - [Quick Start Guide](#quick-start)
-- [Environment Setup](ENVIRONMENT_CONFIG.md)
+- [Environment Setup](SETUP.md)
 
 ### Architecture & Design
-- [Project Architecture](PROJECT_ARCHITECTURE.md)
-- [Database Schema](DATABASE_SCHEMA.md)
+- [Project Architecture](ARCHITECTURE.md)
+- [Backend Flow Map](BACKEND_FLOW_MAP.md)
+- [Database Schema](DATABASE.md)
 - [Backend File Reference](BACKEND_FILE_REFERENCE.md)
-- [Frontend Guide](FRONTEND_GUIDE.md)
 
 ### API Documentation
-- [API Documentation](API_DOCS.md) - Complete REST API reference with authentication
+- [API Documentation](API.md) - Complete REST API reference with authentication
 
 ### Features
-- [Assessment System](ASSESSMENT_SYSTEM_GUIDE.md) - MCQ, Coding, Psychometric tests
-- [Proctoring System](PROCTOR_GUIDE.md) - WebRTC face detection and violation monitoring
-- [Admin Dashboard](ADMIN_DASHBOARD_GUIDE.md) - User and job management
+- [Roles and Workflows](ROLES.md) - Assessment, hiring, and administration workflows
+- [Proctor Setup](PROCTOR_USER_SETUP.md) - Proctor account and monitoring setup
 
 ### Deployment
 - [Deployment Guide](DEPLOYMENT_GUIDE.md) - Production deployment (Railway, Render, Vercel)
-- [Environment Configuration](ENVIRONMENT_CONFIG.md) - All environment variables
+- [Environment Configuration](SETUP.md) - Canonical environment variables
 
 ---
 
@@ -41,7 +40,7 @@ HireSense is a full-stack AI-enabled hiring platform that covers the complete re
 |---------|-------------|
 | AI Resume Analysis | OpenAI GPT-4o-mini pros/cons generation and match scoring |
 | Job Matching | Rule-based + AI re-ranking of candidate-to-job fit |
-| Multi-Role System | Admin, Sector Admin, Interviewer, Proctor, Candidate roles |
+| Multi-Role System | Super Admin, Admin, Sector Admin, Recruiter, Interviewer, Proctor, Candidate roles |
 | Assessment Engine | MCQ, Coding challenges (multi-language), Psychometric tests |
 | Live Proctoring | WebRTC video with face detection and violation tracking |
 | Email Automation | Assessment invitations, rejections, final decisions |
@@ -51,7 +50,7 @@ HireSense is a full-stack AI-enabled hiring platform that covers the complete re
 
 | Layer | Technologies |
 |-------|-------------|
-| Frontend | React 18, Vite, Tailwind CSS, shadcn/ui, Recharts, Socket.IO client |
+| Frontend | React 18, Vite, Tailwind CSS, shadcn/ui, Socket.IO client |
 | Backend | Flask 3.0, Flask-JWT-Extended, Flask-Limiter, Flask-CORS, Socket.IO |
 | Database | PostgreSQL 15 (Supabase compatible) |
 | AI | OpenAI GPT-4o-mini |
@@ -65,9 +64,9 @@ HireSense is a full-stack AI-enabled hiring platform that covers the complete re
 ### Prerequisites
 
 - Python 3.9+
-- Node.js 18+
+- Node.js 20
 - PostgreSQL 15+ (or Supabase)
-- OpenAI API key
+- OpenAI API key (optional; deterministic fallbacks are available)
 
 ### 1. Backend Setup
 
@@ -81,14 +80,14 @@ source venv/bin/activate    # Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure environment (see ENVIRONMENT_CONFIG.md for all variables)
+# Configure environment (see SETUP.md for all variables)
 cp .env.example .env
 
-# Run database migrations
-python scripts/run_migration.py
+# Initialize a fresh database. Use --reconcile for an existing installation.
+python scripts/run_migration.py --schema
 
 # Start server
-python app.py
+python run.py
 ```
 
 Server runs at: `http://localhost:5000`
@@ -101,8 +100,8 @@ cd frontend
 # Install dependencies
 npm install
 
-# Configure environment
-echo "VITE_API_BASE_URL=http://localhost:5000" > .env.local
+# Configure the public backend URL
+cp .env.example .env.local
 
 # Start development server
 npm run dev
@@ -125,26 +124,23 @@ App runs at: `http://localhost:5173`
 
 | Document | Description |
 |----------|-------------|
-| [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) | Complete system architecture, data flow, module responsibilities |
-| [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) | All tables, relationships, indexes |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Complete system architecture, data flow, module responsibilities |
+| [DATABASE.md](DATABASE.md) | All tables, relationships, indexes, and migration modes |
 | [BACKEND_FILE_REFERENCE.md](BACKEND_FILE_REFERENCE.md) | All Python files and their functions |
-| [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md) | React components, pages, routing |
 
 ### API & Features
 
 | Document | Description |
 |----------|-------------|
-| [API_DOCS.md](API_DOCS.md) | Complete REST API reference with authentication |
-| [ASSESSMENT_SYSTEM_GUIDE.md](ASSESSMENT_SYSTEM_GUIDE.md) | MCQ, coding, psychometric tests |
-| [PROCTOR_GUIDE.md](PROCTOR_GUIDE.md) | Proctoring, face detection, violation monitoring |
-| [ADMIN_DASHBOARD_GUIDE.md](ADMIN_DASHBOARD_GUIDE.md) | Admin panel, user management, job descriptions |
+| [API.md](API.md) | Complete REST API reference with authentication |
+| [ROLES.md](ROLES.md) | Role permissions and end-to-end workflows |
 
 ### Operations
 
 | Document | Description |
 |----------|-------------|
 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Production deployment (Railway, Render, Vercel) |
-| [ENVIRONMENT_CONFIG.md](ENVIRONMENT_CONFIG.md) | All environment variables reference |
+| [SETUP.md](SETUP.md) | All environment variables and local setup |
 | [PROCTOR_USER_SETUP.md](PROCTOR_USER_SETUP.md) | Creating proctor accounts |
 
 ---
@@ -283,7 +279,8 @@ SMTP_HOST=smtp.gmail.com       # Email via SMTP (fallback)
 CORS_ORIGINS=https://...       # Restrict CORS in production
 ```
 
-See [ENVIRONMENT_CONFIG.md](ENVIRONMENT_CONFIG.md) for the complete reference.
+See [SETUP.md](SETUP.md) and the canonical templates in `backend/.env.example`
+and `frontend/.env.example` for the complete reference.
 
 ---
 

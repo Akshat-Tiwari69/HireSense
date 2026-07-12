@@ -1,26 +1,39 @@
-"""
-WebSocket Server for Live Proctoring
-Handles WebRTC signaling for real-time video streaming from candidates to interviewers.
-"""
-import socketio
+"""Authenticated WebRTC signalling for live assessment proctoring."""
+
+from __future__ import annotations
+
+import contextlib
 import logging
-from db_config import get_connection
+import os
+
+import socketio
+from eventlet.semaphore import Semaphore
+
+from db_config import get_connection, return_connection
+from user_db import get_user_by_id, user_auth_version
+
 
 logger = logging.getLogger(__name__)
 
+_configured_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:5174,http://localhost:3000,http://127.0.0.1:5173",
+)
+_allowed_origins = [origin.strip() for origin in _configured_origins.split(",") if origin.strip()]
 sio = socketio.Server(
-    cors_allowed_origins='*',
-    async_mode='eventlet',
-    logger=True,
-    engineio_logger=True
+    cors_allowed_origins=_allowed_origins,
+    async_mode="eventlet",
+    logger=False,
+    engineio_logger=False,
 )
 
-# {assessment_id: {'candidate': sid, 'interviewers': [sid1, ...]}}
+# {assessment_id: {'candidate': sid | None, 'interviewers': [sid, ...]}}
 active_rooms = {}
-# {sid: {'type': 'candidate'|'interviewer', 'assessment_id': id, 'user_id': id}}
+# {sid: {'type': 'candidate'|'interviewer', 'assessment_id': int, ...}}
 connections = {}
+_state_lock = Semaphore(1)
 
-# Injected by app.py so event handlers can push a Flask app context for JWT decode
+# Injected by app.py so handlers can decode staff JWTs in Flask context.
 _flask_app = None
 
 
@@ -29,270 +42,364 @@ def init_websocket_server(app):
     _flask_app = app
 
 
+def _positive_int(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _verify_candidate_token(access_token, assessment_id):
-    """Return True if access_token is valid for the given assessment_id."""
+    """Verify that a candidate token belongs to this active assessment."""
+
+    assessment_id = _positive_int(assessment_id)
+    if assessment_id is None or not isinstance(access_token, str) or not access_token:
+        return False
+
+    conn = None
+    cursor = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            """SELECT id FROM scheduled_assessments
-               WHERE access_token = %s AND assessment_id = %s AND status = 'in_progress'""",
-            (access_token, assessment_id)
-        )
-        row = cursor.fetchone()
-        conn.close()
-        return row is not None
-    except Exception as e:
-        logger.error(f"[PROCTORING] Token verification DB error: {e}")
+        cursor.execute("""
+            SELECT 1
+            FROM scheduled_assessments sa
+            JOIN assessments a ON a.id = sa.assessment_id
+            WHERE sa.access_token = %s
+              AND a.id = %s
+              AND sa.status = 'in_progress'
+              AND a.status IN ('started', 'in_progress')
+        """, (access_token, assessment_id))
+        return cursor.fetchone() is not None
+    except Exception:
+        logger.exception("Candidate token verification failed for assessment %s", assessment_id)
         return False
+    finally:
+        if cursor is not None:
+            with contextlib.suppress(Exception):
+                cursor.close()
+        if conn is not None:
+            return_connection(conn)
 
 
 def _verify_interviewer_jwt(token):
-    """Return (user_id, role) if JWT is valid and role is staff, else None."""
-    if not _flask_app or not token:
+    """Return ``(user_id, role)`` for an authenticated staff token."""
+
+    if _flask_app is None or not isinstance(token, str) or not token:
         return None
     try:
         with _flask_app.app_context():
             from flask_jwt_extended import decode_token
+
             decoded = decode_token(token)
-            role = decoded.get('role') or (decoded.get('sub', {}) or {}).get('role')
-            user_id = decoded.get('sub')
-            if role not in ('interviewer', 'proctor', 'admin', 'super_admin'):
-                return None
-            return user_id, role
-    except Exception as e:
-        logger.warning(f"[PROCTORING] JWT decode failed: {e}")
+        role = decoded.get("role")
+        user_id = _positive_int(decoded.get("sub"))
+        if role not in {"interviewer", "proctor", "admin", "super_admin"} or user_id is None:
+            return None
+        user = get_user_by_id(user_id)
+        if (
+            not user
+            or user.get("role") != role
+            or decoded.get("user_auth_version") != user_auth_version(user)
+        ):
+            return None
+        return user_id, role
+    except Exception:
+        logger.warning("Proctoring JWT decode failed", exc_info=True)
         return None
+
+
+def _verify_staff_assessment_access(user_id, role, assessment_id):
+    """Require an active assessment assignment, except for system administrators."""
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT sa.interviewer_id, sa.proctor_id
+            FROM assessments a
+            JOIN scheduled_assessments sa ON sa.id = a.scheduled_assessment_id
+            WHERE a.id = %s
+              AND a.status IN ('started', 'in_progress')
+              AND sa.status = 'in_progress'
+        """, (assessment_id,))
+        assignment = cursor.fetchone()
+        if assignment is None:
+            return False
+        if role in {"admin", "super_admin"}:
+            return True
+        if role == "interviewer":
+            return assignment[0] == user_id
+        return role == "proctor" and assignment[1] == user_id
+    except Exception:
+        logger.exception("Staff access verification failed for assessment %s", assessment_id)
+        return False
+    finally:
+        if cursor is not None:
+            with contextlib.suppress(Exception):
+                cursor.close()
+        if conn is not None:
+            return_connection(conn)
+
+
+def _emit_error(sid, message):
+    sio.emit("error", {"message": message}, room=sid)
 
 
 @sio.event
 def connect(sid, environ):
-    logger.info(f"[PROCTORING] New connection: {sid}")
+    logger.info("Proctoring socket connected: %s", sid)
     return True
 
 
 @sio.event
 def disconnect(sid):
-    logger.info(f"[PROCTORING] Disconnect: {sid}")
+    logger.info("Proctoring socket disconnected: %s", sid)
+    candidate_notification = None
+    interviewer_notifications = []
+    with _state_lock:
+        connection = connections.pop(sid, None)
+        if connection is None:
+            return
+        assessment_id = connection.get("assessment_id")
+        room = active_rooms.get(assessment_id)
+        if room is None:
+            return
 
-    if sid in connections:
-        conn_info = connections[sid]
-        assessment_id = conn_info.get('assessment_id')
-        user_type = conn_info.get('type')
+        if connection.get("type") == "candidate" and room.get("candidate") == sid:
+            room["candidate"] = None
+            interviewer_notifications = list(room.get("interviewers", []))
+        elif connection.get("type") == "interviewer":
+            with contextlib.suppress(ValueError):
+                room.get("interviewers", []).remove(sid)
+            candidate_notification = room.get("candidate")
 
-        if assessment_id and assessment_id in active_rooms:
-            room = active_rooms[assessment_id]
+        if room.get("candidate") is None and not room.get("interviewers"):
+            active_rooms.pop(assessment_id, None)
 
-            if user_type == 'candidate' and room.get('candidate') == sid:
-                room['candidate'] = None
-                for interviewer_sid in room.get('interviewers', []):
-                    sio.emit('candidate_disconnected', {'assessment_id': assessment_id}, room=interviewer_sid)
-                logger.info(f"[PROCTORING] Candidate disconnected from assessment {assessment_id}")
-
-            elif user_type == 'interviewer':
-                if sid in room.get('interviewers', []):
-                    room['interviewers'].remove(sid)
-                logger.info(f"[PROCTORING] Interviewer disconnected from assessment {assessment_id}")
-
-            if not room.get('candidate') and not room.get('interviewers'):
-                del active_rooms[assessment_id]
-                logger.info(f"[PROCTORING] Room {assessment_id} deleted (empty)")
-
-        del connections[sid]
+    for interviewer_sid in interviewer_notifications:
+        sio.emit("candidate_disconnected", {"assessment_id": assessment_id}, room=interviewer_sid)
+    if candidate_notification:
+        sio.emit("interviewer_disconnected", {"assessment_id": assessment_id}, room=candidate_notification)
 
 
 @sio.event
 def join_as_candidate(sid, data):
-    """
-    Candidate joins proctoring room.
-    Data: {'assessment_id': int, 'access_token': str}
-    """
-    try:
-        assessment_id = data.get('assessment_id')
-        access_token = data.get('access_token')
+    if not isinstance(data, dict):
+        _emit_error(sid, "Invalid join payload")
+        return
+    assessment_id = _positive_int(data.get("assessment_id"))
+    access_token = data.get("access_token")
+    if assessment_id is None or not isinstance(access_token, str) or not access_token:
+        _emit_error(sid, "Missing assessment_id or access_token")
+        return
+    if not _verify_candidate_token(access_token, assessment_id):
+        _emit_error(sid, "Invalid or expired assessment token")
+        return
 
-        if not assessment_id or not access_token:
-            sio.emit('error', {'message': 'Missing assessment_id or access_token'}, room=sid)
-            return
+    join_error = None
+    interviewer_sids = []
+    with _state_lock:
+        if sid in connections:
+            join_error = "Socket has already joined a proctoring room"
+        else:
+            room = active_rooms.setdefault(
+                assessment_id, {"candidate": None, "interviewers": []}
+            )
+            existing_candidate = room.get("candidate")
+            if existing_candidate and existing_candidate in connections:
+                join_error = "Candidate is already connected to this assessment"
+            else:
+                room["candidate"] = sid
+                connections[sid] = {"type": "candidate", "assessment_id": assessment_id}
+                interviewer_sids = list(room.get("interviewers", []))
+    if join_error:
+        _emit_error(sid, join_error)
+        return
 
-        if not _verify_candidate_token(access_token, assessment_id):
-            logger.warning(f"[PROCTORING] Invalid token for assessment {assessment_id} from {sid}")
-            sio.emit('error', {'message': 'Invalid or expired assessment token'}, room=sid)
-            return
-
-        if assessment_id not in active_rooms:
-            active_rooms[assessment_id] = {'candidate': None, 'interviewers': []}
-
-        active_rooms[assessment_id]['candidate'] = sid
-        connections[sid] = {'type': 'candidate', 'assessment_id': assessment_id}
-
-        sio.enter_room(sid, f'assessment_{assessment_id}')
-
-        for interviewer_sid in active_rooms[assessment_id].get('interviewers', []):
-            sio.emit('candidate_joined', {'assessment_id': assessment_id}, room=interviewer_sid)
-
-        interviewers_present = len(active_rooms[assessment_id].get('interviewers', [])) > 0
-        sio.emit('joined', {
-            'assessment_id': assessment_id,
-            'role': 'candidate',
-            'interviewers_present': interviewers_present
-        }, room=sid)
-
-        if interviewers_present:
-            sio.emit('interviewer_joined', {}, room=sid)
-
-        logger.info(f"[PROCTORING] Verified candidate joined assessment {assessment_id}")
-
-    except Exception as e:
-        logger.error(f"[PROCTORING] Error in join_as_candidate: {e}")
-        sio.emit('error', {'message': 'Failed to join proctoring room'}, room=sid)
+    sio.enter_room(sid, f"assessment_{assessment_id}")
+    for interviewer_sid in interviewer_sids:
+        sio.emit("candidate_joined", {"assessment_id": assessment_id}, room=interviewer_sid)
+    sio.emit("joined", {
+        "assessment_id": assessment_id,
+        "role": "candidate",
+        "interviewers_present": bool(interviewer_sids),
+    }, room=sid)
+    if interviewer_sids:
+        sio.emit("interviewer_joined", {}, room=sid)
 
 
 @sio.event
 def join_as_interviewer(sid, data):
-    """
-    Interviewer/proctor joins to monitor assessment.
-    Data: {'assessment_id': int, 'user_id': int, 'token': str}
-    """
-    try:
-        assessment_id = data.get('assessment_id')
-        token = data.get('token')
+    if not isinstance(data, dict):
+        _emit_error(sid, "Invalid join payload")
+        return
+    assessment_id = _positive_int(data.get("assessment_id"))
+    if assessment_id is None:
+        _emit_error(sid, "Missing assessment_id")
+        return
+    staff = _verify_interviewer_jwt(data.get("token"))
+    if staff is None:
+        _emit_error(sid, "Unauthorized; valid staff JWT required")
+        return
+    user_id, role = staff
+    if not _verify_staff_assessment_access(user_id, role, assessment_id):
+        _emit_error(sid, "Not assigned to this active assessment")
+        return
 
-        if not assessment_id:
-            sio.emit('error', {'message': 'Missing assessment_id'}, room=sid)
-            return
+    join_error = None
+    candidate_sid = None
+    with _state_lock:
+        if sid in connections:
+            join_error = "Socket has already joined a proctoring room"
+        else:
+            room = active_rooms.setdefault(
+                assessment_id, {"candidate": None, "interviewers": []}
+            )
+            room["interviewers"].append(sid)
+            connections[sid] = {
+                "type": "interviewer",
+                "assessment_id": assessment_id,
+                "user_id": user_id,
+                "role": role,
+            }
+            candidate_sid = room.get("candidate")
+    if join_error:
+        _emit_error(sid, join_error)
+        return
 
-        result = _verify_interviewer_jwt(token)
-        if result is None:
-            logger.warning(f"[PROCTORING] Unauthorized interviewer join attempt for assessment {assessment_id}")
-            sio.emit('error', {'message': 'Unauthorized — valid JWT required'}, room=sid)
-            return
-
-        user_id, role = result
-
-        if assessment_id not in active_rooms:
-            active_rooms[assessment_id] = {'candidate': None, 'interviewers': []}
-
-        if sid not in active_rooms[assessment_id]['interviewers']:
-            active_rooms[assessment_id]['interviewers'].append(sid)
-
-        connections[sid] = {'type': 'interviewer', 'assessment_id': assessment_id, 'user_id': user_id}
-
-        sio.enter_room(sid, f'assessment_{assessment_id}')
-
-        candidate_sid = active_rooms[assessment_id].get('candidate')
-        candidate_present = candidate_sid is not None
-
-        sio.emit('joined', {
-            'assessment_id': assessment_id,
-            'role': 'interviewer',
-            'candidate_present': candidate_present
-        }, room=sid)
-
-        if candidate_present:
-            sio.emit('interviewer_joined', {}, room=candidate_sid)
-
-        logger.info(f"[PROCTORING] Verified interviewer (user {user_id}, role {role}) joined assessment {assessment_id}")
-
-    except Exception as e:
-        logger.error(f"[PROCTORING] Error in join_as_interviewer: {e}")
-        sio.emit('error', {'message': 'Failed to join proctoring room'}, room=sid)
+    sio.enter_room(sid, f"assessment_{assessment_id}")
+    sio.emit("joined", {
+        "assessment_id": assessment_id,
+        "role": "interviewer",
+        "candidate_present": candidate_sid is not None,
+    }, room=sid)
+    if candidate_sid:
+        sio.emit("interviewer_joined", {}, room=candidate_sid)
 
 
 @sio.event
 def webrtc_offer(sid, data):
-    """Forward WebRTC offer from candidate to interviewers."""
-    try:
-        assessment_id = data.get('assessment_id')
-        offer = data.get('offer')
-
-        if assessment_id not in active_rooms:
-            return
-
-        # Only allow if sender is the registered candidate for this room
-        if connections.get(sid, {}).get('assessment_id') != assessment_id:
-            return
-
-        for interviewer_sid in active_rooms[assessment_id].get('interviewers', []):
-            sio.emit('webrtc_offer', {'assessment_id': assessment_id, 'offer': offer}, room=interviewer_sid)
-
-    except Exception as e:
-        logger.error(f"[PROCTORING] Error in webrtc_offer: {e}")
+    if not isinstance(data, dict) or data.get("offer") is None:
+        _emit_error(sid, "Invalid WebRTC offer")
+        return
+    assessment_id = _positive_int(data.get("assessment_id"))
+    authorized = False
+    interviewer_sids = []
+    with _state_lock:
+        connection = connections.get(sid, {})
+        room = active_rooms.get(assessment_id)
+        authorized = (
+            room is not None
+            and connection.get("type") == "candidate"
+            and connection.get("assessment_id") == assessment_id
+            and room.get("candidate") == sid
+        )
+        if authorized:
+            interviewer_sids = list(room.get("interviewers", []))
+    if not authorized:
+        _emit_error(sid, "Not authorized for this assessment")
+        return
+    for interviewer_sid in interviewer_sids:
+        sio.emit("webrtc_offer", {
+            "assessment_id": assessment_id,
+            "offer": data["offer"],
+        }, room=interviewer_sid)
 
 
 @sio.event
 def webrtc_answer(sid, data):
-    """Forward WebRTC answer from interviewer to candidate."""
-    try:
-        assessment_id = data.get('assessment_id')
-        answer = data.get('answer')
-
-        conn_info = connections.get(sid, {})
-        if conn_info.get('type') != 'interviewer' or conn_info.get('assessment_id') != assessment_id:
-            return
-
-        if assessment_id not in active_rooms:
-            return
-
-        candidate_sid = active_rooms[assessment_id].get('candidate')
-        if candidate_sid:
-            sio.emit('webrtc_answer', {'assessment_id': assessment_id, 'answer': answer}, room=candidate_sid)
-
-    except Exception as e:
-        logger.error(f"[PROCTORING] Error in webrtc_answer: {e}")
+    if not isinstance(data, dict) or data.get("answer") is None:
+        _emit_error(sid, "Invalid WebRTC answer")
+        return
+    assessment_id = _positive_int(data.get("assessment_id"))
+    authorized = False
+    candidate_sid = None
+    with _state_lock:
+        connection = connections.get(sid, {})
+        room = active_rooms.get(assessment_id)
+        authorized = (
+            room is not None
+            and connection.get("type") == "interviewer"
+            and connection.get("assessment_id") == assessment_id
+            and sid in room.get("interviewers", [])
+        )
+        if authorized:
+            candidate_sid = room.get("candidate")
+    if not authorized:
+        _emit_error(sid, "Not authorized for this assessment")
+        return
+    if candidate_sid:
+        sio.emit("webrtc_answer", {
+            "assessment_id": assessment_id,
+            "answer": data["answer"],
+        }, room=candidate_sid)
 
 
 @sio.event
 def ice_candidate(sid, data):
-    """Forward ICE candidate between peers, enforcing role-direction."""
-    try:
-        assessment_id = data.get('assessment_id')
-        ice = data.get('candidate')
-        target = data.get('target', 'interviewer')
-
-        conn_info = connections.get(sid, {})
-        sender_type = conn_info.get('type')
-        if conn_info.get('assessment_id') != assessment_id:
-            return
-
-        if assessment_id not in active_rooms:
-            return
-
-        room = active_rooms[assessment_id]
-
-        # Only candidates may send ICE to interviewers; only interviewers to candidates.
-        if target == 'interviewer' and sender_type == 'candidate':
-            for interviewer_sid in room.get('interviewers', []):
-                sio.emit('ice_candidate', {'assessment_id': assessment_id, 'candidate': ice}, room=interviewer_sid)
-        elif target == 'candidate' and sender_type == 'interviewer':
-            candidate_sid = room.get('candidate')
-            if candidate_sid:
-                sio.emit('ice_candidate', {'assessment_id': assessment_id, 'candidate': ice}, room=candidate_sid)
-
-    except Exception as e:
-        logger.error(f"[PROCTORING] Error in ice_candidate: {e}")
+    if not isinstance(data, dict) or data.get("candidate") is None:
+        _emit_error(sid, "Invalid ICE candidate")
+        return
+    assessment_id = _positive_int(data.get("assessment_id"))
+    target = data.get("target", "interviewer")
+    routing_error = None
+    recipients = []
+    with _state_lock:
+        connection = connections.get(sid, {})
+        room = active_rooms.get(assessment_id)
+        if room is None or connection.get("assessment_id") != assessment_id:
+            routing_error = "Not authorized for this assessment"
+        else:
+            sender_type = connection.get("type")
+            if (
+                target == "interviewer"
+                and sender_type == "candidate"
+                and room.get("candidate") == sid
+            ):
+                recipients = list(room.get("interviewers", []))
+            elif (
+                target == "candidate"
+                and sender_type == "interviewer"
+                and sid in room.get("interviewers", [])
+            ):
+                recipients = [room.get("candidate")] if room.get("candidate") else []
+            else:
+                routing_error = "Invalid ICE routing target"
+    if routing_error:
+        _emit_error(sid, routing_error)
+        return
+    for recipient in recipients:
+        sio.emit("ice_candidate", {
+            "assessment_id": assessment_id,
+            "candidate": data["candidate"],
+        }, room=recipient)
 
 
 @sio.event
 def get_active_assessments(sid, data):
-    """Return list of active proctoring rooms — staff only."""
-    try:
-        if connections.get(sid, {}).get('type') != 'interviewer':
-            sio.emit('error', {'message': 'Not authorized'}, room=sid)
-            return
-
-        assessments = [
-            {
-                'assessment_id': aid,
-                'has_candidate': room.get('candidate') is not None,
-                'interviewer_count': len(room.get('interviewers', []))
-            }
-            for aid, room in active_rooms.items()
-        ]
-        sio.emit('active_assessments', {'assessments': assessments}, room=sid)
-
-    except Exception as e:
-        logger.error(f"[PROCTORING] Error in get_active_assessments: {e}")
+    authorized = False
+    assessments = []
+    with _state_lock:
+        authorized = connections.get(sid, {}).get("type") == "interviewer"
+        if authorized:
+            assessments = [
+                {
+                    "assessment_id": assessment_id,
+                    "has_candidate": room.get("candidate") is not None,
+                    "interviewer_count": len(room.get("interviewers", [])),
+                }
+                for assessment_id, room in active_rooms.items()
+            ]
+    if not authorized:
+        _emit_error(sid, "Not authorized")
+        return
+    sio.emit("active_assessments", {"assessments": assessments}, room=sid)
 
 
 def get_socketio_app():

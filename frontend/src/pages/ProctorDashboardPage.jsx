@@ -1,21 +1,68 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { io } from 'socket.io-client';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
-  LogOut, Eye, Users, Clock, CheckCircle, AlertTriangle, RefreshCw,
-  Video, Calendar, Activity, Shield, LayoutDashboard, Search, TrendingUp, Zap
+  LogOut, Eye, CheckCircle, AlertTriangle, RefreshCw,
+  Video, Calendar, Activity, Shield, Search, Zap, UserPlus
 } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import Logo from '../components/Logo';
-import { api, API_BASE_URL } from '../services/api';
+import { api } from '../services/api';
 import ProctorMonitor from '../components/ProctorMonitor';
 import LoadingScreen from '../components/common/LoadingScreen';
+
+const ViolationScreenshot = ({ screenshotUrl }) => {
+  const [objectUrl, setObjectUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let createdUrl = null;
+    setFailed(false);
+    setObjectUrl(null);
+
+    api.get(screenshotUrl, { responseType: 'blob' })
+      .then((response) => {
+        if (!active) return;
+        createdUrl = URL.createObjectURL(response.data);
+        setObjectUrl(createdUrl);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+
+    return () => {
+      active = false;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [screenshotUrl]);
+
+  if (failed) {
+    return <div className="w-32 h-20 flex items-center justify-center bg-slate-100 text-xs text-slate-500 rounded border border-slate-300">Screenshot unavailable</div>;
+  }
+  if (!objectUrl) {
+    return <div className="w-32 h-20 flex items-center justify-center bg-slate-100 text-xs text-slate-500 rounded border border-slate-300">Loading screenshot...</div>;
+  }
+  return (
+    <button
+      type="button"
+      className="w-32 h-20 bg-black rounded overflow-hidden border border-slate-300"
+      onClick={() => window.open(objectUrl, '_blank', 'noopener,noreferrer')}
+      aria-label="Open violation screenshot"
+    >
+      <img
+        src={objectUrl}
+        alt="Violation screenshot"
+        className="w-full h-full object-cover hover:scale-110 transition-transform"
+      />
+    </button>
+  );
+};
 
 const ProctorDashboardPage = () => {
   const navigate = useNavigate();
@@ -32,6 +79,11 @@ const ProctorDashboardPage = () => {
   const [completedAssessments, setCompletedAssessments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [currentProctorId, setCurrentProctorId] = useState(() => {
+    const storedId = Number(localStorage.getItem('user_id'));
+    return Number.isInteger(storedId) && storedId > 0 ? storedId : null;
+  });
+  const [claimingAssessmentIds, setClaimingAssessmentIds] = useState(() => new Set());
 
   // Violations Modal State
   const [violationsModalOpen, setViolationsModalOpen] = useState(false);
@@ -43,10 +95,9 @@ const ProctorDashboardPage = () => {
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
-  const [violationFilter, setViolationFilter] = useState('all');
 
   // Socket.IO ref for real-time violation notifications
-  const socketRef = useRef(null);
+  const fetchAllDataRef = useRef(null);
 
   // Memoized filtered data
   const filteredScheduled = useMemo(() => {
@@ -64,19 +115,11 @@ const ProctorDashboardPage = () => {
   }, [activeAssessments, searchQuery]);
 
   const filteredCompleted = useMemo(() => {
-    let result = completedAssessments.filter(a =>
+    return completedAssessments.filter(a =>
       a.candidate_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       a.email?.toLowerCase().includes(searchQuery.toLowerCase())
     );
-
-    if (violationFilter === 'flagged') {
-      result = result.filter(a => (a.proctoring_violations || 0) > 0);
-    } else if (violationFilter === 'clean') {
-      result = result.filter(a => (a.proctoring_violations || 0) === 0);
-    }
-
-    return result;
-  }, [completedAssessments, searchQuery, violationFilter]);
+  }, [completedAssessments, searchQuery]);
 
   useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -84,7 +127,7 @@ const ProctorDashboardPage = () => {
       navigate('/login');
       return;
     }
-    fetchAllData();
+    fetchAllDataRef.current?.();
   }, [navigate]);
 
   // Auto-refresh every 10 seconds for active monitoring
@@ -92,61 +135,13 @@ const ProctorDashboardPage = () => {
     if (!autoRefresh) return;
 
     const interval = setInterval(() => {
-      fetchAllData(true);
+      fetchAllDataRef.current?.(true);
     }, 10000);
 
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
-  // Socket.IO for real-time violation notifications
-  useEffect(() => {
-    // Connect to Socket.IO server
-    const socket = io(API_BASE_URL, {
-      transports: ['websocket', 'polling']
-    });
-
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      console.log('[PROCTOR DASHBOARD] Connected to violations socket');
-      // Join proctor room for violation notifications
-      socket.emit('join_proctor_room');
-    });
-
-    socket.on('violation_detected', (data) => {
-      console.log('[PROCTOR DASHBOARD] Violation detected:', data);
-
-      // Show toast notification
-      const violationType = data.violation_type?.replace('_', ' ') || 'Unknown';
-      const candidateName = data.candidate_name || 'Candidate';
-
-      toast({
-        variant: 'destructive',
-        title: ' Violation Detected',
-        description: `${candidateName}: ${violationType}`,
-        duration: 5000,
-      });
-
-      // Increment violation count in stats
-      setStats(prev => ({
-        ...prev,
-        violations_today: (prev.violations_today || 0) + 1
-      }));
-
-      // Refresh data to update UI
-      fetchAllData(true);
-    });
-
-    socket.on('disconnect', () => {
-      console.log('[PROCTOR DASHBOARD] Disconnected from violations socket');
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [toast]);
-
-  const fetchAllData = async (silent = false) => {
+  const fetchAllData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       console.log('[PROCTOR] Fetching all proctor data...');
@@ -180,11 +175,53 @@ const ProctorDashboardPage = () => {
     } finally {
       if (!silent) setLoading(false);
     }
-  };
+  }, [navigate, toast]);
+  fetchAllDataRef.current = fetchAllData;
+
+  const isAssignedToCurrentProctor = useCallback((assessment) => (
+    currentProctorId !== null && Number(assessment?.proctor_id) === currentProctorId
+  ), [currentProctorId]);
+
+  const handleClaimAssessment = useCallback(async (scheduledAssessmentId) => {
+    if (!scheduledAssessmentId || claimingAssessmentIds.has(scheduledAssessmentId)) return;
+
+    setClaimingAssessmentIds(prev => {
+      const next = new Set(prev);
+      next.add(scheduledAssessmentId);
+      return next;
+    });
+    try {
+      const response = await api.post('/api/proctor/assign-assessment', {
+        assessment_id: scheduledAssessmentId,
+      });
+      const assignedProctorId = Number(response.data?.data?.proctor_id);
+      if (Number.isInteger(assignedProctorId) && assignedProctorId > 0) {
+        setCurrentProctorId(assignedProctorId);
+        localStorage.setItem('user_id', String(assignedProctorId));
+      }
+      toast({
+        title: 'Assessment claimed',
+        description: 'You can now monitor this candidate and review their violations.',
+      });
+      await fetchAllData(true);
+    } catch (err) {
+      const message = err?.response?.data?.message || 'Failed to claim assessment';
+      toast({ variant: 'destructive', title: 'Claim failed', description: message });
+      await fetchAllData(true);
+    } finally {
+      setClaimingAssessmentIds(prev => {
+        const next = new Set(prev);
+        next.delete(scheduledAssessmentId);
+        return next;
+      });
+    }
+  }, [claimingAssessmentIds, fetchAllData, toast]);
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userEmail');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('user_id');
     localStorage.removeItem('userRole');
     navigate('/login');
   };
@@ -208,7 +245,16 @@ const ProctorDashboardPage = () => {
     return `${Math.floor(diffMins / 1440)} days`;
   };
 
-  const handleViewViolations = async (assessmentId) => {
+  const handleViewViolations = async (assessment) => {
+    if (!isAssignedToCurrentProctor(assessment)) {
+      toast({
+        variant: 'destructive',
+        title: 'Assignment required',
+        description: 'Claim this assessment before reviewing its violation log.',
+      });
+      return;
+    }
+    const assessmentId = assessment.assessment_id ?? assessment.id;
     setLoadingViolations(true);
     setViolationsModalOpen(true);
     setSelectedViolations([]); // Reset
@@ -221,6 +267,18 @@ const ProctorDashboardPage = () => {
     } finally {
       setLoadingViolations(false);
     }
+  };
+
+  const handleStartMonitoring = (assessment) => {
+    if (!isAssignedToCurrentProctor(assessment)) {
+      toast({
+        variant: 'destructive',
+        title: 'Assignment required',
+        description: 'Claim this assessment before opening the live monitor.',
+      });
+      return;
+    }
+    setMonitoringAssessmentId(assessment.assessment_id);
   };
 
   if (loading) {
@@ -364,7 +422,7 @@ const ProctorDashboardPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {activeAssessments.length === 0 ? (
+                {filteredActive.length === 0 ? (
                   <div className="text-center py-12">
                     <Video className="w-16 h-16 text-slate-600 mx-auto mb-4" />
                     <p className="text-slate-600 text-lg">No active assessments at the moment</p>
@@ -372,7 +430,7 @@ const ProctorDashboardPage = () => {
                   </div>
                 ) : (
                   <div className="grid gap-4">
-                    {activeAssessments.map((assessment) => (
+                    {filteredActive.map((assessment) => (
                       <Card key={assessment.id} className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50/50 border-green-500/30 border-2">
                         <CardContent className="pt-6">
                           <div className="flex items-center justify-between">
@@ -402,10 +460,24 @@ const ProctorDashboardPage = () => {
                                 )}
                               </div>
                               <div className="flex items-center gap-2">
+                                {!isAssignedToCurrentProctor(assessment) && !assessment.proctor_id ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 border-purple-300 text-purple-700 hover:bg-purple-50"
+                                    disabled={claimingAssessmentIds.has(assessment.scheduled_assessment_id)}
+                                    onClick={() => handleClaimAssessment(assessment.scheduled_assessment_id)}
+                                  >
+                                    <UserPlus className={`w-3 h-3 mr-1 ${claimingAssessmentIds.has(assessment.scheduled_assessment_id) ? 'animate-pulse' : ''}`} />
+                                    {claimingAssessmentIds.has(assessment.scheduled_assessment_id) ? 'Claiming…' : 'Claim'}
+                                  </Button>
+                                ) : null}
                                 <Button
                                   size="sm"
                                   className="bg-purple-600 hover:bg-purple-700 text-white h-8 text-xs px-3"
-                                  onClick={() => setMonitoringAssessmentId(assessment.assessment_id)}
+                                  disabled={!isAssignedToCurrentProctor(assessment)}
+                                  title={isAssignedToCurrentProctor(assessment) ? 'Open live monitor' : 'Claim this assessment first'}
+                                  onClick={() => handleStartMonitoring(assessment)}
                                 >
                                   <Video className="w-3 h-3 mr-1" />
                                   Monitor Live
@@ -414,7 +486,9 @@ const ProctorDashboardPage = () => {
                                   size="sm"
                                   variant="outline"
                                   className="h-8 text-xs px-3 border-slate-300 hover:bg-white shadow-md text-slate-700"
-                                  onClick={() => handleViewViolations(assessment.assessment_id)}
+                                  disabled={!isAssignedToCurrentProctor(assessment)}
+                                  title={isAssignedToCurrentProctor(assessment) ? 'View violation log' : 'Claim this assessment first'}
+                                  onClick={() => handleViewViolations(assessment)}
                                 >
                                   <Eye className="w-3 h-3 mr-1" />
                                   View
@@ -457,6 +531,7 @@ const ProctorDashboardPage = () => {
                           <TableHead className="text-slate-700 font-semibold">Scheduled Time</TableHead>
                           <TableHead className="text-slate-700 font-semibold">Starts In</TableHead>
                           <TableHead className="text-slate-700 font-semibold">Status</TableHead>
+                          <TableHead className="text-slate-700 font-semibold text-right">Assignment</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -475,6 +550,23 @@ const ProctorDashboardPage = () => {
                             </TableCell>
                             <TableCell>
                               <Badge className="bg-slate-600 text-white shadow-sm">{assessment.status}</Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {isAssignedToCurrentProctor(assessment) ? (
+                                <Badge className="bg-emerald-600 text-white">Assigned to you</Badge>
+                              ) : assessment.proctor_id ? (
+                                <Badge className="bg-slate-500 text-white">Claimed</Badge>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                                  disabled={claimingAssessmentIds.has(assessment.id)}
+                                  onClick={() => handleClaimAssessment(assessment.id)}
+                                >
+                                  <UserPlus className={`w-4 h-4 mr-1 ${claimingAssessmentIds.has(assessment.id) ? 'animate-pulse' : ''}`} />
+                                  {claimingAssessmentIds.has(assessment.id) ? 'Claiming…' : 'Claim assessment'}
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -540,7 +632,9 @@ const ProctorDashboardPage = () => {
                                     size="sm"
                                     variant="ghost"
                                     className="h-6 w-6 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-                                    onClick={() => handleViewViolations(assessment.id)}
+                                    disabled={!isAssignedToCurrentProctor(assessment)}
+                                    title={isAssignedToCurrentProctor(assessment) ? 'View violation log' : 'Only the assigned proctor can view violations'}
+                                    onClick={() => handleViewViolations(assessment)}
                                   >
                                     <Eye className="w-4 h-4" />
                                   </Button>
@@ -593,21 +687,7 @@ const ProctorDashboardPage = () => {
                       {shouldShowScreenshot && (
                         <div className="flex-shrink-0">
                           {violation.screenshot_url ? (
-                            <div className="w-32 h-20 bg-black rounded overflow-hidden border border-slate-300 relative">
-                              <img
-                                src={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}${violation.screenshot_url}`}
-                                alt="Violation screenshot"
-                                className="w-full h-full object-cover cursor-pointer hover:scale-110 transition-transform"
-                                onClick={() => window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}${violation.screenshot_url}`, '_blank')}
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  e.target.nextSibling.style.display = 'flex';
-                                }}
-                              />
-                              <div className="absolute inset-0 items-center justify-center bg-slate-100 text-xs text-slate-500 hidden">
-                                 Screenshot unavailable
-                              </div>
-                            </div>
+                            <ViolationScreenshot screenshotUrl={violation.screenshot_url} />
                           ) : (
                             <div className="w-32 h-20 bg-slate-100 rounded flex items-center justify-center border border-slate-200">
                               <Eye className="w-6 h-6 text-slate-400" />

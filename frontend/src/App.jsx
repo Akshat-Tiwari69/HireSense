@@ -1,25 +1,26 @@
-import React from 'react';
+import { lazy, Suspense } from 'react';
 import "./App.css";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import { ThemeProvider } from './context/ThemeProvider';
-import LandingPage from "./pages/LandingPage";
-import LoginPage from "./pages/LoginPage";
-import ApplyPage from "./pages/ApplyPage";
-import InterviewerDashboardPage from "./pages/InterviewerDashboardPage";
-import AssessmentPage from "./pages/AssessmentPage";
-import AdminDashboardPage from "./pages/AdminDashboardPage";
-import ProctorDashboardPage from "./pages/ProctorDashboardPage";
-import JobListingsPage from "./pages/JobListingsPage";
-import NotFoundPage from "./pages/NotFoundPage";
 import ProtectedRoute from "./components/ProtectedRoute";
+import LoadingScreen from "./components/common/LoadingScreen";
 import { Toaster } from "./components/ui/sonner";
+
+const LandingPage = lazy(() => import("./pages/LandingPage"));
+const LoginPage = lazy(() => import("./pages/LoginPage"));
+const ApplyPage = lazy(() => import("./pages/ApplyPage"));
+const InterviewerDashboardPage = lazy(() => import("./pages/InterviewerDashboardPage"));
+const AssessmentPage = lazy(() => import("./pages/AssessmentPage"));
+const AdminDashboardPage = lazy(() => import("./pages/AdminDashboardPage"));
+const ProctorDashboardPage = lazy(() => import("./pages/ProctorDashboardPage"));
+const JobListingsPage = lazy(() => import("./pages/JobListingsPage"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage"));
 
 function App() {
   return (
-    <ThemeProvider>
-      <div className="App">
+    <div className="App">
         <Router>
-          <Routes>
+          <Suspense fallback={<LoadingScreen message="Loading page..." />}>
+            <Routes>
             {/* Public routes */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
@@ -29,19 +30,19 @@ function App() {
             <Route path="/assessment/:token" element={<AssessmentPage />} />
 
             {/* Protected routes — require a valid auth token */}
-            <Route path="/dashboard" element={<ProtectedRoute element={<InterviewerDashboardPage />} requiredRole="interviewer" />} />
-            <Route path="/interviewer-dashboard" element={<ProtectedRoute element={<InterviewerDashboardPage />} requiredRole="interviewer" />} />
-            <Route path="/admin" element={<ProtectedRoute element={<AdminDashboardPage />} requiredRole="admin" />} />
-            <Route path="/admin-dashboard" element={<ProtectedRoute element={<AdminDashboardPage />} requiredRole="admin" />} />
-            <Route path="/proctor" element={<ProtectedRoute element={<ProctorDashboardPage />} requiredRole="proctor" />} />
-            <Route path="/proctor-dashboard" element={<ProtectedRoute element={<ProctorDashboardPage />} requiredRole="proctor" />} />
+            <Route path="/dashboard" element={<ProtectedRoute element={<InterviewerDashboardPage />} allowedRoles={['interviewer']} />} />
+            <Route path="/interviewer-dashboard" element={<ProtectedRoute element={<InterviewerDashboardPage />} allowedRoles={['interviewer']} />} />
+            <Route path="/admin" element={<ProtectedRoute element={<AdminDashboardPage />} allowedRoles={['admin', 'super_admin']} />} />
+            <Route path="/admin-dashboard" element={<ProtectedRoute element={<AdminDashboardPage />} allowedRoles={['admin', 'super_admin']} />} />
+            <Route path="/proctor" element={<ProtectedRoute element={<ProctorDashboardPage />} allowedRoles={['proctor']} />} />
+            <Route path="/proctor-dashboard" element={<ProtectedRoute element={<ProctorDashboardPage />} allowedRoles={['proctor']} />} />
 
             <Route path="*" element={<NotFoundPage />} />
-          </Routes>
+            </Routes>
+          </Suspense>
         </Router>
         <Toaster />
-      </div>
-    </ThemeProvider>
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -13,10 +13,7 @@ import {
 import { useToast } from '../hooks/use-toast';
 import Logo from '../components/Logo';
 import { api } from '../services/api';
-import { useRealtimeTable } from '../hooks/useRealtimeTable';
-import RealtimeIndicator from '../components/common/RealtimeIndicator';
 import LoadingScreen from '../components/common/LoadingScreen';
-import LoadingSpinner from '../components/common/LoadingSpinner';
 
 // Tab components
 import UsersTab from '../components/admin/tabs/UsersTab';
@@ -41,56 +38,15 @@ const AdminDashboardPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Realtime subscriptions
-  const {
-    data: users,
-    setData: setUsers,
-    isConnected: usersConnected
-  } = useRealtimeTable('users', [], {
-    onInsert: (newUser) => {
-      toast({
-        title: " New User Added",
-        description: `${newUser.name} (${newUser.role})`,
-        duration: 3000
-      });
-    }
-  });
+  // All privileged data is loaded through the authenticated backend API.
+  const [users, setUsers] = useState([]);
+  const [candidates, setCandidates] = useState([]);
+  const [jobPostings, setJobPostings] = useState([]);
 
-  const {
-    data: candidates,
-    setData: setCandidates,
-    isConnected: candidatesConnected
-  } = useRealtimeTable('candidates', [], {
-    onInsert: (newCandidate) => {
-      toast({
-        title: " New Candidate Registered",
-        description: `${newCandidate.name} - ${newCandidate.email}`,
-        duration: 3000
-      });
-    }
-  });
-
-  const {
-    data: jobPostings,
-    setData: setJobPostings,
-    isConnected: jobsConnected
-  } = useRealtimeTable('job_descriptions', [], {
-    onInsert: (newJob) => {
-      toast({
-        title: " New Job Posted",
-        description: newJob.title,
-        duration: 3000
-      });
-    }
-  });
-
-  // Check if any realtime connection is active
-  const isRealtimeConnected = usersConnected || candidatesConnected || jobsConnected;
-
-  // State for other data (non-realtime)
   const [dbStats, setDbStats] = useState(null);
   const [dbTables, setDbTables] = useState([]);
   const [envStatus, setEnvStatus] = useState({});
+  const [runtimeEnvMutationEnabled, setRuntimeEnvMutationEnabled] = useState(false);
   const [selectedTable, setSelectedTable] = useState(null);
   const [tableData, setTableData] = useState({ data: [], columns: [] });
   const [emailLogs, setEmailLogs] = useState([]);
@@ -105,13 +61,13 @@ const AdminDashboardPage = () => {
   const [sectors, setSectors] = useState([]);
   const [sectorModalOpen, setSectorModalOpen] = useState(false);
   const [sectorForm, setSectorForm] = useState({ name: '', description: '', email_alias: '' });
-  const [candidateMatches, setCandidateMatches] = useState({});
   const [matchingCandidate, setMatchingCandidate] = useState(null);
   const [jobCandidates, setJobCandidates] = useState([]);
   const [selectedJobForCandidates, setSelectedJobForCandidates] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [analytics, setAnalytics] = useState({ candidates: {}, assessments: {} });
   const [loading, setLoading] = useState(true);
+  const fetchAllDataRef = useRef(null);
 
   // Modals
   const [userModalOpen, setUserModalOpen] = useState(false);
@@ -130,11 +86,10 @@ const AdminDashboardPage = () => {
   const [savingUser, setSavingUser] = useState(false);
   const [deletingUser, setDeletingUser] = useState(null);
   const [savingCandidate, setSavingCandidate] = useState(false);
-  const [deletingCandidate, setDeletingCandidate] = useState(null);
-  const [resettingStatus, setResettingStatus] = useState(null);
+  const [deletingCandidate] = useState(null);
+  const [resettingStatus] = useState(null);
   const [savingJob, setSavingJob] = useState(false);
   const [deletingJob, setDeletingJob] = useState(null);
-  const [savingEnvVar, setSavingEnvVar] = useState(false);
   const [enhancingJob, setEnhancingJob] = useState(false);
   const [enhancingSector, setEnhancingSector] = useState(false);
   const [expandedJob, setExpandedJob] = useState(null);
@@ -195,10 +150,10 @@ const AdminDashboardPage = () => {
       navigate('/login');
       return;
     }
-    fetchAllData();
+    fetchAllDataRef.current?.();
   }, [navigate]);
 
-  const fetchAllData = async () => {
+  const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
       const [usersRes, candidatesRes, statsRes, tablesRes, envRes, jobsRes, sectorsRes] = await Promise.all([
@@ -221,6 +176,7 @@ const AdminDashboardPage = () => {
       setDbStats(statsRes.data.data || {});
       setDbTables(tablesRes.data.data || []);
       setEnvStatus(envRes.data.data || {});
+      setRuntimeEnvMutationEnabled(envRes.data.runtime_mutation_enabled === true);
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to load admin data';
       if (err?.response?.status === 403) {
@@ -232,11 +188,14 @@ const AdminDashboardPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate, setCandidates, setJobPostings, setUsers, toast]);
+  fetchAllDataRef.current = fetchAllData;
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
     localStorage.removeItem('userEmail');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('user_id');
     navigate('/login');
   };
 
@@ -509,7 +468,6 @@ const AdminDashboardPage = () => {
     try {
       const res = await api.post('/api/jobs/match-candidate', { candidate_id: candidateId });
       const matches = res.data.data?.matches || [];
-      setCandidateMatches(prev => ({ ...prev, [candidateId]: matches }));
       toast({
         title: 'AI Matching Complete',
         description: `Found ${matches.length} job match(es). Best: ${matches[0]?.job_title || 'N/A'} (${matches[0]?.match_score || 0}%)`,
@@ -615,13 +573,13 @@ const AdminDashboardPage = () => {
   };
 
   // Environment variable management
-  const handleEditEnvVar = (key, currentValue) => {
+  const handleEditEnvVar = (key) => {
     setEditingEnvVar(key);
     setEnvVarValue(''); // Don't pre-fill for security
   };
 
   const handleSaveEnvVar = async () => {
-    if (!editingEnvVar) return;
+    if (!editingEnvVar || !runtimeEnvMutationEnabled) return;
 
     try {
       await api.post('/api/admin/settings/env', {
@@ -685,7 +643,6 @@ const AdminDashboardPage = () => {
                 </SelectItem>
               </SelectContent>
             </Select>
-            <RealtimeIndicator isConnected={isRealtimeConnected} />
             <Button variant="outline" onClick={fetchAllData} className="border-slate-300 text-slate-700 hover:bg-slate-50">
               <RefreshCw className="w-4 h-4 mr-2" />
               Refresh
@@ -922,6 +879,8 @@ const AdminDashboardPage = () => {
             handleEditEnvVar={handleEditEnvVar}
             handleSaveEnvVar={handleSaveEnvVar}
             handleCancelEdit={handleCancelEdit}
+            canEdit={localStorage.getItem('userRole') === 'super_admin'}
+            runtimeMutationEnabled={runtimeEnvMutationEnabled}
           />
         </Tabs>
       </main>
