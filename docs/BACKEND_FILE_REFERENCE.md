@@ -20,12 +20,10 @@ Complete reference for all backend Python files and their functions.
 
 ### Database Layer
 
-> **Note:** `db_helpers.py` was split into focused domain modules in May 2026.
-> It is now a thin re-export hub — all existing imports continue to work unchanged.
+> **Note:** The former `db_helpers.py` was split into focused domain modules. Callers now import those modules directly.
 
 | File | Functions | Purpose |
 |------|-----------|---------|
-| `db_helpers.py` | re-exports all | Backward-compatible re-export hub |
 | `user_db.py` | 3 | User auth queries (`create_user`, `get_user_by_email`, `get_user_by_id`) |
 | `candidate_db.py` | 6 | Candidate CRUD (`insert_candidate`, `get_candidate_by_id`, `get_all_candidates`, etc.) |
 | `assessment_db.py` | 25 | Assessments, responses, scoring, scheduling, token access |
@@ -335,9 +333,9 @@ def start_by_token(token):
 
 ---
 
-## db_helpers.py
+## Database domain APIs
 
-Database operations module.
+Historical combined reference for operations now implemented by `user_db.py`, `candidate_db.py`, `assessment_db.py`, `proctoring_db.py`, and `email_db.py`.
 
 ### User Operations
 
@@ -688,42 +686,22 @@ def get_psychometric_scenarios():
 
 ---
 
-## init_db.py
+## scripts/run_migration.py
 
-Database initialization script.
+The database entry point has two explicit modes:
 
-```python
-def init_database():
-    """Initialize database with schema"""
-    conn = get_db_connection()
-    
-    # Read and execute schema
-    with open('schema.sql', 'r') as f:
-        schema = f.read()
-    
-    conn.executescript(schema)
-    conn.commit()
-    conn.close()
-    
-    print("Database initialized successfully")
+```bash
+# Fresh, empty PostgreSQL database
+python scripts/run_migration.py --schema
 
-def seed_default_users():
-    """Create default admin and interviewer"""
-    import bcrypt
-    
-    # Admin user
-    admin_hash = bcrypt.hashpw(b'admin123', bcrypt.gensalt()).decode()
-    create_user('admin@company.com', admin_hash, 'admin', 'Admin User')
-    
-    # Default interviewer
-    interviewer_hash = bcrypt.hashpw(b'password123', bcrypt.gensalt()).decode()
-    create_user('interviewer@company.com', interviewer_hash, 
-                'interviewer', 'Default Interviewer')
-
-if __name__ == '__main__':
-    init_database()
-    seed_default_users()
+# Existing HireSense database with a legacy schema
+python scripts/run_migration.py --reconcile
 ```
+
+The script reads `DATABASE_URL`, serializes concurrent schema work with a
+PostgreSQL advisory lock, performs mode-specific preflight checks, runs the
+canonical SQL transactionally, and verifies required tables and columns before
+committing. It does not create default accounts or embed default passwords.
 
 ---
 
@@ -837,9 +815,9 @@ Email log persistence (used by `email_service.py`).
 
 ## Related Documentation
 
-- [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) - System architecture
-- [API_DOCS.md](API_DOCS.md) - API reference
-- [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) - Database structure
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
+- [API.md](API.md) - API reference
+- [DATABASE.md](DATABASE.md) - Database structure
 
 ---
 

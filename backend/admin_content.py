@@ -11,18 +11,16 @@ import tempfile
 import shutil
 import contextlib
 import logging
-try:
-    import rarfile
-    RAR_SUPPORTED = True
-except ImportError:
-    RAR_SUPPORTED = False
+import stat
+from pathlib import PurePosixPath
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.utils import secure_filename
-from db_config import get_connection, return_connection
-from db_helpers import insert_candidate, get_candidate_by_email
+from db_config import db_connection, get_connection, return_connection
+from candidate_db import get_candidate_by_email, insert_candidate_application
 from admin_middleware import require_admin_role
+from storage_config import get_upload_root, get_upload_subdirectory
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +29,11 @@ admin_content_bp = Blueprint('admin_content', __name__)
 ALLOWED_RESUME_EXTENSIONS = {'pdf', 'docx'}
 EMAIL_PATTERN_BULK = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
 MAX_BULK_WORKERS = 8
+MAX_ARCHIVE_MEMBERS = 100
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_RESUME_BYTES = 10 * 1024 * 1024
+MAX_QUESTION_TEXT_CHARS = 100_000
+MAX_AI_INPUT_CHARS = 20_000
 
 
 # ============================================================================
@@ -67,37 +70,113 @@ def _merge_ai_data_to_parsed(parsed_data, ai_data):
         parsed_data['phone'] = ai_data['phone']
 
 
-def _get_db_cursor():
-    conn = get_connection()
-    return conn, conn.cursor()
+def _safe_zip_member_name(member):
+    """Return a normalized archive name or reject traversal/symlink entries."""
+    normalized = member.filename.replace('\\', '/')
+    path = PurePosixPath(normalized)
+    mode = member.external_attr >> 16
+    if (
+        path.is_absolute()
+        or not path.parts
+        or '..' in path.parts
+        or ':' in path.parts[0]
+        or stat.S_ISLNK(mode)
+    ):
+        raise ValueError('Archive contains an unsafe file path')
+    if member.flag_bits & 0x1:
+        raise ValueError('Encrypted archives are not supported')
+    return path
 
 
-def _save_candidate_job_match(candidate_id, job_id, match_score, ai_reasoning):
-    match_conn, match_cur = _get_db_cursor()
-    try:
-        match_cur.execute("""
-            INSERT INTO candidate_job_matches
-            (candidate_id, job_id, match_score, ai_reasoning)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (candidate_id, job_id)
-            DO UPDATE SET match_score = EXCLUDED.match_score,
-                         ai_reasoning = EXCLUDED.ai_reasoning,
-                         matched_at = NOW()
-        """, (candidate_id, int(job_id), match_score, ai_reasoning))
-        match_cur.execute("""
-            UPDATE candidates SET best_match_job_id = %s, match_score = %s WHERE id = %s
-        """, (int(job_id), match_score, candidate_id))
-        match_conn.commit()
-    except Exception as match_err:
-        logger.warning(f"Could not save job match for candidate {candidate_id}: {match_err}")
-        with contextlib.suppress(Exception):
-            match_conn.rollback()
-    finally:
-        with contextlib.suppress(Exception):
-            return_connection(match_conn)
+def _extract_resume_zip(archive_path, destination):
+    """Safely extract bounded PDF/DOCX members and return their display names."""
+    extracted = []
+    with zipfile.ZipFile(archive_path, 'r') as archive:
+        members = archive.infolist()
+        if len(members) > MAX_ARCHIVE_MEMBERS:
+            raise ValueError(f'Archive contains more than {MAX_ARCHIVE_MEMBERS} files')
+
+        total_size = sum(member.file_size for member in members if not member.is_dir())
+        if total_size > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise ValueError('Archive expands beyond the allowed size')
+
+        for member in members:
+            path = _safe_zip_member_name(member)
+            if member.is_dir() or '__MACOSX' in path.parts or path.name.startswith('.'):
+                continue
+            extension = path.suffix.lower().lstrip('.')
+            if extension not in ALLOWED_RESUME_EXTENSIONS:
+                continue
+            if member.file_size > MAX_RESUME_BYTES:
+                raise ValueError(f'Resume {path.name} exceeds the 10 MB limit')
+            if member.compress_size == 0 and member.file_size:
+                raise ValueError('Archive contains an invalid compressed entry')
+            if member.compress_size and member.file_size / member.compress_size > 200:
+                raise ValueError('Archive contains a suspiciously compressed entry')
+
+            safe_name = secure_filename(path.name)
+            if not safe_name:
+                raise ValueError('Archive contains a resume with an invalid filename')
+            extracted_path = os.path.join(destination, f'{uuid.uuid4()}_{safe_name}')
+            bytes_written = 0
+            with archive.open(member, 'r') as source, open(extracted_path, 'wb') as target:
+                while chunk := source.read(1024 * 1024):
+                    bytes_written += len(chunk)
+                    if bytes_written > MAX_RESUME_BYTES:
+                        raise ValueError(f'Resume {path.name} exceeds the 10 MB limit')
+                    target.write(chunk)
+            extracted.append((extracted_path, str(path)))
+    return extracted
+
+
+def _create_openai_client():
+    api_key = os.environ.get('OPENAI_API_KEY')
+    if not api_key:
+        raise RuntimeError('OPENAI_API_KEY not configured')
+    from openai import OpenAI
+    return OpenAI(api_key=api_key, timeout=30.0, max_retries=1)
+
+
+def _parse_ai_json(raw):
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError('AI provider returned an empty response')
+    content = raw.strip()
+    if content.startswith('```'):
+        content = content.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+    return _json.loads(content)
+
+
+def _normalize_parsed_questions(value):
+    if not isinstance(value, list):
+        raise ValueError('Question parser did not return a list')
+    normalized = []
+    for item in value[:200]:
+        if not isinstance(item, dict):
+            continue
+        question = item.get('question')
+        if not isinstance(question, str) or not question.strip():
+            continue
+        options = item.get('options')
+        if options is not None:
+            if not isinstance(options, list):
+                options = None
+            else:
+                options = [str(option).strip()[:500] for option in options[:20] if str(option).strip()]
+        correct_answer = item.get('correct_answer')
+        normalized.append({
+            'question': question.strip()[:2_000],
+            'options': options,
+            'correct_answer': str(correct_answer).strip()[:500] if correct_answer is not None else None,
+            'category': str(item.get('category') or 'custom').strip()[:100],
+            'difficulty': str(item.get('difficulty') or 'medium').lower()
+            if str(item.get('difficulty') or 'medium').lower() in {'easy', 'medium', 'hard'}
+            else 'medium',
+        })
+    return normalized
 
 
 def _fetch_job_for_bulk(job_id):
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -107,7 +186,6 @@ def _fetch_job_for_bulk(job_id):
             (int(job_id),)
         )
         row = cursor.fetchone()
-        return_connection(conn)
         if row:
             skills = set()
             for skills_val in (row[3], row[4]):
@@ -123,10 +201,13 @@ def _fetch_job_for_bulk(job_id):
             return {'skills': list(skills), 'min_experience': min_exp, 'title': row[1], 'department': row[2]}, job_info
     except Exception as e:
         logger.warning(f"[BULK] Could not load job posting {job_id}: {e}")
+    finally:
+        if conn:
+            return_connection(conn)
     return None, None
 
 
-def _process_single_resume(filepath, filename, job_description, job_info, job_id, upload_folder):
+def _process_single_resume(filepath, filename, job_description, job_info, job_id):
     from resume_parser import parse_resume, calculate_match_score
     from resume_analyzer import analyze_resume, ResumeAnalyzer
 
@@ -155,11 +236,13 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
             name = os.path.splitext(filename)[0].replace('_', ' ').replace('-', ' ').title() or 'Unknown Candidate'
             email = f'unknown-{uuid.uuid4().hex[:12]}@bulk-upload.local'
             try:
-                candidate_id = insert_candidate(
+                candidate_id = insert_candidate_application(
                     name=name, email=email, phone='',
                     resume_path=filepath,
                     parsed_data={'skills': [], 'experience': 0, 'education': '', 'match_score': 0, 'shortlist_status': 'Pending Review'},
-                    pros=None, cons=None, status='Absence of Details'
+                    job_id=int(job_id),
+                    ai_reasoning='Resume text could not be extracted; manual review required.',
+                    pros=None, cons=None, status='absence_of_details',
                 )
                 result.update({'status': 'success', 'name': name, 'email': email, 'candidate_id': candidate_id,
                                 'error': 'Could not extract text — saved with Absence of Details'})
@@ -213,7 +296,7 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
             if not name or 'unknown' in name.lower():
                 name = os.path.splitext(filename)[0].replace('_', ' ').replace('-', ' ').title() or 'Unknown Candidate'
 
-        candidate_status = 'Absence of Details' if missing_details else 'Applied'
+        candidate_status = 'absence_of_details' if missing_details else 'applied'
         result['name'] = name
         result['email'] = email
         result['match_score'] = parsed_data.get('match_score', 0)
@@ -225,21 +308,21 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
                 if existing := get_candidate_by_email(email):
                     result.update({'status': 'duplicate', 'candidate_id': existing['id'],
                                    'error': f'Already registered (ID: {existing["id"]})'})
+                    with contextlib.suppress(OSError):
+                        os.remove(filepath)
                     return result
 
         pros_text = "\n".join(ai_analysis.get('pros', [])) if ai_analysis else None
         cons_text = "\n".join(ai_analysis.get('cons', [])) if ai_analysis else None
 
-        candidate_id = insert_candidate(
+        candidate_id = insert_candidate_application(
             name=name, email=email, phone=phone or '',
             resume_path=filepath, parsed_data=parsed_data,
-            pros=pros_text, cons=cons_text, status=candidate_status
+            job_id=int(job_id),
+            ai_reasoning=ai_analysis.get('overall_assessment', '') if ai_analysis else '',
+            pros=pros_text, cons=cons_text, status=candidate_status,
         )
         result['candidate_id'] = candidate_id
-
-        if candidate_id:
-            _save_candidate_job_match(candidate_id, job_id, parsed_data.get('match_score', 0),
-                                      ai_analysis.get('overall_assessment', '') if ai_analysis else '')
 
         result['status'] = 'success'
         if missing_details:
@@ -247,8 +330,10 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
         logger.info(f"[BULK] Processed {filename} -> {name} <{email}> score={result['match_score']} status={candidate_status}")
 
     except Exception as e:
-        result['error'] = str(e)
-        logger.error(f"[BULK] Error processing {filename}: {e}")
+        result['error'] = 'Resume processing failed'
+        logger.exception("[BULK] Error processing %s: %s", filename, e)
+        with contextlib.suppress(OSError):
+            os.remove(filepath)
 
     return result
 
@@ -258,45 +343,44 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
 # ============================================================================
 
 def _extract_text_from_file(filepath):
-    text = ""
+    chunks = []
+    total_chars = 0
+
+    def append_text(value):
+        nonlocal total_chars
+        if not value:
+            return
+        total_chars += len(value) + 1
+        if total_chars > MAX_QUESTION_TEXT_CHARS:
+            raise ValueError('Extracted question-bank text is too large')
+        chunks.append(value)
+
     if filepath.lower().endswith('.pdf'):
         from PyPDF2 import PdfReader
         with open(filepath, 'rb') as f:
             pdf = PdfReader(f)
             for page in pdf.pages:
                 if page_text := page.extract_text():
-                    text += page_text + "\n"
+                    append_text(page_text)
     elif filepath.lower().endswith('.docx'):
         from docx import Document
         doc = Document(filepath)
         for para in doc.paragraphs:
             if para.text.strip():
-                text += para.text + "\n"
+                append_text(para.text)
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     if cell.text.strip():
-                        text += cell.text + "\n"
-    return text.strip()
+                        append_text(cell.text)
+    return "\n".join(chunks).strip()
 
 
 def _parse_questions_from_text(text):
     questions = []
 
     try:
-        api_key = os.environ.get('OPENAI_API_KEY')
-        if not api_key:
-            raise ValueError('OPENAI_API_KEY not configured')
-
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
-        except TypeError:
-            import httpx
-            proxy = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy')
-            http_client = httpx.Client(proxies=proxy) if proxy else httpx.Client()
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key, http_client=http_client)
+        client = _create_openai_client()
 
         truncated = text[:12000] if len(text) > 12000 else text
 
@@ -327,11 +411,9 @@ Return ONLY valid JSON, no markdown."""},
             temperature=0.2,
             max_tokens=4000
         )
-        import json
-        content = response.choices[0].message.content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        questions = json.loads(content)
+        questions = _normalize_parsed_questions(
+            _parse_ai_json(response.choices[0].message.content)
+        )
         logger.info(f"[CUSTOM QB] AI parsed {len(questions)} questions from uploaded document")
         return questions
     except Exception as ai_err:
@@ -371,11 +453,8 @@ def bulk_upload_resumes():
 
     archive_file = request.files['file']
     fname = (archive_file.filename or '').lower()
-    if not fname.endswith('.zip') and not fname.endswith('.rar'):
-        return jsonify({'status': 'error', 'message': 'Please upload a .zip or .rar file'}), 400
-    if fname.endswith('.rar') and not RAR_SUPPORTED:
-        return jsonify({'status': 'error', 'message': 'RAR support not available. Please upload a .zip file.'}), 400
-    is_rar = fname.endswith('.rar')
+    if not fname.endswith('.zip'):
+        return jsonify({'status': 'error', 'message': 'Please upload a .zip file'}), 400
 
     job_id = request.form.get('job_id')
     if not job_id:
@@ -388,68 +467,19 @@ def bulk_upload_resumes():
     logger.info(f"[BULK] Target job: {job_info['title']} (ID: {job_id})")
 
     temp_dir = tempfile.mkdtemp(prefix='bulk_upload_')
-    extract_dir = os.path.join(temp_dir, 'resumes')
-    os.makedirs(extract_dir, exist_ok=True)
-    upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-    os.makedirs(upload_folder, exist_ok=True)
+    upload_folder = str(get_upload_root(create=True))
 
     try:
-        archive_path = os.path.join(temp_dir, 'upload.rar' if is_rar else 'upload.zip')
+        archive_path = os.path.join(temp_dir, 'upload.zip')
         archive_file.save(archive_path)
+        extract_dir = os.path.join(temp_dir, 'resumes')
+        os.makedirs(extract_dir, exist_ok=True)
+        extracted_files = _extract_resume_zip(archive_path, extract_dir)
         resume_files = []
-
-        def _collect_resume_files(base_dir):
-            for root, _dirs, files in os.walk(base_dir):
-                for fname in files:
-                    if '__MACOSX' in root or fname.startswith('.'):
-                        continue
-                    ext = fname.rsplit('.', 1)[-1].lower() if '.' in fname else ''
-                    if ext not in ALLOWED_RESUME_EXTENSIONS:
-                        continue
-                    rel_path = os.path.relpath(os.path.join(root, fname), base_dir)
-                    parent_dir = os.path.basename(os.path.dirname(rel_path))
-                    display_name = f"{parent_dir}/{fname}" if parent_dir and parent_dir != '.' else fname
-                    safe_name = secure_filename(fname)
-                    unique_name = f"{uuid.uuid4()}_{safe_name}"
-                    perm_path = os.path.join(upload_folder, unique_name)
-                    shutil.copy2(os.path.join(root, fname), perm_path)
-                    resume_files.append((perm_path, display_name))
-
-        if is_rar:
-            import subprocess as _sp
-            _unrar_candidates = [
-                r'C:\Program Files\WinRAR\UnRAR.exe',
-                r'C:\Program Files (x86)\WinRAR\UnRAR.exe',
-                'unrar', 'UnRAR',
-            ]
-            if RAR_SUPPORTED and getattr(rarfile, 'UNRAR_TOOL', None):
-                _unrar_candidates.insert(0, rarfile.UNRAR_TOOL)
-
-            rar_extract_dir = os.path.join(temp_dir, 'rar_extracted')
-            os.makedirs(rar_extract_dir, exist_ok=True)
-            proc = None
-            for _tool in _unrar_candidates:
-                try:
-                    proc = _sp.run(
-                        [_tool, 'x', '-o+', '-y', archive_path, rar_extract_dir + os.sep],
-                        capture_output=True, timeout=120
-                    )
-                    if proc.returncode == 0:
-                        break
-                except OSError:
-                    continue
-            if proc is None or proc.returncode != 0:
-                err_msg = proc.stderr.decode(errors='replace') if proc else 'unrar not found'
-                logger.error(f"[BULK] unrar failed: {err_msg}")
-                return jsonify({'status': 'error',
-                                'message': 'Failed to extract RAR file. Please use a .zip file instead.'}), 400
-            _collect_resume_files(rar_extract_dir)
-        else:
-            zip_extract_dir = os.path.join(temp_dir, 'zip_extracted')
-            os.makedirs(zip_extract_dir, exist_ok=True)
-            with zipfile.ZipFile(archive_path, 'r') as zf:
-                zf.extractall(zip_extract_dir)
-            _collect_resume_files(zip_extract_dir)
+        for extracted_path, display_name in extracted_files:
+            permanent_path = os.path.join(upload_folder, os.path.basename(extracted_path))
+            shutil.copy2(extracted_path, permanent_path)
+            resume_files.append((permanent_path, display_name))
 
         if not resume_files:
             return jsonify({'status': 'error', 'message': 'No PDF or DOCX files found in the archive'}), 400
@@ -461,15 +491,19 @@ def bulk_upload_resumes():
         with ThreadPoolExecutor(max_workers=MAX_BULK_WORKERS) as executor:
             future_map = {
                 executor.submit(_process_single_resume, filepath, original_name,
-                                job_description, job_info, job_id, upload_folder): original_name
+                                job_description, job_info, job_id): (original_name, filepath)
                 for filepath, original_name in resume_files
             }
             for future in as_completed(future_map):
                 try:
-                    results.append(future.result(timeout=120))
-                except Exception as exc:
+                    results.append(future.result())
+                except Exception:
+                    original_name, filepath = future_map[future]
+                    with contextlib.suppress(OSError):
+                        os.remove(filepath)
+                    logger.exception("[BULK] Worker failed for %s", original_name)
                     results.append({
-                        'filename': future_map[future], 'status': 'error', 'error': str(exc),
+                        'filename': original_name, 'status': 'error', 'error': 'Resume processing failed',
                         'name': None, 'email': None, 'match_score': 0,
                         'recommendation': None, 'candidate_id': None
                     })
@@ -492,6 +526,8 @@ def bulk_upload_resumes():
 
     except zipfile.BadZipFile:
         return jsonify({'status': 'error', 'message': 'Invalid or corrupted archive file'}), 400
+    except ValueError as error:
+        return jsonify({'status': 'error', 'message': str(error)}), 400
     except Exception as e:
         logger.exception(f"[BULK] Unexpected error: {e}")
         return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
@@ -504,8 +540,12 @@ def bulk_upload_resumes():
 @jwt_required()
 @require_admin_role
 def ai_enhance_text():
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'status': 'error', 'message': 'A JSON object is required'}), 400
     text_type = data.get('type', 'job')
+    if text_type not in {'job', 'sector'}:
+        return jsonify({'status': 'error', 'message': 'Type must be job or sector'}), 400
     title = data.get('title') or ''
     description = data.get('description') or ''
 
@@ -527,21 +567,11 @@ def ai_enhance_text():
 
     if not title and not description:
         return jsonify({'status': 'error', 'message': 'Provide at least a title or description to enhance'}), 400
+    if len(title) > 300 or len(description) > MAX_AI_INPUT_CHARS:
+        return jsonify({'status': 'error', 'message': 'Input is too long'}), 400
 
     try:
-        api_key = os.environ.get('OPENAI_API_KEY')
-        if not api_key:
-            return jsonify({'status': 'error', 'message': 'OpenAI API key not configured'}), 500
-
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
-        except TypeError:
-            import httpx
-            proxy = os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy')
-            http_client = httpx.Client(proxies=proxy) if proxy else httpx.Client()
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key, http_client=http_client)
+        client = _create_openai_client()
 
         if text_type == 'sector':
             system_msg = (
@@ -580,12 +610,9 @@ def ai_enhance_text():
             max_tokens=1500
         )
 
-        raw = response.choices[0].message.content.strip()
-        if raw.startswith('```'):
-            raw = raw.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
-
-        import json as _j
-        result = _j.loads(raw)
+        result = _parse_ai_json(response.choices[0].message.content)
+        if not isinstance(result, dict):
+            raise ValueError('AI provider returned an invalid response')
 
         enhanced_title = result.get('enhanced_title', title)
         enhanced_desc = result.get('enhanced_description', description)
@@ -626,19 +653,21 @@ def ai_enhance_text():
 
         return jsonify(resp)
 
-    except Exception as e:
-        logger.error(f"[AI ENHANCE] Failed: {e}")
-        return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
+    except RuntimeError as error:
+        logger.warning("[AI ENHANCE] Service unavailable: %s", error)
+        return jsonify({'status': 'error', 'message': 'AI enhancement is not configured'}), 503
+    except Exception:
+        logger.exception("[AI ENHANCE] Provider request failed")
+        return jsonify({'status': 'error', 'message': 'AI enhancement failed'}), 502
 
 
 @admin_content_bp.route('/question-bank/upload', methods=['POST'])
 @jwt_required()
+@require_admin_role
 def upload_question_bank():
+    filepath = None
+    stored = False
     try:
-        claims = get_jwt()
-        if claims.get('role', '') not in ('admin', 'super_admin', 'interviewer'):
-            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
-
         if 'file' not in request.files:
             return jsonify({'status': 'error', 'message': 'No file uploaded'}), 400
 
@@ -652,9 +681,10 @@ def upload_question_bank():
 
         description = request.form.get('description', '')
         tags = request.form.get('tags', '')
+        if len(description) > 2_000 or len(tags) > 500:
+            return jsonify({'status': 'error', 'message': 'Description or tags are too long'}), 400
 
-        upload_dir = os.path.join(os.path.dirname(__file__), 'uploads', 'question_banks')
-        os.makedirs(upload_dir, exist_ok=True)
+        upload_dir = str(get_upload_subdirectory('question_banks', create=True))
         original_filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{original_filename}"
         filepath = os.path.join(upload_dir, unique_filename)
@@ -666,22 +696,23 @@ def upload_question_bank():
             return jsonify({'status': 'error', 'message': 'Could not extract any text from the file.'}), 400
 
         parsed_questions = _parse_questions_from_text(questions_text)
+        if not parsed_questions:
+            return jsonify({'status': 'error', 'message': 'No valid questions were found'}), 400
 
         user_id = int(get_jwt_identity())
-        conn = get_connection()
-        cur = conn.cursor()
-        import json
-        cur.execute("""
-            INSERT INTO custom_question_bank
-            (filename, original_filename, file_path, questions_text, parsed_questions, uploaded_by, description, tags)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (unique_filename, file.filename, filepath,
-              questions_text, json.dumps(parsed_questions),
-              user_id, description, tags))
-        qb_id = cur.fetchone()[0]
-        conn.commit()
-        return_connection(conn)
+        with db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO custom_question_bank
+                (filename, original_filename, file_path, questions_text, parsed_questions, uploaded_by, description, tags)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (unique_filename, original_filename, filepath,
+                  questions_text, _json.dumps(parsed_questions),
+                  user_id, description, tags))
+            qb_id = cur.fetchone()[0]
+            conn.commit()
+        stored = True
 
         logger.info(f"[CUSTOM QB] Uploaded question bank #{qb_id}: {file.filename} ({len(parsed_questions)} questions parsed)")
 
@@ -696,31 +727,33 @@ def upload_question_bank():
             }
         }), 201
 
-    except Exception as e:
-        logger.error(f"[CUSTOM QB] Upload failed: {e}")
+    except ValueError as error:
+        return jsonify({'status': 'error', 'message': str(error)}), 400
+    except Exception:
+        logger.exception("[CUSTOM QB] Upload failed")
         return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
+    finally:
+        if filepath and not stored:
+            with contextlib.suppress(OSError):
+                os.remove(filepath)
 
 
 @admin_content_bp.route('/question-bank', methods=['GET'])
 @jwt_required()
+@require_admin_role
 def list_question_banks():
     try:
-        claims = get_jwt()
-        if claims.get('role', '') not in ('admin', 'super_admin', 'interviewer'):
-            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
-
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT qb.id, qb.original_filename, qb.description, qb.tags,
-                   qb.is_active, qb.created_at, u.name as uploaded_by_name,
-                   jsonb_array_length(COALESCE(qb.parsed_questions, '[]'::jsonb)) as questions_count
-            FROM custom_question_bank qb
-            LEFT JOIN users u ON qb.uploaded_by = u.id
-            ORDER BY qb.created_at DESC
-        """)
-        rows = cur.fetchall()
-        return_connection(conn)
+        with db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT qb.id, qb.original_filename, qb.description, qb.tags,
+                       qb.is_active, qb.created_at, u.name as uploaded_by_name,
+                       jsonb_array_length(COALESCE(qb.parsed_questions, '[]'::jsonb)) as questions_count
+                FROM custom_question_bank qb
+                LEFT JOIN users u ON qb.uploaded_by = u.id
+                ORDER BY qb.created_at DESC
+            """)
+            rows = cur.fetchall()
 
         items = [{
             'id': row[0], 'filename': row[1], 'description': row[2],
@@ -738,30 +771,25 @@ def list_question_banks():
 
 @admin_content_bp.route('/question-bank/<int:qb_id>', methods=['GET'])
 @jwt_required()
+@require_admin_role
 def get_question_bank(qb_id):
     try:
-        claims = get_jwt()
-        if claims.get('role', '') not in ('admin', 'super_admin', 'interviewer'):
-            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
-
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT qb.id, qb.original_filename, qb.description, qb.tags,
-                   qb.is_active, qb.created_at, qb.parsed_questions, qb.questions_text,
-                   u.name as uploaded_by_name
-            FROM custom_question_bank qb
-            LEFT JOIN users u ON qb.uploaded_by = u.id
-            WHERE qb.id = %s
-        """, (qb_id,))
-        row = cur.fetchone()
-        return_connection(conn)
+        with db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT qb.id, qb.original_filename, qb.description, qb.tags,
+                       qb.is_active, qb.created_at, qb.parsed_questions, qb.questions_text,
+                       u.name as uploaded_by_name
+                FROM custom_question_bank qb
+                LEFT JOIN users u ON qb.uploaded_by = u.id
+                WHERE qb.id = %s
+            """, (qb_id,))
+            row = cur.fetchone()
 
         if not row:
             return jsonify({'status': 'error', 'message': 'Not found'}), 404
 
-        import json
-        parsed = json.loads(row[6]) if isinstance(row[6], str) else (row[6] or [])
+        parsed = _json.loads(row[6]) if isinstance(row[6], str) else (row[6] or [])
 
         return jsonify({'status': 'success', 'data': {
             'id': row[0], 'filename': row[1], 'description': row[2], 'tags': row[3],
@@ -777,24 +805,19 @@ def get_question_bank(qb_id):
 
 @admin_content_bp.route('/question-bank/<int:qb_id>', methods=['DELETE'])
 @jwt_required()
+@require_admin_role
 def delete_question_bank(qb_id):
     try:
-        claims = get_jwt()
-        if claims.get('role', '') not in ('admin', 'super_admin'):
-            return jsonify({'status': 'error', 'message': 'Only admins can delete'}), 403
+        with db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT file_path FROM custom_question_bank WHERE id = %s", (qb_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Not found'}), 404
 
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT file_path FROM custom_question_bank WHERE id = %s", (qb_id,))
-        row = cur.fetchone()
-        if not row:
-            return_connection(conn)
-            return jsonify({'status': 'error', 'message': 'Not found'}), 404
-
-        filepath = row[0]
-        cur.execute("DELETE FROM custom_question_bank WHERE id = %s", (qb_id,))
-        conn.commit()
-        return_connection(conn)
+            filepath = row[0]
+            cur.execute("DELETE FROM custom_question_bank WHERE id = %s", (qb_id,))
+            conn.commit()
 
         if filepath and os.path.exists(filepath):
             with contextlib.suppress(Exception):
@@ -809,26 +832,21 @@ def delete_question_bank(qb_id):
 
 @admin_content_bp.route('/question-bank/<int:qb_id>/toggle', methods=['PATCH'])
 @jwt_required()
+@require_admin_role
 def toggle_question_bank(qb_id):
     try:
-        claims = get_jwt()
-        if claims.get('role', '') not in ('admin', 'super_admin'):
-            return jsonify({'status': 'error', 'message': 'Only admins can toggle status'}), 403
-
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE custom_question_bank
-            SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-            RETURNING is_active
-        """, (qb_id,))
-        row = cur.fetchone()
-        if not row:
-            return_connection(conn)
-            return jsonify({'status': 'error', 'message': 'Not found'}), 404
-        conn.commit()
-        return_connection(conn)
+        with db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE custom_question_bank
+                SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                RETURNING is_active
+            """, (qb_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'status': 'error', 'message': 'Not found'}), 404
+            conn.commit()
 
         return jsonify({'status': 'success', 'is_active': row[0]})
 

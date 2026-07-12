@@ -9,12 +9,15 @@ import re
 import uuid
 import logging
 import contextlib
+import stat
+import zipfile
+from pathlib import PurePosixPath
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from resume_parser import parse_resume
 from resume_analyzer import analyze_resume
-from db_helpers import insert_candidate, get_candidate_by_email
-from db_config import get_connection, return_connection
+from candidate_db import get_candidate_by_email, insert_candidate_application
+from db_config import db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +25,89 @@ resume_bp = Blueprint('resume', __name__)
 
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 MAX_FILE_SIZE_MB = 10
+MAX_DOCX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+MAX_DOCX_ENTRY_BYTES = 20 * 1024 * 1024
+MAX_DOCX_FILES = 2_000
 EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
+
+
+class UploadValidationError(ValueError):
+    """Raised when uploaded resume bytes do not match a safe PDF/DOCX file."""
 
 
 def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _validate_pdf_file(filepath):
+    file_size = os.path.getsize(filepath)
+    if file_size < 10:
+        raise UploadValidationError("Uploaded PDF is empty or incomplete")
+    with open(filepath, 'rb') as pdf_file:
+        header = pdf_file.read(8)
+        if not header.startswith(b'%PDF-'):
+            raise UploadValidationError("Uploaded file does not have a valid PDF signature")
+        pdf_file.seek(max(0, file_size - 4096))
+        if b'%%EOF' not in pdf_file.read(4096):
+            raise UploadValidationError("Uploaded PDF is incomplete")
+
+
+def _validate_docx_file(filepath):
+    if not zipfile.is_zipfile(filepath):
+        raise UploadValidationError("Uploaded file is not a valid DOCX container")
+
+    required_parts = {'[Content_Types].xml', '_rels/.rels', 'word/document.xml'}
+    try:
+        with zipfile.ZipFile(filepath) as archive:
+            infos = archive.infolist()
+            if len(infos) > MAX_DOCX_FILES:
+                raise UploadValidationError("DOCX contains too many files")
+
+            names = set()
+            uncompressed_total = 0
+            for info in infos:
+                normalized_name = info.filename.replace('\\', '/')
+                path = PurePosixPath(normalized_name)
+                if (
+                    not normalized_name
+                    or normalized_name.startswith('/')
+                    or '..' in path.parts
+                ):
+                    raise UploadValidationError("DOCX contains an unsafe file path")
+                if normalized_name in names:
+                    raise UploadValidationError("DOCX contains duplicate file entries")
+                names.add(normalized_name)
+
+                if info.flag_bits & 0x1:
+                    raise UploadValidationError("Encrypted DOCX files are not supported")
+                mode = (info.external_attr >> 16) & 0xFFFF
+                if mode and stat.S_ISLNK(mode):
+                    raise UploadValidationError("DOCX must not contain symbolic links")
+                if info.is_dir():
+                    continue
+                if info.file_size > MAX_DOCX_ENTRY_BYTES:
+                    raise UploadValidationError("DOCX contains an oversized file entry")
+                uncompressed_total += info.file_size
+                if uncompressed_total > MAX_DOCX_UNCOMPRESSED_BYTES:
+                    raise UploadValidationError("DOCX expands beyond the allowed size")
+
+            if not required_parts.issubset(names):
+                raise UploadValidationError("DOCX is missing required document parts")
+            if corrupt_name := archive.testzip():
+                raise UploadValidationError(
+                    f"DOCX contains a corrupt file entry: {corrupt_name}"
+                )
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        raise UploadValidationError("Uploaded file is not a valid DOCX container") from exc
+
+
+def _validate_resume_file(filepath, extension):
+    if extension == 'pdf':
+        _validate_pdf_file(filepath)
+    elif extension == 'docx':
+        _validate_docx_file(filepath)
+    else:
+        raise UploadValidationError("Unsupported resume file type")
 
 
 def _is_valid_email(email):
@@ -56,15 +137,15 @@ def _delete_file(filepath):
 def _get_job_description_for_id(job_id):
     try:
         import json as _json
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, title, department, required_skills, preferred_skills, min_experience "
-            "FROM job_descriptions WHERE id = %s AND status = 'active'",
-            (int(job_id),)
-        )
-        row = cursor.fetchone()
-        return_connection(conn)
+        with db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, title, department, required_skills, preferred_skills, min_experience "
+                "FROM job_descriptions WHERE id = %s AND status = 'active' "
+                "AND (closes_at IS NULL OR closes_at > CURRENT_TIMESTAMP)",
+                (int(job_id),)
+            )
+            row = cursor.fetchone()
         if row:
             skills = set()
             for skills_val in (row[3], row[4]):
@@ -108,9 +189,20 @@ def upload_resume():
     if not original_filename or "." not in original_filename:
         return jsonify({"status": "error", "message": "Invalid filename after sanitization"}), 400
 
-    unique_filename = f"{uuid.uuid4()}_{original_filename}"
+    extension = original_filename.rsplit('.', 1)[1].lower()
+    filename_stem = original_filename.rsplit('.', 1)[0]
+    unique_filename = f"{uuid.uuid4()}_{filename_stem}.{extension}"
     upload_folder = current_app.config['UPLOAD_FOLDER']
     filepath = os.path.join(upload_folder, unique_filename)
+
+    selected_job_id = request.form.get('job_id')
+    if not selected_job_id:
+        return jsonify({"status": "error", "message": "Please select a job position to apply for."}), 400
+
+    job_description, selected_job_info = _get_job_description_for_id(selected_job_id)
+    if not job_description:
+        return jsonify({"status": "error",
+                        "message": "The selected job position is no longer active."}), 400
 
     try:
         file.save(filepath)
@@ -118,16 +210,11 @@ def upload_resume():
         logger.error(f"[ERROR] OSError saving file: {e}")
         return jsonify({"status": "error", "message": "Failed to save uploaded file."}), 500
 
-    selected_job_id = request.form.get('job_id')
-    if not selected_job_id:
+    try:
+        _validate_resume_file(filepath, extension)
+    except UploadValidationError as exc:
         _delete_file(filepath)
-        return jsonify({"status": "error", "message": "Please select a job position to apply for."}), 400
-
-    job_description, selected_job_info = _get_job_description_for_id(selected_job_id)
-    if not job_description:
-        _delete_file(filepath)
-        return jsonify({"status": "error",
-                        "message": "The selected job position is no longer active."}), 400
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     logger.info(f"[MATCH] Scoring against: {selected_job_info['title']} (ID: {selected_job_id})")
 
@@ -135,7 +222,7 @@ def upload_resume():
         parsed_data = parse_resume(filepath, job_description)
 
         with open(filepath, 'rb') as f:
-            if filepath.endswith('.pdf'):
+            if extension == 'pdf':
                 from PyPDF2 import PdfReader
                 pdf = PdfReader(f)
                 resume_text = " ".join([page.extract_text() or '' for page in pdf.pages])
@@ -180,9 +267,11 @@ def upload_resume():
 
     except Exception as e:
         logger.exception(f"[ERROR] Error parsing resume: {e}")
-        parsed_data = {"error": "Failed to parse resume", "skills": [], "experience": 0,
-                       "education": "Not Specified", "match_score": 0, "shortlist_status": "Pending Review"}
-        ai_analysis = None
+        _delete_file(filepath)
+        return jsonify({
+            "status": "error",
+            "message": "The resume could not be parsed as a valid PDF or DOCX file.",
+        }), 400
 
     manual_name = request.form.get('name', '').strip()
     manual_email = request.form.get('email', '').strip()
@@ -190,6 +279,8 @@ def upload_resume():
 
     name = manual_name or parsed_data.get('name')
     email = manual_email or parsed_data.get('email')
+    if isinstance(email, str):
+        email = email.strip().lower()
     phone = manual_phone or parsed_data.get('phone') or ""
 
     if not email or not _is_valid_email(email):
@@ -202,6 +293,7 @@ def upload_resume():
 
     with contextlib.suppress(Exception):
         if existing := get_candidate_by_email(email):
+            _delete_file(filepath)
             return jsonify({
                 "status": "error",
                 "message": f"You have already registered with this email address ({email}).",
@@ -215,40 +307,12 @@ def upload_resume():
     try:
         pros_text = "\n".join(ai_analysis.get('pros', [])) if ai_analysis else None
         cons_text = "\n".join(ai_analysis.get('cons', [])) if ai_analysis else None
-
-        candidate_id = insert_candidate(
+        ai_reasoning = ai_analysis.get('overall_assessment', '') if ai_analysis else ''
+        candidate_id = insert_candidate_application(
             name=name, email=email, phone=phone, resume_path=filepath,
-            parsed_data=parsed_data, pros=pros_text, cons=cons_text, status="Applied"
+            parsed_data=parsed_data, job_id=int(selected_job_id), ai_reasoning=ai_reasoning,
+            pros=pros_text, cons=cons_text, status="applied"
         )
-
-        if candidate_id and selected_job_info:
-            match_conn = None
-            try:
-                match_conn = get_connection()
-                match_cur = match_conn.cursor()
-                match_score = parsed_data.get('match_score', 0)
-                ai_reasoning = ai_analysis.get('overall_assessment', '') if ai_analysis else ''
-                match_cur.execute("""
-                    INSERT INTO candidate_job_matches (candidate_id, job_id, match_score, ai_reasoning)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (candidate_id, job_id)
-                    DO UPDATE SET match_score = EXCLUDED.match_score,
-                                 ai_reasoning = EXCLUDED.ai_reasoning, matched_at = NOW()
-                """, (candidate_id, int(selected_job_id), match_score, ai_reasoning))
-                match_cur.execute(
-                    "UPDATE candidates SET best_match_job_id = %s, match_score = %s WHERE id = %s",
-                    (int(selected_job_id), match_score, candidate_id)
-                )
-                match_conn.commit()
-            except Exception as match_err:
-                logger.warning(f"[MATCH] Could not save job match: {match_err}")
-                if match_conn:
-                    with contextlib.suppress(Exception):
-                        match_conn.rollback()
-            finally:
-                if match_conn:
-                    with contextlib.suppress(Exception):
-                        return_connection(match_conn)
     except Exception as e:
         logger.exception(f"[ERROR] Error saving candidate: {e}")
         _delete_file(filepath)

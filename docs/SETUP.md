@@ -42,47 +42,42 @@ Optional (for AI features):
    pip install -r requirements.txt
    ```
 
-4. Create a `backend/.env` file with the following configuration:
+4. Copy the canonical environment template and replace its placeholder values:
 
-   ```properties
-   # Database
-   DATABASE_URL=postgresql://postgres:password@localhost:5432/elite_hire
-
-   # Security
-   SECRET_KEY=your_flask_secret_key
-   JWT_SECRET_KEY=your_jwt_signing_key
-
-   # OpenAI (required for AI features)
-   OPENAI_API_KEY=your_openai_api_key
-
-   # Supabase (optional, if using Supabase as your database host)
-   SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_KEY=your_anon_key
-
-   # Email — SMTP (optional)
-   SMTP_SERVER=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USERNAME=your_email@gmail.com
-   SMTP_PASSWORD=your_app_password
-
-   # Email — Resend (optional, alternative to SMTP)
-   RESEND_API_KEY=your_resend_api_key
+   ```bash
+   cp .env.example .env
    ```
+
+   The backend reads the names in `backend/.env.example`. At minimum, set
+   `DATABASE_URL` and a random `JWT_SECRET_KEY` of at least 32 characters.
+   `OPENAI_API_KEY` enables AI-backed features, while email can use either
+   `RESEND_API_KEY` or the `SMTP_*` variables in the template.
 
    > **Note:** For local development you can create a `backend/local.env`
    > file instead. The application loads `local.env` first when present,
    > falling back to `.env`.
 
-5. Initialize the database:
+5. Initialize a fresh, empty database:
 
    ```bash
-   psql "$DATABASE_URL" -f ../database/schema_postgresql.sql
+   python scripts/run_migration.py --schema
    ```
+
+   If the database already contains an older HireSense installation, do not
+   re-run the fresh schema. Reconcile it instead:
+
+   ```bash
+   python scripts/run_migration.py --reconcile
+   ```
+
+   Both commands use the canonical `database/schema_postgres.sql` and
+   `database/migrations/20260713_reconcile_canonical_schema.sql` artifacts and
+   verify required runtime columns before committing.
 
 6. Start the backend server:
 
    ```bash
-   python app.py
+   python run.py
    ```
 
    The API is now available at `http://localhost:5000`.
@@ -101,11 +96,14 @@ Optional (for AI features):
    npm install
    ```
 
-3. Create a `frontend/.env` file:
+3. Create a `frontend/.env.local` file from the public template:
 
-   ```properties
-   VITE_API_BASE_URL=http://localhost:5000
+   ```bash
+   cp .env.example .env.local
    ```
+
+   `VITE_API_BASE_URL` is embedded into the browser bundle. Never place secrets
+   in a `VITE_*` variable.
 
 4. Start the development server:
 
@@ -121,7 +119,7 @@ Open two terminal windows and start each service:
 
 ```bash
 # Terminal 1 — Backend
-cd backend && python app.py
+cd backend && python run.py
 
 # Terminal 2 — Frontend
 cd frontend && npm run dev
@@ -133,13 +131,11 @@ back to `http://<your-ip>:5000` automatically.
 
 ## Database migrations
 
-Incremental migrations are stored in `database/migrations/`. Apply them in
-order after the initial schema import:
-
-```bash
-psql "$DATABASE_URL" -f database/migrations/add_assessment_token.sql
-psql "$DATABASE_URL" -f database/migrations/add_job_postings_sectors_rbac.sql
-```
+Use `python backend/scripts/run_migration.py --schema` once for a fresh
+database. Use `--reconcile` for an existing installation. Historical files in
+`database/migrations/` are records of past changes and are not an ordered setup
+sequence; the dated `20260713` reconciliation migration is the supported legacy
+upgrade path.
 
 ## Default user roles
 
@@ -188,7 +184,7 @@ directory to any static hosting provider.
 - **OpenAI API errors** — Confirm your `OPENAI_API_KEY` is valid. AI
   features gracefully fall back to rule-based analysis when the key is
   missing.
-- **CORS errors** — The backend enables CORS for all origins in development.
-  For production, configure allowed origins in `app.py`.
+- **CORS errors** — Set `CORS_ORIGINS` to a comma-separated list of exact
+  frontend origins. Do not use wildcard origins in production.
 - **WebSocket connection issues** — The Socket.IO server runs on the same
   port as the Flask API (5000). Verify that eventlet is installed correctly.

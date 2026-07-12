@@ -1,13 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
-  Briefcase, MapPin, Clock, Search, ArrowRight, Building2, GraduationCap, IndianRupee, X
+  Briefcase, MapPin, Clock, Search, ArrowRight, Building2, GraduationCap, IndianRupee, AlertCircle
 } from 'lucide-react';
 import Logo from '../components/Logo';
 import { api } from '../services/api';
@@ -17,18 +16,26 @@ const JobListingsPage = () => {
   const [jobs, setJobs] = useState([]);
   const [sectors, setSectors] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [levelFilter, setLevelFilter] = useState('all');
   const [selectedJob, setSelectedJob] = useState(null);
 
   useEffect(() => {
-    Promise.all([
-      api.get('/api/jobs/postings?status=active').catch(() => ({ data: { data: [] } })),
-      api.get('/api/jobs/sectors').catch(() => ({ data: { data: [] } })),
-    ]).then(([jobsRes, sectorsRes]) => {
-      setJobs(jobsRes.data.data || []);
-      setSectors(sectorsRes.data.data || []);
+    Promise.allSettled([
+      api.get('/api/jobs/postings?status=active'),
+      api.get('/api/jobs/sectors'),
+    ]).then(([jobsResult, sectorsResult]) => {
+      if (jobsResult.status === 'fulfilled') {
+        setJobs(jobsResult.value.data.data || []);
+      } else {
+        setLoadError(true);
+      }
+
+      if (sectorsResult.status === 'fulfilled') {
+        setSectors(sectorsResult.value.data.data || []);
+      }
     }).finally(() => setLoading(false));
   }, []);
 
@@ -108,7 +115,11 @@ const JobListingsPage = () => {
 
         {/* Results count */}
         <p className="text-sm text-slate-500 mb-4">
-          {loading ? 'Loading...' : `${filteredJobs.length} position${filteredJobs.length !== 1 ? 's' : ''} found`}
+          {loading
+            ? 'Loading...'
+            : loadError
+              ? 'Positions unavailable'
+              : `${filteredJobs.length} position${filteredJobs.length !== 1 ? 's' : ''} found`}
         </p>
 
         {/* Job Cards */}
@@ -200,7 +211,18 @@ const JobListingsPage = () => {
             </div>
           ))}
 
-          {!loading && filteredJobs.length === 0 && (
+          {!loading && loadError && (
+            <div role="alert" className="bg-white rounded-xl shadow-md p-12 text-center">
+              <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-slate-900 mb-2">Unable to load positions</h3>
+              <p className="text-slate-500 mb-4">The jobs service is temporarily unavailable. Please try again shortly.</p>
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                Try Again
+              </Button>
+            </div>
+          )}
+
+          {!loading && !loadError && filteredJobs.length === 0 && (
             <div className="bg-white rounded-xl shadow-md p-12 text-center">
               <Briefcase className="w-12 h-12 text-slate-300 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-slate-900 mb-2">No positions found</h3>

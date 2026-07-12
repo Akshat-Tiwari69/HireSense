@@ -1,9 +1,8 @@
 # Railway Nixpacks configuration for frontend (Node)
 
 [phases.install]
-# Install dependencies
 commands = [
-  "npm ci || npm install"
+  "npm ci"
 ]
 
 [phases.build]
@@ -13,5 +12,7 @@ commands = [
 ]
 
 [start]
-# Preview static build with Vite on the provided PORT
-cmd = "npm run preview -- --host 0.0.0.0 --port $PORT"
+cmd = "npm start"
+
+[variables]
+NIXPACKS_NODE_VERSION = "20"

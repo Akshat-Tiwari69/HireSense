@@ -10,7 +10,7 @@ HireSense is a full-stack AI-enabled hiring platform that handles the complete r
 
 | Layer | Technologies |
 |-------|-------------|
-| Frontend | React 18, Vite, Tailwind CSS, shadcn/ui, Recharts |
+| Frontend | React 18, Vite, Tailwind CSS, shadcn/ui |
 | Backend | Flask 3.0, Flask-JWT-Extended, Flask-Limiter, Flask-CORS |
 | Database | PostgreSQL 15 (Supabase compatible) |
 | AI | OpenAI GPT-4o-mini (resume analysis, question generation, job matching) |
@@ -37,7 +37,9 @@ HireSense is a full-stack AI-enabled hiring platform that handles the complete r
 | Role | Access |
 |------|--------|
 | Admin | Full system — users, candidates, jobs, sectors, analytics |
+| Super Admin | Admin access plus privileged user and development-setting controls |
 | Sector Admin | Scoped to their sector's jobs and candidates |
+| Recruiter | Candidate and job workflow access without system administration |
 | Interviewer | Candidate review, assessment scheduling, final decisions |
 | Proctor | Live session monitoring, violation reporting |
 | Candidate | Job listings, application submission, assessment |
@@ -49,9 +51,9 @@ HireSense is a full-stack AI-enabled hiring platform that handles the complete r
 ### Prerequisites
 
 - Python 3.9+
-- Node.js 18+
+- Node.js 20
 - PostgreSQL 15+ (or a Supabase project)
-- OpenAI API key
+- OpenAI API key (optional; deterministic fallbacks are built in)
 
 ### Backend
 
@@ -68,11 +70,11 @@ pip install -r requirements.txt
 # Create .env file — see docs/SETUP.md for all variables
 cp .env.example .env        # then fill in values
 
-# Run database migrations
-python scripts/run_migration.py
+# Initialize a fresh database. For an existing installation, use --reconcile.
+python scripts/run_migration.py --schema
 
 # Start server (development)
-python app.py
+python run.py
 ```
 
 Server runs at `http://localhost:5000`
@@ -85,8 +87,8 @@ cd frontend
 # Install dependencies
 npm install
 
-# Create .env.local — minimum required:
-# VITE_API_BASE_URL=http://localhost:5000
+# Create .env.local from the public frontend template
+cp .env.example .env.local
 npm run dev
 ```
 
@@ -102,6 +104,7 @@ All documentation lives in `docs/`. Start with the index:
 |----------|----------------|
 | [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) | Full doc index + quick API reference |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flows, module responsibilities |
+| [docs/BACKEND_FLOW_MAP.md](docs/BACKEND_FLOW_MAP.md) | End-to-end request, database, lifecycle, and failure-boundary map |
 | [docs/BACKEND_FILE_REFERENCE.md](docs/BACKEND_FILE_REFERENCE.md) | Every backend Python file and its functions |
 | [docs/DATABASE.md](docs/DATABASE.md) | All tables, relationships, indexes |
 | [docs/API.md](docs/API.md) | Complete REST API reference with examples |
@@ -112,62 +115,20 @@ All documentation lives in `docs/`. Start with the index:
 
 ---
 
-## Current Development Status
+## Refactoring and Hardening Status
 
-### What's Working (on `main`)
-- Full candidate application flow
-- AI resume analysis and job matching
-- Assessment engine (MCQ, coding, psychometric)
-- Live proctoring with WebRTC
-- Role-based access for all 5 roles
-- Email automation (Resend + SMTP fallback)
-- Admin dashboard with analytics
+The whole-project cleanup is complete on the current review branch:
 
-### Active Refactoring (on `dev`)
-The codebase is being restructured to make it maintainable long-term.
-See the [refactoring plan](#refactoring-plan) below.
+- Database access is split into focused user, candidate, assessment, proctoring, and email modules.
+- Admin and interviewee routes are composed from smaller domain blueprints.
+- The PostgreSQL schema, dated reconciliation migration, and application field usage share one canonical contract.
+- Assessment scheduling, scoring, completion, and final decisions use transaction and concurrency guards.
+- Resume/archive/question ingestion is bounded and validates real file/container structure.
+- JWT role changes, assessment capability tokens, private uploads, and proctor evidence are protected end to end.
+- Frontend lint, dead-code analysis, dependency audit, and production build are part of `npm run check`.
+- The backend regression suite covers route contracts, transactions, provider fallbacks, and security boundaries.
 
----
-
-## Refactoring Plan
-
-The project has several large files that are hard to maintain. We are splitting them into focused modules, one phase at a time. All changes go to `dev` branch first.
-
-### Phase 1 — Backend DB split (done)
-
-`backend/db_helpers.py` was 1,820 lines containing every database query for every domain. It has been split into:
-
-| Module | Responsibility |
-|--------|---------------|
-| `backend/user_db.py` | User auth queries |
-| `backend/candidate_db.py` | Candidate CRUD |
-| `backend/assessment_db.py` | Assessments, responses, scoring, scheduling, token access |
-| `backend/proctoring_db.py` | Violation recording and event logging |
-| `backend/email_db.py` | Email log reads/writes |
-
-`db_helpers.py` is now a thin re-export hub — all existing imports in other files continue to work unchanged.
-
-### Phase 2 — Backend route split (upcoming)
-
-| File | Lines | Plan |
-|------|-------|------|
-| `admin_routes.py` | 1,815 | Split into `routes/admin_users.py`, `routes/admin_jobs.py`, `routes/admin_analytics.py` |
-| `interviewee_routes.py` | 1,217 | Split by assessment section |
-| `app.py` | 1,081 | Extract resume endpoints into their own blueprint |
-
-### Phase 3 — Frontend component split (upcoming)
-
-| File | Lines | Plan |
-|------|-------|------|
-| `AdminDashboardPage.jsx` | 2,602 | Extract 6 tab-level sub-components |
-| `AssessmentPage.jsx` | 1,654 | Extract `MCQSection`, `CodingSection`, `PsychometricSection` |
-| `InterviewerDashboardPage.jsx` | 1,025 | Extract modal and list components |
-
-### Phase 4 — Tests and CI (upcoming)
-
-- Backend: `pytest` fixtures for every route file
-- Frontend: Vitest for critical components
-- GitHub Actions: lint → test → build pipeline
+Live PostgreSQL, email, AI-provider, Piston, and WebRTC checks still require valid external services; readiness remains 503 when PostgreSQL is unavailable.
 
 ---
 
@@ -182,6 +143,24 @@ PRs from `dev` → `main` are reviewed before merging.
 
 ---
 
+## Quality Checks
+
+```bash
+# Frontend: lint, dead-code analysis, and production build
+cd frontend
+npm run check
+npm audit
+
+# Backend: tests, static checks, and syntax compilation
+cd ../backend
+pip install -r requirements-dev.txt
+pytest
+ruff check .
+python -m compileall -q .
+```
+
+---
+
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License.

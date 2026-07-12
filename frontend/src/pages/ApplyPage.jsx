@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Upload, CheckCircle, Loader2, FileText, Briefcase, MapPin, Clock, AlertCircle } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
 import Logo from '../components/Logo';
@@ -351,7 +350,7 @@ const ApplyPage = () => {
 
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-blue-800">
-                  <strong>Privacy Notice:</strong> We extract your contact details directly from the resume. Your data is encrypted and never shared with third parties.
+                  <strong>Privacy Notice:</strong> We process your resume to extract contact details and evaluate your application. Resume content may be processed by the configured AI provider.
                 </p>
               </div>
 

@@ -237,6 +237,9 @@ backend/uploads/*
 # IDE
 .vscode/
 .idea/
+.claude/settings.local.json
+.claude/worktrees/
+.codebase-memory/
 *.swp
 
 # Windows

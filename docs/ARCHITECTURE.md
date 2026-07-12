@@ -91,8 +91,8 @@ application.
 | `interviewee_routes.py` | Candidate assessment API — token access, answer submission, scoring |
 | `proctor_routes.py` | Proctoring API — session monitoring, violation tracking |
 | `job_routes.py` | Job postings, sectors, AI candidate-job matching, audit logs |
-| `db_config.py` | PostgreSQL connection pool management |
-| `db_helpers.py` | Data access layer with LRU caching |
+| `db_config.py` | PostgreSQL connection management and query compatibility |
+| `user_db.py`, `candidate_db.py`, `assessment_db.py`, `proctoring_db.py`, `email_db.py` | Domain-specific data access |
 | `resume_parser.py` | PDF/DOCX text extraction and basic skill matching |
 | `resume_analyzer.py` | AI-powered resume evaluation (pros/cons, recommendations) |
 | `job_matcher.py` | Rule-based + AI candidate-job matching |

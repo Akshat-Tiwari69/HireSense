@@ -1,7 +1,14 @@
 -- ============================================================================
--- HireSense Database Schema (PostgreSQL / Supabase)
--- Last verified against live database: 2026-02-21
--- This is the single source-of-truth schema file.
+-- HireSense canonical database schema (PostgreSQL / Supabase)
+--
+-- This file defines the schema for a fresh installation and is safe to run more
+-- than once. Existing installations must run migrations in database/migrations;
+-- 20260713_reconcile_canonical_schema.sql upgrades all known legacy variants.
+--
+-- Canonical names used by the application:
+--   job_descriptions.created_by   (not created_by_id)
+--   candidates.best_match_job_id  (not candidates.job_id)
+--   audit_log                     (not admin_audit_log)
 -- ============================================================================
 
 -- ============================================================================
@@ -58,6 +65,8 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_email_lower_unique
+    ON candidates(LOWER(email));
 CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(shortlist_status);
 CREATE INDEX IF NOT EXISTS idx_candidates_best_job ON candidates(best_match_job_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_sector ON candidates(sector_id);
@@ -82,17 +91,31 @@ CREATE TABLE IF NOT EXISTS job_descriptions (
     experience_level TEXT DEFAULT 'mid',    -- 'junior', 'mid', 'senior', 'lead', 'principal'
     closes_at TIMESTAMP,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    max_experience INTEGER
+    max_experience INTEGER,
+    role_complexity_level TEXT DEFAULT 'intermediate'
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_descriptions_sector ON job_descriptions(sector_id);
 CREATE INDEX IF NOT EXISTS idx_job_descriptions_status ON job_descriptions(status);
 CREATE INDEX IF NOT EXISTS idx_job_descriptions_level ON job_descriptions(experience_level);
+CREATE INDEX IF NOT EXISTS idx_job_descriptions_created_by ON job_descriptions(created_by);
 
 -- Add candidates FK to job_descriptions (after both tables exist)
-ALTER TABLE candidates
-    ADD CONSTRAINT candidates_best_match_job_id_fkey
-    FOREIGN KEY (best_match_job_id) REFERENCES job_descriptions(id) ON DELETE SET NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'candidates'::regclass
+          AND conname = 'candidates_best_match_job_id_fkey'
+    ) THEN
+        ALTER TABLE candidates
+            ADD CONSTRAINT candidates_best_match_job_id_fkey
+            FOREIGN KEY (best_match_job_id)
+            REFERENCES job_descriptions(id) ON DELETE SET NULL;
+    END IF;
+END
+$$;
 
 -- Questions: Static question bank (legacy)
 CREATE TABLE IF NOT EXISTS questions (
@@ -128,6 +151,8 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
     stream_ended_at TIMESTAMP,
     is_technical_role BOOLEAN DEFAULT true, -- If false, no coding questions
     questions_data JSONB,                   -- Pre-generated questions at schedule time
+    job_id INTEGER REFERENCES job_descriptions(id) ON DELETE SET NULL,
+    proctor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
     FOREIGN KEY (interviewer_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -135,6 +160,8 @@ CREATE TABLE IF NOT EXISTS scheduled_assessments (
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_candidate ON scheduled_assessments(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_time ON scheduled_assessments(scheduled_time);
 CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_token ON scheduled_assessments(access_token);
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_job ON scheduled_assessments(job_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_assessments_proctor ON scheduled_assessments(proctor_id);
 
 -- Assessments: Track each candidate's test
 CREATE TABLE IF NOT EXISTS assessments (
@@ -161,15 +188,39 @@ CREATE TABLE IF NOT EXISTS assessments (
 
 CREATE INDEX IF NOT EXISTS idx_assessments_candidate ON assessments(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_assessments_status ON assessments(status);
+CREATE INDEX IF NOT EXISTS idx_assessments_job ON assessments(job_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_assessments_scheduled_unique
+    ON assessments(scheduled_assessment_id)
+    WHERE scheduled_assessment_id IS NOT NULL;
 
 -- Add circular FKs after both tables exist
-ALTER TABLE scheduled_assessments
-    ADD CONSTRAINT fk_sched_assessment
-    FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE SET NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'scheduled_assessments'::regclass
+          AND conname = 'fk_sched_assessment'
+    ) THEN
+        ALTER TABLE scheduled_assessments
+            ADD CONSTRAINT fk_sched_assessment
+            FOREIGN KEY (assessment_id)
+            REFERENCES assessments(id) ON DELETE SET NULL;
+    END IF;
 
-ALTER TABLE assessments
-    ADD CONSTRAINT fk_assessment_scheduled
-    FOREIGN KEY (scheduled_assessment_id) REFERENCES scheduled_assessments(id) ON DELETE SET NULL;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'assessments'::regclass
+          AND conname = 'fk_assessment_scheduled'
+    ) THEN
+        ALTER TABLE assessments
+            ADD CONSTRAINT fk_assessment_scheduled
+            FOREIGN KEY (scheduled_assessment_id)
+            REFERENCES scheduled_assessments(id) ON DELETE SET NULL;
+    END IF;
+END
+$$;
 
 
 -- ============================================================================
@@ -189,6 +240,8 @@ CREATE TABLE IF NOT EXISTS mcq_responses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcq_assessment ON mcq_responses(assessment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcq_assessment_question_unique
+    ON mcq_responses(assessment_id, question_id);
 
 -- Coding Submissions
 CREATE TABLE IF NOT EXISTS coding_submissions (
@@ -206,6 +259,8 @@ CREATE TABLE IF NOT EXISTS coding_submissions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_coding_assessment ON coding_submissions(assessment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_coding_assessment_problem_unique
+    ON coding_submissions(assessment_id, problem_id);
 
 -- Psychometric Responses
 CREATE TABLE IF NOT EXISTS psychometric_responses (
@@ -220,6 +275,8 @@ CREATE TABLE IF NOT EXISTS psychometric_responses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_psychometric_assessment ON psychometric_responses(assessment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_psychometric_assessment_question_unique
+    ON psychometric_responses(assessment_id, question_id);
 
 
 -- ============================================================================
@@ -234,10 +291,12 @@ CREATE TABLE IF NOT EXISTS proctoring_events (
     severity TEXT NOT NULL,                 -- 'low', 'medium', 'high'
     details TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_reviewed BOOLEAN NOT NULL DEFAULT false,
     FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_proctoring_assessment ON proctoring_events(assessment_id);
+CREATE INDEX IF NOT EXISTS idx_proctoring_events_reviewed ON proctoring_events(is_reviewed);
 
 -- Proctoring Violations (active violation tracking)
 CREATE TABLE IF NOT EXISTS proctoring_violations (

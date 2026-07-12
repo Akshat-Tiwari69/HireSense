@@ -1,85 +1,225 @@
-"""Run the job postings / sectors / RBAC migration."""
+"""Apply the canonical HireSense schema or reconcile an existing database."""
+
+from __future__ import annotations
+
+import argparse
 import os
-import sys
+import re
+from pathlib import Path
+
 import psycopg2
+from dotenv import load_dotenv
 
-db_url = os.environ.get("DATABASE_URL", "")
-if not db_url:
-    print("ERROR: DATABASE_URL not set")
-    sys.exit(1)
 
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+SQL_ARTIFACTS = {
+    "schema": REPOSITORY_ROOT / "database" / "schema_postgres.sql",
+    "reconcile": (
+        REPOSITORY_ROOT
+        / "database"
+        / "migrations"
+        / "20260713_reconcile_canonical_schema.sql"
+    ),
+}
+CORE_TABLES = {
+    "assessments",
+    "candidates",
+    "job_descriptions",
+    "scheduled_assessments",
+    "users",
+}
+REQUIRED_COLUMNS = {
+    ("candidates", "best_match_job_id"),
+    ("job_descriptions", "created_by"),
+    ("job_descriptions", "role_complexity_level"),
+    ("proctoring_events", "is_reviewed"),
+    ("scheduled_assessments", "job_id"),
+    ("scheduled_assessments", "proctor_id"),
+}
 
-migration_path = os.path.join(
-    os.path.dirname(__file__), "..", "..", "database", "migrations",
-    "add_job_postings_sectors_rbac.sql"
-)
 
-with open(migration_path, "r") as f:
-    sql = f.read()
-
-print("Connecting to database...")
-conn = psycopg2.connect(db_url)
-conn.autocommit = False
-cur = conn.cursor()
-
-try:
-    print("Running migration...")
-    cur.execute(sql)
-    conn.commit()
-    print("Migration completed successfully!")
-
-    # Verify new tables
-    cur.execute(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = 'public' "
-        "AND table_name IN ('sectors','candidate_job_matches','audit_log','sector_email_configs') "
-        "ORDER BY table_name"
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Initialize a fresh HireSense PostgreSQL database or reconcile a "
+            "legacy installation with the canonical schema."
+        )
     )
-    tables = [r[0] for r in cur.fetchall()]
-    print(f"Verified new tables: {tables}")
-
-    # Check sectors seeded
-    cur.execute("SELECT COUNT(*) FROM sectors")
-    count = cur.fetchone()[0]
-    print(f"Sectors seeded: {count}")
-
-    # Verify new columns on job_descriptions
-    cur.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'job_descriptions' "
-        "AND column_name IN ('sector_id','status','preferred_skills','salary_range',"
-        "'employment_type','experience_level','closes_at','created_by','max_experience') "
-        "ORDER BY column_name"
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
+        "--schema",
+        dest="mode",
+        action="store_const",
+        const="schema",
+        help="initialize a fresh, empty database with database/schema_postgres.sql",
     )
-    cols = [r[0] for r in cur.fetchall()]
-    print(f"New job_descriptions columns: {cols}")
-
-    # Verify new columns on users
-    cur.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'users' "
-        "AND column_name IN ('sector_id','permissions') "
-        "ORDER BY column_name"
+    mode.add_argument(
+        "--reconcile",
+        dest="mode",
+        action="store_const",
+        const="reconcile",
+        help=(
+            "upgrade an existing installation with the dated canonical "
+            "reconciliation migration"
+        ),
     )
-    ucols = [r[0] for r in cur.fetchall()]
-    print(f"New users columns: {ucols}")
+    return parser
 
-    # Verify new columns on candidates
-    cur.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'candidates' "
-        "AND column_name IN ('parsed_skills_json','best_match_job_id','sector_id') "
-        "ORDER BY column_name"
+
+def _load_environment() -> None:
+    """Load local development configuration without overriding process values."""
+    local_env = BACKEND_ROOT / "local.env"
+    env_file = local_env if local_env.exists() else BACKEND_ROOT / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
+
+
+def _database_url() -> str:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql://", 1)
+    return database_url
+
+
+def _strip_outer_transaction(sql: str) -> str:
+    """Remove the reconciliation file's outer transaction wrapper.
+
+    The runner owns the transaction so it can perform preflight checks, apply the
+    SQL, verify the result, and roll everything back together on failure.
+    """
+    without_begin, begin_count = re.subn(
+        r"(?im)^\s*BEGIN;\s*", "", sql, count=1
     )
-    ccols = [r[0] for r in cur.fetchall()]
-    print(f"New candidates columns: {ccols}")
+    without_commit, commit_count = re.subn(
+        r"(?im)\s*COMMIT;\s*$", "", without_begin, count=1
+    )
+    if begin_count != 1 or commit_count != 1:
+        raise ValueError("reconciliation SQL must have one outer BEGIN/COMMIT pair")
+    return without_commit
 
-except Exception as e:
-    conn.rollback()
-    print(f"Migration FAILED: {e}")
-    sys.exit(1)
-finally:
-    cur.close()
-    conn.close()
+
+def _existing_core_tables(cursor) -> set[str]:
+    cursor.execute(
+        """
+        SELECT table_name
+          FROM information_schema.tables
+         WHERE table_schema = 'public'
+           AND table_name = ANY(%s)
+        """,
+        (sorted(CORE_TABLES),),
+    )
+    return {row[0] for row in cursor.fetchall()}
+
+
+def _preflight(cursor, mode: str) -> None:
+    existing = _existing_core_tables(cursor)
+    if mode == "schema" and existing:
+        names = ", ".join(sorted(existing))
+        raise RuntimeError(
+            "fresh-schema mode refused because HireSense tables already exist "
+            f"({names}); use --reconcile for an existing database"
+        )
+    if mode == "reconcile":
+        missing = CORE_TABLES - existing
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise RuntimeError(
+                "reconciliation requires an existing HireSense installation; "
+                f"missing core tables: {names}"
+            )
+
+
+def _verify(cursor) -> None:
+    cursor.execute("SELECT to_regclass('public.audit_log')")
+    if cursor.fetchone()[0] is None:
+        raise RuntimeError("verification failed: public.audit_log is missing")
+
+    missing_columns: list[str] = []
+    for table_name, column_name in sorted(REQUIRED_COLUMNS):
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND table_name = %s
+                   AND column_name = %s
+            )
+            """,
+            (table_name, column_name),
+        )
+        if not cursor.fetchone()[0]:
+            missing_columns.append(f"{table_name}.{column_name}")
+
+    if missing_columns:
+        raise RuntimeError(
+            "verification failed; missing canonical columns: "
+            + ", ".join(missing_columns)
+        )
+
+
+def _safe_database_error(exc: psycopg2.Error) -> str:
+    primary = getattr(getattr(exc, "diag", None), "message_primary", None)
+    return primary or exc.__class__.__name__
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    _load_environment()
+    database_url = _database_url()
+    if not database_url:
+        print("DATABASE_URL is not set; configure backend/.env or the process environment.")
+        return 2
+
+    sql_path = SQL_ARTIFACTS[args.mode]
+    if not sql_path.is_file():
+        print(f"Canonical SQL artifact is missing: {sql_path}")
+        return 2
+
+    try:
+        sql = sql_path.read_text(encoding="utf-8")
+        if args.mode == "reconcile":
+            sql = _strip_outer_transaction(sql)
+    except (OSError, UnicodeError, ValueError) as exc:
+        print(f"Unable to load canonical SQL: {exc}")
+        return 2
+
+    connection = None
+    try:
+        print(f"Applying {sql_path.relative_to(REPOSITORY_ROOT)} ...")
+        connection = psycopg2.connect(
+            database_url,
+            application_name="hiresense-migration",
+            connect_timeout=10,
+        )
+        connection.autocommit = False
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                ("hiresense-schema-migration",),
+            )
+            _preflight(cursor, args.mode)
+            cursor.execute(sql)
+            _verify(cursor)
+        connection.commit()
+    except psycopg2.Error as exc:
+        if connection is not None:
+            connection.rollback()
+        print(f"Migration failed: {_safe_database_error(exc)}")
+        return 1
+    except (OSError, RuntimeError, ValueError) as exc:
+        if connection is not None:
+            connection.rollback()
+        print(f"Migration failed: {exc}")
+        return 1
+    finally:
+        if connection is not None:
+            connection.close()
+
+    print("Migration completed and canonical schema checks passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

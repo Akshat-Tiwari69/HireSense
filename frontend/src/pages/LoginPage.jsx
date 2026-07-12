@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -53,7 +53,7 @@ const LoginPage = () => {
       toast({ title: 'Login successful', description: 'Welcome back!' });
 
       // Redirect based on role
-      if (userRole === 'admin') {
+      if (userRole === 'admin' || userRole === 'super_admin') {
         navigate('/admin');
       } else if (userRole === 'proctor') {
         navigate('/proctor');

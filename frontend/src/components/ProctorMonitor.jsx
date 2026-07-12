@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import SimplePeer from 'simple-peer';
 import { X, Wifi, WifiOff, Video, Loader2 } from 'lucide-react';
@@ -14,6 +14,7 @@ const ProctorMonitor = ({ assessmentId, onClose }) => {
     const socketRef = useRef(null);
     const peerRef = useRef(null);
     const videoRef = useRef(null);
+    const handleOfferRef = useRef(null);
 
     useEffect(() => {
         // Connect to Socket.IO server using dynamic API URL
@@ -41,7 +42,7 @@ const ProctorMonitor = ({ assessmentId, onClose }) => {
             setCandidatePresent(data.candidate_present);
         });
 
-        socket.on('candidate_joined', (data) => {
+        socket.on('candidate_joined', () => {
             console.log('[PROCTOR] Candidate joined');
             setCandidatePresent(true);
             setError(null); // Clear any previous errors
@@ -49,7 +50,7 @@ const ProctorMonitor = ({ assessmentId, onClose }) => {
 
         socket.on('webrtc_offer', (data) => {
             console.log('[PROCTOR] Received WebRTC offer');
-            handleOffer(data.offer);
+            handleOfferRef.current?.(data.offer);
         });
 
         socket.on('ice_candidate', (data) => {
@@ -135,6 +136,8 @@ const ProctorMonitor = ({ assessmentId, onClose }) => {
 
         peer.signal(offer);
     };
+
+    handleOfferRef.current = handleOffer;
 
     return (
         <div className="proctor-monitor-overlay">

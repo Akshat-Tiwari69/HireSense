@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowRight, CheckCircle, Shield, Zap, Target,
-  Brain, Users, TrendingUp, Clock, Award, X, BarChart3, Star, LogIn,
+  ArrowRight, CheckCircle, Shield,
+  Users, TrendingUp, Clock, Award, BarChart3, Star, LogIn,
   Menu, X as XIcon, Sparkles, Briefcase
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/card";
+import { Card } from "../components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import Logo from '../components/Logo';
 
@@ -44,6 +44,9 @@ const LandingPage = () => {
           <button 
             className="sm:hidden p-2 hover:bg-indigo-50 rounded-lg transition-colors"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-navigation"
           >
             {mobileMenuOpen ? (
               <XIcon className="w-6 h-6 text-slate-900" />
@@ -55,7 +58,7 @@ const LandingPage = () => {
         
         {/* Mobile Menu */}
         {mobileMenuOpen && (
-          <div className="sm:hidden border-t bg-white animate-in fade-in slide-in-from-top-2 duration-300">
+          <div id="mobile-navigation" className="sm:hidden border-t bg-white animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="px-4 py-4 flex flex-col gap-3">
               <Button
                 size="sm"
@@ -173,8 +176,8 @@ const LandingPage = () => {
                 <Shield className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
               </div>
               <div>
-                <h3 className="font-semibold text-slate-900 mb-1 sm:mb-2 text-sm sm:text-base">Secure & GDPR-Ready</h3>
-                <p className="text-slate-600 text-xs sm:text-sm">Enterprise-grade security with full compliance</p>
+                <h3 className="font-semibold text-slate-900 mb-1 sm:mb-2 text-sm sm:text-base">Secure by Design</h3>
+                <p className="text-slate-600 text-xs sm:text-sm">Role-based access, bounded uploads, and protected candidate data</p>
               </div>
             </div>
           </Card>
@@ -186,20 +189,20 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
             <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-2">85%</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Faster Hiring</div>
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">End-to-End</div>
+              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Hiring Workflow</div>
             </div>
             <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-2">3x</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Better Matches</div>
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Server-Side</div>
+              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Assessment Scoring</div>
             </div>
             <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-2">50k+</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Candidates Assessed</div>
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Role-Based</div>
+              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Access Control</div>
             </div>
             <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-2">98%</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Client Satisfaction</div>
+              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Traceable</div>
+              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Audit Records</div>
             </div>
           </div>
         </div>
@@ -254,7 +257,7 @@ const LandingPage = () => {
                 <Clock className="w-6 h-6 text-indigo-600" />
               </div>
             </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Save 85% Time</h3>
+            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Streamlined Review</h3>
             <p className="text-slate-600 text-sm sm:text-base">Automate resume screening and initial assessments</p>
           </Card>
 
@@ -304,8 +307,8 @@ const LandingPage = () => {
                 <Shield className="w-6 h-6 text-rose-600" />
               </div>
             </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Enterprise Security</h3>
-            <p className="text-slate-600 text-sm sm:text-base">SOC 2 Type II certified with end-to-end encryption</p>
+            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Layered Security</h3>
+            <p className="text-slate-600 text-sm sm:text-base">JWT-based access controls, audit logging, and strict input validation</p>
           </Card>
         </div>
       </section>
@@ -314,7 +317,7 @@ const LandingPage = () => {
       <section className="bg-gradient-to-r from-indigo-600 via-indigo-600 to-blue-600 py-12 sm:py-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-4 sm:mb-6">Ready to Transform Your Hiring?</h2>
-          <p className="text-lg sm:text-xl text-indigo-100 mb-8 sm:mb-10 max-w-2xl mx-auto">Join hundreds of companies making smarter hiring decisions with AI</p>
+          <p className="text-lg sm:text-xl text-indigo-100 mb-8 sm:mb-10 max-w-2xl mx-auto">Use one structured workflow for screening, assessment, proctoring, and hiring decisions</p>
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-4 sm:px-0">
             <Button
               size="lg"

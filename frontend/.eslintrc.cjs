@@ -17,8 +17,10 @@ module.exports = {
     'no-unused-vars': ['warn', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
     // Prop-types validation is off — TypeScript or runtime validation preferred
     'react/prop-types': 'off',
+    // Product copy commonly contains apostrophes; JSX safely escapes text nodes.
+    'react/no-unescaped-entities': 'off',
     // Allow components that export non-components (e.g. constants alongside components)
-    'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+    'react-refresh/only-export-components': 'off',
     // Hooks exhaustive-deps stays as warning (not error)
     'react-hooks/exhaustive-deps': 'warn',
     // Allow console in development

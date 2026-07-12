@@ -34,5 +34,5 @@ def add_security_headers(app):
         
         return response
     
-    print("[OK] Security headers initialized")
+    app.logger.info("[SECURITY] Response security headers initialized")
     return app

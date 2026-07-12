@@ -3,11 +3,9 @@ Authentication Module
 Handles user registration, login, and JWT token management
 """
 
-from flask import Blueprint, request, jsonify, make_response
+from flask import Blueprint, request, jsonify
 from flask_jwt_extended import (
     create_access_token,
-    set_access_cookies,
-    unset_jwt_cookies,
     jwt_required,
     get_jwt_identity,
     get_jwt
@@ -17,8 +15,13 @@ import logging
 import time
 from functools import lru_cache
 from werkzeug.security import generate_password_hash, check_password_hash
-from db_helpers import create_user, get_user_by_email, get_user_by_id
-from db_config import return_connection
+from user_db import (
+    DuplicateEmailError,
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    user_auth_version,
+)
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -93,7 +96,13 @@ def register():
         logger.info("="*80)
         
         # Get request data
-        data = request.get_json()
+        data = request.get_json(silent=True)
+
+        if not isinstance(data, dict):
+            return jsonify({
+                'status': 'error',
+                'message': 'A JSON object is required'
+            }), 400
         
         # Validate required fields
         required_fields = ['email', 'password', 'role', 'name']
@@ -105,10 +114,22 @@ def register():
                     'message': f'Missing required field: {field}'
                 }), 400
         
+        if not all(isinstance(data[field], str) for field in required_fields):
+            return jsonify({
+                'status': 'error',
+                'message': 'Email, password, role, and name must be strings'
+            }), 400
+
         email = data['email'].strip().lower()
         password = data['password']
         role = data['role'].strip().lower()
         name = data['name'].strip()
+
+        if len(email) > 254 or len(password) > 128 or len(name) > 120:
+            return jsonify({
+                'status': 'error',
+                'message': 'One or more fields exceed the maximum allowed length'
+            }), 400
         
         logger.info(f"[REG] Attempt - Email: {email}, Role: {role}, Name: {name}")
         
@@ -166,7 +187,7 @@ def register():
         password_hash = hash_password(password)
         
         # Create user
-        logger.info(f"[DB] Creating user in database...")
+        logger.info("[DB] Creating user in database...")
         user_id = create_user(email, password_hash, role, name)
         
         logger.info(f"[OK] User registered - ID: {user_id}")
@@ -183,6 +204,11 @@ def register():
             }
         }), 201
     
+    except DuplicateEmailError:
+        return jsonify({
+            'status': 'error',
+            'message': 'User with this email already exists'
+        }), 409
     except Exception:
         logger.exception("[ERROR] Registration error")
         return jsonify({
@@ -214,23 +240,34 @@ def login():
         logger.info("="*80)
         
         # Get request data
-        data = request.get_json()
+        data = request.get_json(silent=True)
         
         # Validate required fields
-        if not data or 'email' not in data or 'password' not in data:
+        if not isinstance(data, dict) or 'email' not in data or 'password' not in data:
             logger.error("[ERROR] Missing email or password")
             return jsonify({
                 'status': 'error',
                 'message': 'Email and password are required'
             }), 400
         
+        if not isinstance(data['email'], str) or not isinstance(data['password'], str):
+            return jsonify({
+                'status': 'error',
+                'message': 'Email and password must be strings'
+            }), 400
+
         email = data['email'].strip().lower()
         password = data['password']
+        if not email or not password or len(email) > 254 or len(password) > 128:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid email or password'
+            }), 400
         
         logger.info(f"[LOGIN] Attempt: {email}")
         
-        # Get user from database (benefits from LRU cache in db_helpers)
-        logger.info(f"[DB] Looking up user...")
+        # Get user from the user-domain data module.
+        logger.info("[DB] Looking up user...")
         user_lookup_start = time.perf_counter()
         user = get_user_by_email(email)
         logger.info("[DB] Lookup done in %.3fs (found=%s)", time.perf_counter() - user_lookup_start, bool(user))
@@ -265,7 +302,8 @@ def login():
         additional_claims = {
             'role': user['role'],
             'name': user['name'],
-            'sector_id': user.get('sector_id')
+            'sector_id': user.get('sector_id'),
+            'user_auth_version': user_auth_version(user),
         }
         
         access_token = create_access_token(
@@ -273,11 +311,11 @@ def login():
             additional_claims=additional_claims
         )
         
-        logger.info(f"[OK] JWT token created successfully")
+        logger.info("[OK] JWT token created successfully")
         logger.info(f"[SUCCESS] LOGIN SUCCESSFUL - User: {email}, Role: {user['role']}")
         logger.info("="*80)
         
-        response = make_response(jsonify({
+        return jsonify({
             'status': 'success',
             'message': 'Login successful',
             'data': {
@@ -290,11 +328,7 @@ def login():
                     'sector_id': user.get('sector_id')
                 }
             }
-        }), 200)
-        # Set HttpOnly cookie so the browser sends the token automatically.
-        # The token is also returned in the body so localStorage-based clients keep working.
-        set_access_cookies(response, access_token)
-        return response
+        }), 200
 
     except Exception:
         logger.exception("[ERROR] Login failed")
@@ -306,10 +340,8 @@ def login():
 
 @auth_bp.route('/logout', methods=['POST'])
 def logout():
-    """Clear the JWT cookie so browser sessions are properly terminated."""
-    response = make_response(jsonify({'status': 'success', 'message': 'Logged out'}), 200)
-    unset_jwt_cookies(response)
-    return response
+    """Acknowledge logout; bearer-token removal happens in the client."""
+    return jsonify({'status': 'success', 'message': 'Logged out'}), 200
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -331,9 +363,6 @@ def get_current_user():
     try:
         # Get user ID from JWT
         user_id = get_jwt_identity()
-        
-        # Get additional claims
-        claims = get_jwt()
         
         # Get user from database
         user = get_user_by_id(user_id)

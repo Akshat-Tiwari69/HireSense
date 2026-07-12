@@ -41,24 +41,28 @@ backend/
 
 **Procfile:**
 ```
-web: gunicorn app:app
+web: gunicorn --worker-class eventlet --workers 1 app:app_with_socketio --bind 0.0.0.0:$PORT --timeout 90
 ```
 
 **runtime.txt:**
 ```
-python-3.11.0
+python-3.11.9
 ```
 
 **nixpacks.toml:**
 ```toml
 [phases.setup]
-nixPkgs = ["python311"]
+nixPkgs = ["python311Full", "gcc", "postgresql"]
+nixLibs = ["postgresql"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+commands = [
+  "python -m ensurepip --upgrade || true",
+  "python -m pip install -r requirements.txt"
+]
 
 [start]
-cmd = "gunicorn app:app --bind 0.0.0.0:$PORT"
+cmd = "LD_LIBRARY_PATH=/nix/var/nix/profiles/default/lib:$LD_LIBRARY_PATH gunicorn --worker-class eventlet --workers 1 app:app_with_socketio --bind 0.0.0.0:$PORT --timeout 90"
 ```
 
 #### 2. Deploy to Railway
@@ -86,13 +90,29 @@ railway up
 In Railway dashboard, add:
 
 ```
-FLASK_ENV=production
+APP_ENV=production
+ALLOW_RUNTIME_ENV_MUTATION=false
 JWT_SECRET_KEY=your-production-secret-key
 DATABASE_URL=postgresql://... (auto-set by Railway)
 OPENAI_API_KEY=sk-your-openai-key
 RESEND_API_KEY=re_your-resend-key
 CORS_ORIGINS=https://your-frontend-domain.com
+UPLOAD_FOLDER=/data/uploads
 ```
+
+#### Persistent Upload Storage
+
+Resumes and proctoring screenshots contain private candidate data. The default
+`backend/uploads` directory is intended for local development only; ephemeral
+containers can erase it during a restart or redeploy. In production, set
+`UPLOAD_FOLDER` to a private persistent mounted volume (for example,
+`/data/uploads`) or replace local storage with a durable object-store adapter.
+
+Do not expose the upload root as a public/static directory. Restrict access,
+encrypt and back it up as appropriate, and define a retention/deletion policy
+that matches your hiring and privacy requirements. If an existing deployment
+already has uploads, copy them before changing `UPLOAD_FOLDER` because database
+records retain their stored file paths.
 
 ---
 
@@ -107,10 +127,12 @@ services:
     name: elite-hire-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn --worker-class eventlet --workers 1 app:app_with_socketio --bind 0.0.0.0:$PORT --timeout 90
     envVars:
-      - key: FLASK_ENV
+      - key: APP_ENV
         value: production
+      - key: ALLOW_RUNTIME_ENV_MUTATION
+        value: false
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
@@ -221,20 +243,28 @@ GRANT ALL PRIVILEGES ON DATABASE elite_hire_prod TO elite_hire_user;
 # Set DATABASE_URL
 export DATABASE_URL="postgresql://user:pass@host:5432/elite_hire_prod"
 
-# Apply schema
+# Initialize a fresh, empty database
 cd backend
-python scripts/run_migration.py
+python scripts/run_migration.py --schema
 
-# Or apply the SQL directly:
-psql $DATABASE_URL < database/schema_postgres.sql
+# For an existing HireSense database, use the reconciliation path instead:
+python scripts/run_migration.py --reconcile
+
+# Direct SQL alternative for a fresh database (run from repository root):
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/schema_postgres.sql
 ```
+
+The runner deliberately refuses fresh-schema mode when HireSense core tables
+already exist. Back up an existing database before reconciliation and review
+PostgreSQL warnings for historical duplicate data that may prevent optional
+unique indexes from being created.
 
 #### 3. Create Initial Admin
 
 ```python
 # seed_production.py
 import bcrypt
-from db_helpers import create_user
+from user_db import create_user
 
 password_hash = bcrypt.hashpw(
     'your-secure-admin-password'.encode('utf-8'),
@@ -257,7 +287,8 @@ create_user(
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `FLASK_ENV` | Flask environment | `production` |
+| `APP_ENV` | Application environment; use `production` for hosted deployments | `production` |
+| `ALLOW_RUNTIME_ENV_MUTATION` | Local admin `.env` editing opt-in; keep disabled in production | `false` |
 | `JWT_SECRET_KEY` | JWT signing key | `random-64-char-string` |
 | `DATABASE_URL` | PostgreSQL connection | `postgresql://user:pass@host/db` |
 | `OPENAI_API_KEY` | OpenAI API key | `sk-...` |
@@ -337,7 +368,7 @@ def health_check():
 import logging
 from logging.handlers import RotatingFileHandler
 
-if os.environ.get('FLASK_ENV') == 'production':
+if os.environ.get('APP_ENV') == 'production':
     handler = RotatingFileHandler(
         'logs/app.log',
         maxBytes=10000000,
@@ -361,7 +392,8 @@ if os.environ.get('FLASK_ENV') == 'production':
 
 ### Backend
 
-- [ ] `FLASK_ENV=production`
+- [ ] `APP_ENV=production`
+- [ ] `ALLOW_RUNTIME_ENV_MUTATION=false`
 - [ ] JWT_SECRET_KEY is secure (64+ chars)
 - [ ] DATABASE_URL configured
 - [ ] CORS_ORIGINS set to frontend domain
@@ -479,9 +511,9 @@ psql $DATABASE_URL < backup_20260125.sql
 
 ## Related Documentation
 
-- [ENVIRONMENT_CONFIG.md](ENVIRONMENT_CONFIG.md) - All environment variables
-- [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md) - System architecture
-- [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md) - Database structure
+- [SETUP.md](SETUP.md) - Setup and environment variables
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
+- [DATABASE.md](DATABASE.md) - Database structure and migration modes
 
 ---
 

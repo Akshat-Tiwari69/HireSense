@@ -4,109 +4,216 @@ Handles all email communications for the CYGNUSA Elite-Hire system
 Supports Resend API (recommended for cloud) and SMTP fallback
 """
 
-import os
-import smtplib
+import json
 import logging
-from email.mime.text import MIMEText
+import os
+import re
+import smtplib
+import socket
+import ssl
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
-from typing import Optional, Dict
-from db_helpers import log_email
+from email.mime.text import MIMEText
+from email.utils import formataddr, parseaddr
+from html import escape
+from typing import Dict, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
-# Try to import resend (optional dependency)
-try:
-    import resend
-    RESEND_AVAILABLE = True
-except ImportError:
-    RESEND_AVAILABLE = False
+from email_db import log_email
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
+RESEND_API_URL = "https://api.resend.com/emails"
+VALID_PROVIDERS = {"auto", "smtp", "resend"}
+EMAIL_PATTERN = re.compile(r"^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$")
+
+
+def _bounded_float(value: object, default: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(max(parsed, minimum), maximum)
+
+
+def _bounded_port(value: object, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if 1 <= parsed <= 65535 else default
+
 
 class EmailService:
-    """
-    Email service for sending notifications to candidates and interviewers
-    Uses Resend API (if configured) or falls back to SMTP
-    """
-    
+    """Send candidate notifications through a configured provider."""
+
     def __init__(
         self,
         smtp_host: Optional[str] = None,
         smtp_port: Optional[int] = None,
         smtp_user: Optional[str] = None,
         smtp_pass: Optional[str] = None,
-        use_tls: bool = True
+        use_tls: bool = True,
+        provider: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
     ):
-        """
-        Initialize email service with SMTP configuration
-        
-        Args:
-            smtp_host: SMTP server hostname (default: from env SMTP_HOST)
-            smtp_port: SMTP server port (default: from env SMTP_PORT or 587)
-            smtp_user: SMTP username/email (default: from env SMTP_USER)
-            smtp_pass: SMTP password (default: from env SMTP_PASS)
-            use_tls: Whether to use TLS encryption (default: True)
-        """
-        # Resend API configuration (preferred for cloud deployments)
-        self.resend_api_key = os.environ.get('RESEND_API_KEY')
-        self.resend_from_email = os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
-        
-        # SMTP configuration (fallback)
-        self.smtp_host = smtp_host or os.environ.get('SMTP_HOST', 'smtp.gmail.com')
-        self.smtp_port = smtp_port or int(os.environ.get('SMTP_PORT', 587))
-        self.smtp_user = smtp_user or os.environ.get('SMTP_USER')
-        self.smtp_pass = smtp_pass or os.environ.get('SMTP_PASS')
+        """Initialize provider configuration without opening network connections."""
+        configured_provider = (provider or os.environ.get("EMAIL_PROVIDER", "auto")).lower()
+        if configured_provider not in VALID_PROVIDERS:
+            logger.warning("Unknown EMAIL_PROVIDER; falling back to automatic selection")
+            configured_provider = "auto"
+        self.provider = configured_provider
+
+        self.timeout_seconds = _bounded_float(
+            timeout_seconds or os.environ.get("EMAIL_TIMEOUT_SECONDS"),
+            default=10.0,
+            minimum=1.0,
+            maximum=60.0,
+        )
+        self.resend_api_key = os.environ.get("RESEND_API_KEY")
+        self.resend_from_email = os.environ.get(
+            "RESEND_FROM_EMAIL", "onboarding@resend.dev"
+        )
+
+        self.smtp_host = smtp_host or os.environ.get("SMTP_HOST", "smtp.gmail.com")
+        configured_port = smtp_port or os.environ.get("SMTP_PORT", "587")
+        self.smtp_port = _bounded_port(configured_port, 587)
+        if str(self.smtp_port) != str(configured_port):
+            logger.warning("Invalid SMTP_PORT; using port 587")
+        self.smtp_ssl_port = _bounded_port(os.environ.get("SMTP_SSL_PORT", "465"), 465)
+        self.smtp_user = smtp_user or os.environ.get("SMTP_USER")
+        self.smtp_pass = smtp_pass or os.environ.get("SMTP_PASS")
         self.use_tls = use_tls
-        
-        # Sender information
-        self.sender_email = self.smtp_user
-        self.sender_name = os.environ.get('SMTP_SENDER_NAME', 'HireSense')
-        
-        # Configure Resend if available
-        if self.resend_api_key and RESEND_AVAILABLE:
-            resend.api_key = self.resend_api_key
-            print(f"[EMAIL] ✅ Resend API configured (from: {self.resend_from_email})", flush=True)
-        elif not self.smtp_user or not self.smtp_pass:
-            print("[EMAIL] ⚠️ No email service configured (set RESEND_API_KEY or SMTP_USER/SMTP_PASS)", flush=True)
-    
+        self.sender_email = os.environ.get("SMTP_SENDER_EMAIL") or self.smtp_user
+        self.sender_name = os.environ.get("SMTP_SENDER_NAME", "HireSense")
+        self._last_provider_error = "delivery failed"
+
+    @staticmethod
+    def _is_valid_email(value: object) -> bool:
+        if not isinstance(value, str):
+            return False
+        address = value.strip()
+        if not address or len(address) > 254 or "\r" in address or "\n" in address:
+            return False
+        display_name, parsed_address = parseaddr(address)
+        return not display_name and parsed_address == address and bool(EMAIL_PATTERN.fullmatch(address))
+
+    @staticmethod
+    def _safe_display_name(value: object) -> str:
+        name = str(value or "Candidate").replace("\r", " ").replace("\n", " ").strip()
+        return name[:200] or "Candidate"
+
+    @staticmethod
+    def _is_valid_http_url(value: object) -> bool:
+        if not isinstance(value, str) or len(value) > 2048:
+            return False
+        parsed = urlparse(value)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+    def _smtp_is_configured(self) -> bool:
+        return bool(
+            self.smtp_host
+            and self.smtp_user
+            and self.smtp_pass
+            and self._is_valid_email(self.sender_email)
+        )
+
+    def _resend_is_configured(self) -> bool:
+        return bool(self.resend_api_key and self._is_valid_email(self.resend_from_email))
+
+    def _provider_order(self) -> list[str]:
+        if self.provider == "smtp":
+            return ["smtp"] if self._smtp_is_configured() else []
+        if self.provider == "resend":
+            return ["resend"] if self._resend_is_configured() else []
+
+        providers = []
+        # Preserve the existing SMTP-first behavior in automatic mode.
+        if self._smtp_is_configured():
+            providers.append("smtp")
+        if self._resend_is_configured():
+            providers.append("resend")
+        return providers
+
+    def _safe_log_email(
+        self,
+        recipient_email: str,
+        recipient_name: str,
+        email_type: str,
+        subject: str,
+        status: str,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Persist one final outcome without changing the delivery result."""
+        try:
+            log_email(
+                recipient_email=recipient_email,
+                recipient_name=recipient_name,
+                email_type=email_type,
+                subject=subject,
+                status=status,
+                error_message=error_message,
+            )
+        except Exception as exc:
+            # Database failures must never trigger a duplicate provider send.
+            logger.error("Could not persist email outcome (%s)", type(exc).__name__)
+
     def _send_via_resend(
         self,
         recipient_email: str,
         recipient_name: str,
         subject: str,
         html_body: str,
-        email_type: str
+        email_type: str,
     ) -> bool:
-        """Send email via Resend API"""
-        try:
-            print(f"[EMAIL] Sending via Resend API to {recipient_email}...", flush=True)
-            
-            params = {
-                "from": f"{self.sender_name} <{self.resend_from_email}>",
+        """Send through Resend with a bounded HTTP timeout."""
+        del recipient_name, email_type
+        payload = json.dumps(
+            {
+                "from": formataddr(
+                    (self._safe_display_name(self.sender_name), self.resend_from_email)
+                ),
                 "to": [recipient_email],
                 "subject": subject,
                 "html": html_body,
             }
-            
-            response = resend.Emails.send(params)
-            print(f"[EMAIL] ✅ Resend success! ID: {response.get('id', 'unknown')}", flush=True)
-            
-            log_email(
-                recipient_email=recipient_email,
-                recipient_name=recipient_name,
-                email_type=email_type,
-                subject=subject,
-                status='sent',
-                error_message=None
-            )
+        ).encode("utf-8")
+        request = Request(
+            RESEND_API_URL,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {self.resend_api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "HireSense/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                response_body = response.read(65_536)
+                status_code = getattr(response, "status", None) or response.getcode()
+            if not 200 <= status_code < 300:
+                self._last_provider_error = f"Resend rejected request (HTTP {status_code})"
+                return False
+            result = json.loads(response_body or b"{}")
+            if not isinstance(result, dict) or not result.get("id"):
+                self._last_provider_error = "Resend returned an invalid response"
+                return False
             return True
-            
-        except Exception as e:
-            print(f"[EMAIL] ❌ Resend failed: {e}", flush=True)
-            log_email(recipient_email, recipient_name, email_type, subject, 'failed', str(e))
-            return False
-    
+        except HTTPError as exc:
+            self._last_provider_error = f"Resend rejected request (HTTP {exc.code})"
+        except (URLError, TimeoutError, socket.timeout):
+            self._last_provider_error = "Resend request timed out or was unreachable"
+        except (json.JSONDecodeError, ValueError, OSError):
+            self._last_provider_error = "Resend returned an invalid response"
+        except Exception as exc:
+            self._last_provider_error = "Resend delivery failed"
+            logger.warning("Unexpected Resend failure (%s)", type(exc).__name__)
+        return False
+
     def _send_email(
         self,
         recipient_email: str,
@@ -114,38 +221,80 @@ class EmailService:
         subject: str,
         html_body: str,
         text_body: Optional[str] = None,
-        email_type: str = "general"
+        email_type: str = "general",
     ) -> bool:
-        """
-        Internal method to send email via Resend API or SMTP
-        
-        Args:
-            recipient_email: Recipient's email address
-            recipient_name: Recipient's name
-            subject: Email subject line
-            html_body: HTML email body
-            text_body: Plain text fallback (optional)
-            email_type: Type of email for logging
-        
-        Returns:
-            bool: True if sent successfully, False otherwise
-        """
-        print(f"[EMAIL] Starting send: {email_type} to {recipient_email}", flush=True)
-        
-        # Try Gmail/SMTP FIRST (primary method)
-        if self.smtp_user and self.smtp_pass:
-            smtp_success = self._send_via_smtp(recipient_email, recipient_name, subject, html_body, text_body, email_type)
-            if smtp_success:
+        """Validate, send through configured providers, and log one outcome."""
+        recipient_email = str(recipient_email or "").strip()
+        recipient_name = self._safe_display_name(recipient_name)
+        validation_error = None
+        if not self._is_valid_email(recipient_email):
+            validation_error = "invalid recipient email"
+        elif not subject or len(subject) > 255 or "\r" in subject or "\n" in subject:
+            validation_error = "invalid email subject"
+        elif not isinstance(html_body, str) or not html_body.strip():
+            validation_error = "empty email body"
+
+        if validation_error:
+            self._safe_log_email(
+                recipient_email,
+                recipient_name,
+                email_type,
+                subject[:255] if isinstance(subject, str) else "",
+                "failed",
+                validation_error,
+            )
+            return False
+
+        providers = self._provider_order()
+        for provider_name in providers:
+            if provider_name == "smtp":
+                sent = self._send_via_smtp(
+                    recipient_email,
+                    recipient_name,
+                    subject,
+                    html_body,
+                    text_body,
+                    email_type,
+                )
+            else:
+                sent = self._send_via_resend(
+                    recipient_email,
+                    recipient_name,
+                    subject,
+                    html_body,
+                    email_type,
+                )
+            if sent:
+                self._safe_log_email(
+                    recipient_email, recipient_name, email_type, subject, "sent"
+                )
                 return True
-            print(f"[EMAIL] SMTP failed, trying Resend fallback...", flush=True)
-        
-        # Fall back to Resend API
-        if self.resend_api_key and RESEND_AVAILABLE:
-            return self._send_via_resend(recipient_email, recipient_name, subject, html_body, email_type)
-        
-        print(f"[EMAIL] ⚠️ No email service configured, skipping email to {recipient_email}", flush=True)
+
+        error_message = self._last_provider_error if providers else "no email provider configured"
+        self._safe_log_email(
+            recipient_email,
+            recipient_name,
+            email_type,
+            subject,
+            "failed",
+            error_message,
+        )
         return False
-    
+
+    def _deliver_smtp_message(self, message: MIMEMultipart, use_ssl: bool) -> None:
+        smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        port = self.smtp_ssl_port if use_ssl else self.smtp_port
+        kwargs = {"timeout": self.timeout_seconds}
+        if use_ssl:
+            kwargs["context"] = ssl.create_default_context()
+        with smtp_class(self.smtp_host, port, **kwargs) as server:
+            server.ehlo()
+            if self.use_tls and not use_ssl:
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+            server.login(self.smtp_user, self.smtp_pass)
+            server.send_message(message)
+
     def _send_via_smtp(
         self,
         recipient_email: str,
@@ -153,74 +302,54 @@ class EmailService:
         subject: str,
         html_body: str,
         text_body: Optional[str],
-        email_type: str
+        email_type: str,
     ) -> bool:
-        """Send email via SMTP (Gmail)"""
+        """Send through SMTP, falling back to SSL only for transport failures."""
+        del email_type
+        message = MIMEMultipart("alternative")
+        message["From"] = formataddr(
+            (self._safe_display_name(self.sender_name), self.sender_email)
+        )
+        message["To"] = formataddr((self._safe_display_name(recipient_name), recipient_email))
+        message["Subject"] = subject
+        if text_body:
+            message.attach(MIMEText(text_body, "plain", "utf-8"))
+        message.attach(MIMEText(html_body, "html", "utf-8"))
+
         try:
-            print(f"[EMAIL] SMTP config: {self.smtp_host}:{self.smtp_port}", flush=True)
-            
-            # Create message
-            message = MIMEMultipart('alternative')
-            message['From'] = f"{self.sender_name} <{self.sender_email}>"
-            message['To'] = f"{recipient_name} <{recipient_email}>"
-            message['Subject'] = subject
-            
-            # Add plain text version if provided
-            if text_body:
-                text_part = MIMEText(text_body, 'plain')
-                message.attach(text_part)
-            
-            # Add HTML version
-            html_part = MIMEText(html_body, 'html')
-            message.attach(html_part)
-            
-            print(f"[EMAIL] Connecting to SMTP...", flush=True)
-            
-            # Connect to SMTP server and send (with 10 second timeout)
-            try:
-                print(f"[EMAIL] Trying TLS on port {self.smtp_port}...", flush=True)
-                with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
-                    if self.use_tls:
-                        server.starttls()
-                    server.login(self.smtp_user, self.smtp_pass)
-                    server.send_message(message)
-                    print("[EMAIL] TLS send succeeded!", flush=True)
-            except Exception as e_tls:
-                print(f"[EMAIL] TLS failed: {e_tls}, trying SSL:465...", flush=True)
-                with smtplib.SMTP_SSL(self.smtp_host, 465, timeout=10) as server:
-                    server.login(self.smtp_user, self.smtp_pass)
-                    server.send_message(message)
-                    print("[EMAIL] SSL send succeeded!", flush=True)
-            
-            print(f"[EMAIL] ✅ Email sent successfully to {recipient_email}!", flush=True)
-            
-            log_email(
-                recipient_email=recipient_email,
-                recipient_name=recipient_name,
-                email_type=email_type,
-                subject=subject,
-                status='sent',
-                error_message=None
-            )
+            self._deliver_smtp_message(message, use_ssl=self.smtp_port == self.smtp_ssl_port)
             return True
-            
-        except smtplib.SMTPAuthenticationError as e:
-            error_msg = f"SMTP authentication failed: {str(e)}"
-            print(f"[EMAIL] ❌ {error_msg}", flush=True)
-            log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
+        except smtplib.SMTPAuthenticationError:
+            self._last_provider_error = "SMTP authentication failed"
             return False
-            
-        except smtplib.SMTPException as e:
-            error_msg = f"SMTP error: {str(e)}"
-            print(f"[EMAIL] ❌ {error_msg}", flush=True)
-            log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
+        except smtplib.SMTPRecipientsRefused:
+            self._last_provider_error = "SMTP recipient was rejected"
             return False
-            
-        except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
-            print(f"[EMAIL] ❌ {error_msg}", flush=True)
-            logger.exception(f"❌ {error_msg}")
-            log_email(recipient_email, recipient_name, email_type, subject, 'failed', error_msg)
+        except (smtplib.SMTPSenderRefused, smtplib.SMTPDataError):
+            self._last_provider_error = "SMTP sender or message was rejected"
+            return False
+        except (smtplib.SMTPException, OSError, TimeoutError, socket.timeout, ssl.SSLError) as exc:
+            if self.use_tls and self.smtp_port != self.smtp_ssl_port:
+                logger.info("SMTP TLS transport failed; trying configured SSL port")
+                try:
+                    self._deliver_smtp_message(message, use_ssl=True)
+                    return True
+                except smtplib.SMTPAuthenticationError:
+                    self._last_provider_error = "SMTP authentication failed"
+                    return False
+                except smtplib.SMTPRecipientsRefused:
+                    self._last_provider_error = "SMTP recipient was rejected"
+                    return False
+                except Exception as ssl_exc:
+                    self._last_provider_error = "SMTP connection or delivery failed"
+                    logger.warning("SMTP SSL fallback failed (%s)", type(ssl_exc).__name__)
+                    return False
+            self._last_provider_error = "SMTP connection or delivery failed"
+            logger.warning("SMTP delivery failed (%s)", type(exc).__name__)
+            return False
+        except Exception as exc:
+            self._last_provider_error = "SMTP delivery failed"
+            logger.warning("Unexpected SMTP failure (%s)", type(exc).__name__)
             return False
     
     def send_rejection_email(
@@ -241,6 +370,10 @@ class EmailService:
             bool: True if sent successfully
         """
         subject = "Application Status - CYGNUSA Elite-Hire"
+        candidate_name = self._safe_display_name(candidate_name)
+        candidate_name_html = escape(candidate_name)
+        reason_text = str(reason).strip()[:4_000] if reason else None
+        reason_html = escape(reason_text) if reason_text else None
         
         # HTML email template
         html_body = f"""
@@ -270,13 +403,13 @@ class EmailService:
             <h1>CYGNUSA Elite-Hire</h1>
         </div>
         <div class="content">
-            <h2>Dear {candidate_name},</h2>
+            <h2>Dear {candidate_name_html},</h2>
             
             <p>Thank you for your interest in joining our team and for taking the time to submit your application.</p>
             
             <p>After careful review of your qualifications, we regret to inform you that we will not be moving forward with your application at this time.</p>
             
-            {f'<p><strong>Feedback:</strong> {reason}</p>' if reason else ''}
+            {f'<p><strong>Feedback:</strong> {reason_html}</p>' if reason_html else ''}
             
             <p>We appreciate the effort you put into your application. We encourage you to apply for future opportunities that match your skills and experience.</p>
             
@@ -302,7 +435,7 @@ Thank you for your interest in joining our team and for taking the time to submi
 
 After careful review of your qualifications, we regret to inform you that we will not be moving forward with your application at this time.
 
-{'Feedback: ' + reason if reason else ''}
+{'Feedback: ' + reason_text if reason_text else ''}
 
 We appreciate the effort you put into your application. We encourage you to apply for future opportunities that match your skills and experience.
 
@@ -349,6 +482,29 @@ This is an automated message. Please do not reply to this email.
             bool: True if sent successfully
         """
         subject = "Assessment Invitation - CYGNUSA Elite-Hire"
+        candidate_name = self._safe_display_name(candidate_name)
+        assessment_link = str(assessment_link or "").strip()
+        if not self._is_valid_http_url(assessment_link):
+            self._safe_log_email(
+                str(candidate_email or "").strip(),
+                candidate_name,
+                "assessment_invitation",
+                subject,
+                "failed",
+                "invalid assessment link",
+            )
+            return False
+
+        scheduled_time = str(scheduled_time or "").strip()[:500]
+        interviewer_text = (
+            self._safe_display_name(interviewer_name) if interviewer_name else None
+        )
+        additional_text = str(additional_info).strip()[:8_000] if additional_info else None
+        candidate_name_html = escape(candidate_name)
+        assessment_link_html = escape(assessment_link, quote=True)
+        scheduled_time_html = escape(scheduled_time)
+        interviewer_html = escape(interviewer_text) if interviewer_text else None
+        additional_html = escape(additional_text) if additional_text else None
         
         # HTML email template
         html_body = f"""
@@ -381,12 +537,12 @@ This is an automated message. Please do not reply to this email.
             <h1>🎉 Congratulations!</h1>
         </div>
         <div class="content">
-            <h2>Dear {candidate_name},</h2>
+            <h2>Dear {candidate_name_html},</h2>
             
             <p>Great news! After reviewing your application, we are pleased to invite you to take our technical assessment.</p>
             
             <div class="highlight">
-                <p><strong>📅 Scheduled Time:</strong> {scheduled_time}</p>
+                <p><strong>📅 Scheduled Time:</strong> {scheduled_time_html}</p>
                 <p><strong>⏰ Assessment Window:</strong> ±30 minutes from scheduled time</p>
                 <p><strong>⏱️ Duration:</strong> Approximately 60-90 minutes</p>
             </div>
@@ -400,9 +556,9 @@ This is an automated message. Please do not reply to this email.
                 </ul>
             </div>
             
-            {f'<p><strong>Contact Person:</strong> {interviewer_name}</p>' if interviewer_name else ''}
+            {f'<p><strong>Contact Person:</strong> {interviewer_html}</p>' if interviewer_html else ''}
             
-            {f'<div class="instructions"><p>{additional_info}</p></div>' if additional_info else ''}
+            {f'<div class="instructions"><p>{additional_html}</p></div>' if additional_html else ''}
             
             <p><strong>Important:</strong> Please ensure you:</p>
             <ul>
@@ -413,7 +569,7 @@ This is an automated message. Please do not reply to this email.
             </ul>
             
             <center>
-                <a href="{assessment_link}" class="button">Start Assessment</a>
+                <a href="{assessment_link_html}" class="button">Start Assessment</a>
             </center>
             
             <p>If you need to reschedule or have any questions, please contact us as soon as possible.</p>
@@ -449,9 +605,9 @@ Assessment Components:
 - Coding Challenge: 1 programming problem
 - Psychometric Assessment: 3 scenario-based questions
 
-{'Contact Person: ' + interviewer_name if interviewer_name else ''}
+{'Contact Person: ' + interviewer_text if interviewer_text else ''}
 
-{additional_info if additional_info else ''}
+{additional_text if additional_text else ''}
 
 Important: Please ensure you:
 - Have a stable internet connection
@@ -505,7 +661,13 @@ This is an automated message. Please do not reply to this email.
         Returns:
             bool: True if sent successfully
         """
-        is_hired = decision.lower() in ['hire', 'hired', 'selected']
+        candidate_name = self._safe_display_name(candidate_name)
+        candidate_name_html = escape(candidate_name)
+        rationale_text = str(rationale).strip()[:8_000] if rationale else None
+        rationale_html = escape(rationale_text) if rationale_text else None
+        next_steps_text = str(next_steps).strip()[:8_000] if next_steps else None
+        next_steps_html = escape(next_steps_text) if next_steps_text else None
+        is_hired = str(decision or "").strip().lower() in {"hire", "hired", "selected"}
         
         subject = f"{'Congratulations' if is_hired else 'Assessment Results'} - CYGNUSA Elite-Hire"
         
@@ -531,7 +693,7 @@ This is an automated message. Please do not reply to this email.
             <h1>🎉 Congratulations!</h1>
         </div>
         <div class="content">
-            <h2>Dear {candidate_name},</h2>
+            <h2>Dear {candidate_name_html},</h2>
             
             <div class="success-box">
                 <h3>We are delighted to offer you a position with CYGNUSA!</h3>
@@ -539,11 +701,11 @@ This is an automated message. Please do not reply to this email.
             
             <p>We were impressed by your performance in the assessment and believe you will be a valuable addition to our team.</p>
             
-            {f'<p><strong>Assessment Feedback:</strong> {rationale}</p>' if rationale else ''}
+            {f'<p><strong>Assessment Feedback:</strong> {rationale_html}</p>' if rationale_html else ''}
             
             {self._format_scores_html(scores) if scores else ''}
             
-            {f'<div class="success-box"><h4>Next Steps:</h4><p>{next_steps}</p></div>' if next_steps else 
+            {f'<div class="success-box"><h4>Next Steps:</h4><p>{next_steps_html}</p></div>' if next_steps_html else
             '<div class="success-box"><h4>Next Steps:</h4><p>Our HR team will contact you within 2-3 business days with your offer letter and onboarding details.</p></div>'}
             
             <p>Welcome to the team! We look forward to working with you.</p>
@@ -581,13 +743,13 @@ This is an automated message. Please do not reply to this email.
             <h1>Assessment Results</h1>
         </div>
         <div class="content">
-            <h2>Dear {candidate_name},</h2>
+            <h2>Dear {candidate_name_html},</h2>
             
             <p>Thank you for completing our assessment. We appreciate the time and effort you invested in the process.</p>
             
             <p>After careful evaluation of your assessment results, we have decided not to proceed with your application at this time.</p>
             
-            {f'<div class="feedback-box"><strong>Feedback:</strong> {rationale}</div>' if rationale else ''}
+            {f'<div class="feedback-box"><strong>Feedback:</strong> {rationale_html}</div>' if rationale_html else ''}
             
             {self._format_scores_html(scores) if scores else ''}
             
@@ -618,12 +780,12 @@ We are delighted to offer you a position with CYGNUSA!
 
 We were impressed by your performance in the assessment and believe you will be a valuable addition to our team.
 
-{'Assessment Feedback: ' + rationale if rationale else ''}
+{'Assessment Feedback: ' + rationale_text if rationale_text else ''}
 
 {self._format_scores_text(scores) if scores else ''}
 
 Next Steps:
-{next_steps if next_steps else 'Our HR team will contact you within 2-3 business days with your offer letter and onboarding details.'}
+{next_steps_text if next_steps_text else 'Our HR team will contact you within 2-3 business days with your offer letter and onboarding details.'}
 
 Welcome to the team! We look forward to working with you.
 
@@ -640,7 +802,7 @@ Thank you for completing our assessment. We appreciate the time and effort you i
 
 After careful evaluation of your assessment results, we have decided not to proceed with your application at this time.
 
-{'Feedback: ' + rationale if rationale else ''}
+{'Feedback: ' + rationale_text if rationale_text else ''}
 
 {self._format_scores_text(scores) if scores else ''}
 
@@ -669,11 +831,11 @@ CYGNUSA Elite-Hire Team
         html = '<div class="scores"><h4>Your Assessment Scores:</h4><ul>'
         
         if 'technical' in scores:
-            html += f'<li><strong>Technical Score:</strong> {scores["technical"]}%</li>'
+            html += f'<li><strong>Technical Score:</strong> {escape(str(scores["technical"]))}%</li>'
         if 'psychometric' in scores:
-            html += f'<li><strong>Psychometric Score:</strong> {scores["psychometric"]}%</li>'
+            html += f'<li><strong>Psychometric Score:</strong> {escape(str(scores["psychometric"]))}%</li>'
         if 'overall' in scores:
-            html += f'<li><strong>Overall Score:</strong> {scores["overall"]}%</li>'
+            html += f'<li><strong>Overall Score:</strong> {escape(str(scores["overall"]))}%</li>'
         
         html += '</ul></div>'
         return html
@@ -738,73 +900,3 @@ def send_final_decision_email(
     return get_email_service().send_final_decision_email(
         candidate_email, candidate_name, decision, rationale, next_steps, scores
     )
-
-
-# Test function
-def test_email_service():
-    """Test email service with sample data"""
-    print("=" * 60)
-    print("Testing Email Service")
-    print("=" * 60)
-    
-    # Check configuration
-    service = EmailService()
-    print(f"\nSMTP Configuration:")
-    print(f"  Host: {service.smtp_host}")
-    print(f"  Port: {service.smtp_port}")
-    print(f"  User: {service.smtp_user}")
-    print(f"  Pass: {'*' * 8 if service.smtp_pass else 'NOT SET'}")
-    
-    if not service.smtp_user or not service.smtp_pass:
-        print("\n⚠️  SMTP credentials not configured!")
-        print("Set environment variables:")
-        print("  SMTP_USER=your-email@gmail.com")
-        print("  SMTP_PASS=your-app-password")
-        return
-    
-    test_email = input("\nEnter test email address (or press Enter to skip): ").strip()
-    
-    if not test_email:
-        print("\n✅ Configuration check passed. Skipping actual email send.")
-        return
-    
-    print(f"\nSending test emails to {test_email}...")
-    
-    # Test 1: Rejection email
-    print("\n1. Testing rejection email...")
-    result1 = service.send_rejection_email(
-        candidate_email=test_email,
-        candidate_name="Test Candidate",
-        reason="Thank you for your application. After review, we found other candidates with more experience in our required tech stack."
-    )
-    print(f"   Result: {'✅ Sent' if result1 else '❌ Failed'}")
-    
-    # Test 2: Assessment invitation
-    print("\n2. Testing assessment invitation...")
-    result2 = service.send_assessment_invitation(
-        candidate_email=test_email,
-        candidate_name="Test Candidate",
-        assessment_link="http://localhost:5173/assessment/123",
-        scheduled_time="January 25, 2026 at 10:00 AM EST",
-        interviewer_name="Jane Doe"
-    )
-    print(f"   Result: {'✅ Sent' if result2 else '❌ Failed'}")
-    
-    # Test 3: Final decision (hired)
-    print("\n3. Testing final decision email (hired)...")
-    result3 = service.send_final_decision_email(
-        candidate_email=test_email,
-        candidate_name="Test Candidate",
-        decision="Hire",
-        rationale="Excellent performance across all assessment areas.",
-        scores={"technical": 85, "psychometric": 90, "overall": 87}
-    )
-    print(f"   Result: {'✅ Sent' if result3 else '❌ Failed'}")
-    
-    print("\n" + "=" * 60)
-    print("Email service test completed!")
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    test_email_service()

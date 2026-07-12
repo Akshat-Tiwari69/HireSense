@@ -1,4 +1,3 @@
-import React from 'react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../ui/card';
@@ -14,13 +13,17 @@ const SettingsTab = ({
   handleEditEnvVar,
   handleSaveEnvVar,
   handleCancelEdit,
+  canEdit,
+  runtimeMutationEnabled,
 }) => (
   <TabsContent value="settings">
     <Card className="bg-white border-none shadow-md hover:shadow-xl transition-all duration-300">
       <CardHeader>
         <CardTitle className="text-slate-900">Environment Variables</CardTitle>
         <CardDescription className="text-slate-600">
-          Configure environment variables. Changes are persisted to .env file and require backend restart to take effect.
+          {runtimeMutationEnabled
+            ? 'Local development editing is enabled. Changes persist to backend/.env and may require a restart.'
+            : 'Read-only in this environment. Change deployment variables through the hosting platform or secret store.'}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -77,7 +80,7 @@ const SettingsTab = ({
                   )}
                 </div>
 
-                {editingEnvVar !== key && (
+                {canEdit && runtimeMutationEnabled && editingEnvVar !== key && (
                   <Button
                     size="sm"
                     variant="outline"

@@ -1,4 +1,4 @@
-import React from 'react';
+import { Fragment } from 'react';
 import { Button } from '../../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
@@ -76,7 +76,7 @@ const JobPostingsTab = ({
           </TableHeader>
           <TableBody>
             {jobPostings.map((job) => (
-              <React.Fragment key={job.id}>
+              <Fragment key={job.id}>
                 <TableRow className="border-slate-200 cursor-pointer hover:bg-slate-50" onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}>
                   <TableCell className="text-slate-400 px-2">
                     {expandedJob === job.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -191,7 +191,7 @@ const JobPostingsTab = ({
                     </TableCell>
                   </TableRow>
                 )}
-              </React.Fragment>
+              </Fragment>
             ))}
           </TableBody>
         </Table>
