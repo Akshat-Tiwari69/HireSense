@@ -49,7 +49,7 @@ def validate_email(email):
 
 
 def hash_password(password):
-    """Hash a password using bcrypt"""
+    """Hash a password using Werkzeug's configured password hasher."""
     hashed = generate_password_hash(password)
     return hashed
 
