@@ -231,14 +231,16 @@ The **Candidate** does not have a traditional login. Instead, they interact with
 
 ---
 
-## Default Credentials
+## Seed Accounts
 
 When seeding the database with `database/seed_users.py`, the following accounts are created:
 
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | `admin@hiresense.com` | `admin123` |
-| Interviewer | `interviewer@hiresense.com` | `interviewer123` |
-| Proctor | `proctor@hiresense.com` | `proctor123` |
+| Role | Email | Password source |
+|------|-------|-----------------|
+| Admin | `admin@hiresense.com` | `SEED_ADMIN_PASSWORD` or a generated initial password |
+| Interviewer | `interviewer@hiresense.com` | `SEED_INTERVIEWER_PASSWORD` or a generated initial password |
+| Proctor | `proctor@hiresense.com` | `SEED_PROCTOR_PASSWORD` or a generated initial password |
 
-> ⚠️ **Change these passwords immediately in production environments.**
+The seed script has no fixed default passwords. Generated passwords are shown
+once at seed time; store them in an approved secret manager and rotate them
+before production use. Never commit seed passwords to the repository.
