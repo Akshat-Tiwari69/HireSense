@@ -37,6 +37,7 @@ def test_deploy_supports_prepare_before_activation_for_explicit_migrations():
     assert "--prepare-only" in deploy
     assert preparation < activation
     assert '"${SUDO_USER:-root}" == "hiresense-deploy"' in deploy
+    assert '! -user root -o \\( ! -type l -a -perm /022 \\)' in deploy
 
 
 def test_github_deploy_key_is_restricted_to_a_validated_sha():
