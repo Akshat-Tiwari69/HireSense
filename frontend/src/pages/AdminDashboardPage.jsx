@@ -1,19 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '../components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Badge } from '../components/ui/badge';
-import { Card, CardContent } from '../components/ui/card';
 import {
-  LogOut, Users, Database, Settings, RefreshCw,
-  Shield, UserPlus, BarChart3, Eye, Mail, LayoutDashboard, Briefcase,
-  AlertTriangle, Upload, BookOpen
+  Users, Shield, UserPlus, BarChart3, Mail, Briefcase,
+  AlertTriangle, Upload, BookOpen,
 } from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
-import Logo from '../components/Logo';
+import { toJobClosingInputValue } from '../lib/jobs';
 import { api } from '../services/api';
 import LoadingScreen from '../components/common/LoadingScreen';
+import { useAuth } from '../contexts/AuthContext';
+import WorkspaceShell from '../components/workspace/WorkspaceShell';
+import MetricCard from '../components/workspace/MetricCard';
 
 // Tab components
 import UsersTab from '../components/admin/tabs/UsersTab';
@@ -25,8 +23,6 @@ import BulkUploadTab from '../components/admin/tabs/BulkUploadTab';
 import QuestionBankTab from '../components/admin/tabs/QuestionBankTab';
 import AnalyticsTab from '../components/admin/tabs/AnalyticsTab';
 import AuditLogTab from '../components/admin/tabs/AuditLogTab';
-import DatabaseTab from '../components/admin/tabs/DatabaseTab';
-import SettingsTab from '../components/admin/tabs/SettingsTab';
 
 // Modal components
 import UserModal from '../components/admin/modals/UserModal';
@@ -37,6 +33,7 @@ import SectorModal from '../components/admin/modals/SectorModal';
 const AdminDashboardPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signOut, user } = useAuth();
 
   // All privileged data is loaded through the authenticated backend API.
   const [users, setUsers] = useState([]);
@@ -44,18 +41,14 @@ const AdminDashboardPage = () => {
   const [jobPostings, setJobPostings] = useState([]);
 
   const [dbStats, setDbStats] = useState(null);
-  const [dbTables, setDbTables] = useState([]);
-  const [envStatus, setEnvStatus] = useState({});
-  const [runtimeEnvMutationEnabled, setRuntimeEnvMutationEnabled] = useState(false);
-  const [selectedTable, setSelectedTable] = useState(null);
-  const [tableData, setTableData] = useState({ data: [], columns: [] });
   const [emailLogs, setEmailLogs] = useState([]);
   const [jobModalOpen, setJobModalOpen] = useState(false);
   const [jobForm, setJobForm] = useState({
     title: '', description: '', required_skills: '', preferred_skills: '',
-    min_experience: 0, max_experience: '', department: '', location: '',
+    min_experience: 0, max_experience: '', department: '', work_mode: 'On-Site',
     sector_id: '', status: 'active', employment_type: 'full-time',
-    experience_level: 'mid', salary_range: ''
+    experience_level: 'mid', salary_range: '', closes_at: '',
+    role_complexity_level: 'intermediate'
   });
   const [editingJob, setEditingJob] = useState(null);
   const [sectors, setSectors] = useState([]);
@@ -64,6 +57,7 @@ const AdminDashboardPage = () => {
   const [matchingCandidate, setMatchingCandidate] = useState(null);
   const [jobCandidates, setJobCandidates] = useState([]);
   const [selectedJobForCandidates, setSelectedJobForCandidates] = useState(null);
+  const [reviewingMatch, setReviewingMatch] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [analytics, setAnalytics] = useState({ candidates: {}, assessments: {} });
   const [loading, setLoading] = useState(true);
@@ -72,22 +66,18 @@ const AdminDashboardPage = () => {
   // Modals
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'interviewer' });
+  const [userForm, setUserForm] = useState({ name: '', email: '', password: '', role: 'interviewer', sector_id: '' });
 
   const [candidateModalOpen, setCandidateModalOpen] = useState(false);
   const [editingCandidate, setEditingCandidate] = useState(null);
-  const [candidateForm, setCandidateForm] = useState({ name: '', email: '', phone: '', status: 'Applied', match_score: 0 });
-
-  // Environment variable editing state
-  const [editingEnvVar, setEditingEnvVar] = useState(null);
-  const [envVarValue, setEnvVarValue] = useState('');
+  const [candidateForm, setCandidateForm] = useState({ name: '', email: '', phone: '', status: 'applied', match_score: 0 });
 
   // Button loading states
   const [savingUser, setSavingUser] = useState(false);
   const [deletingUser, setDeletingUser] = useState(null);
   const [savingCandidate, setSavingCandidate] = useState(false);
-  const [deletingCandidate] = useState(null);
-  const [resettingStatus] = useState(null);
+  const [deletingCandidate, setDeletingCandidate] = useState(null);
+  const [resettingStatus, setResettingStatus] = useState(null);
   const [savingJob, setSavingJob] = useState(false);
   const [deletingJob, setDeletingJob] = useState(null);
   const [enhancingJob, setEnhancingJob] = useState(false);
@@ -125,43 +115,38 @@ const AdminDashboardPage = () => {
 
   // Memoized filtered data
   const filteredUsers = useMemo(() => {
+    const query = userSearch.trim().toLowerCase();
     return users.filter(user =>
-      user.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-      user.email.toLowerCase().includes(userSearch.toLowerCase())
+      String(user.name || '').toLowerCase().includes(query) ||
+      String(user.email || '').toLowerCase().includes(query)
     );
   }, [users, userSearch]);
 
   const filteredCandidates = useMemo(() => {
+    const query = candidateSearch.trim().toLowerCase();
     return candidates.filter(candidate => {
-      const matchesSearch = candidate.name.toLowerCase().includes(candidateSearch.toLowerCase()) ||
-        candidate.email.toLowerCase().includes(candidateSearch.toLowerCase());
-      const matchesStatus = candidateStatusFilter === 'all' || (candidate.status || 'Applied') === candidateStatusFilter;
+      const matchesSearch = String(candidate.name || '').toLowerCase().includes(query) ||
+        String(candidate.email || '').toLowerCase().includes(query);
+      const matchesStatus = candidateStatusFilter === 'all' || (candidate.status || 'applied') === candidateStatusFilter;
       return matchesSearch && matchesStatus;
     });
   }, [candidates, candidateSearch, candidateStatusFilter]);
 
   const candidateStatuses = useMemo(() => {
-    return [...new Set(candidates.map(c => c.status || 'Applied'))];
+    return [...new Set(candidates.map(c => c.status || 'applied'))];
   }, [candidates]);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
     fetchAllDataRef.current?.();
-  }, [navigate]);
+  }, []);
 
   const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
-      const [usersRes, candidatesRes, statsRes, tablesRes, envRes, jobsRes, sectorsRes] = await Promise.all([
+      const [usersRes, candidatesRes, statsRes, jobsRes, sectorsRes] = await Promise.all([
         api.get('/api/admin/users'),
         api.get('/api/admin/candidates'),
         api.get('/api/admin/db/stats'),
-        api.get('/api/admin/db/tables'),
-        api.get('/api/admin/settings/env'),
         api.get('/api/jobs/postings?status=all').catch(() => ({ data: { data: [] } })),
         api.get('/api/jobs/sectors').catch(() => ({ data: { data: [] } }))
       ]);
@@ -174,9 +159,6 @@ const AdminDashboardPage = () => {
 
       // Set non-realtime data
       setDbStats(statsRes.data.data || {});
-      setDbTables(tablesRes.data.data || []);
-      setEnvStatus(envRes.data.data || {});
-      setRuntimeEnvMutationEnabled(envRes.data.runtime_mutation_enabled === true);
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to load admin data';
       if (err?.response?.status === 403) {
@@ -192,10 +174,7 @@ const AdminDashboardPage = () => {
   fetchAllDataRef.current = fetchAllData;
 
   const handleLogout = () => {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('userEmail');
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('user_id');
+    signOut();
     navigate('/login');
   };
 
@@ -212,7 +191,7 @@ const AdminDashboardPage = () => {
       }
       setUserModalOpen(false);
       setEditingUser(null);
-      setUserForm({ name: '', email: '', password: '', role: 'interviewer' });
+      setUserForm({ name: '', email: '', password: '', role: 'interviewer', sector_id: '' });
       fetchAllData();
     } catch (err) {
       toast({ variant: 'destructive', title: 'Error', description: err?.response?.data?.message || 'Failed to save user' });
@@ -237,7 +216,7 @@ const AdminDashboardPage = () => {
 
   const openEditUser = (user) => {
     setEditingUser(user);
-    setUserForm({ name: user.name, email: user.email, password: '', role: user.role });
+    setUserForm({ name: user.name, email: user.email, password: '', role: user.role, sector_id: user.sector_id || '' });
     setUserModalOpen(true);
   };
 
@@ -259,23 +238,29 @@ const AdminDashboardPage = () => {
 
   const handleDeleteCandidate = async (candidateId) => {
     if (!confirm('Are you sure you want to delete this candidate? This will also delete all their assessments.')) return;
+    setDeletingCandidate(candidateId);
     try {
       await api.delete(`/api/admin/candidates/${candidateId}`);
       toast({ title: 'Success', description: 'Candidate deleted successfully' });
       fetchAllData();
     } catch (err) {
       toast({ variant: 'destructive', title: 'Error', description: err?.response?.data?.message || 'Failed to delete candidate' });
+    } finally {
+      setDeletingCandidate(null);
     }
   };
 
   const handleResetCandidateStatus = async (candidateId) => {
     if (!confirm('Reset this candidate status to Applied?')) return;
+    setResettingStatus(candidateId);
     try {
       await api.post(`/api/admin/reset-candidate-status/${candidateId}`);
       toast({ title: 'Success', description: 'Candidate status reset to Applied' });
       fetchAllData();
     } catch (err) {
       toast({ variant: 'destructive', title: 'Error', description: err?.response?.data?.message || 'Failed to reset status' });
+    } finally {
+      setResettingStatus(null);
     }
   };
 
@@ -285,21 +270,10 @@ const AdminDashboardPage = () => {
       name: candidate.name,
       email: candidate.email,
       phone: candidate.phone || '',
-      status: candidate.status || 'Applied',
+      status: candidate.status || 'applied',
       match_score: candidate.match_score || 0
     });
     setCandidateModalOpen(true);
-  };
-
-  // Database
-  const fetchTableData = async (tableName) => {
-    try {
-      setSelectedTable(tableName);
-      const res = await api.get(`/api/admin/db/tables/${tableName}`);
-      setTableData({ data: res.data.data || [], columns: res.data.columns || [] });
-    } catch (err) {
-      toast({ variant: 'destructive', title: 'Error', description: 'Failed to load table data' });
-    }
   };
 
   const fetchEmailLogs = async () => {
@@ -317,8 +291,8 @@ const AdminDashboardPage = () => {
     try {
       const res = await api.get('/api/admin/absence-of-details');
       setAbsenceCandidates(res.data.data || []);
-    } catch (err) {
-      console.error('Failed to fetch absence-of-details:', err);
+    } catch {
+      toast({ variant: 'destructive', title: 'Unable to load candidates', description: 'Missing-detail records could not be retrieved.' });
     } finally {
       setAbsenceLoading(false);
     }
@@ -345,7 +319,7 @@ const AdminDashboardPage = () => {
         name: absenceForm.name.trim(),
         email: absenceForm.email.trim(),
         phone: absenceForm.phone?.trim() || '',
-        status: 'Applied'
+        status: 'applied'
       });
       toast({ title: 'Candidate updated', description: 'Status changed to Applied' });
       setAbsenceEditing(null);
@@ -385,7 +359,7 @@ const AdminDashboardPage = () => {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       toast({
-        title: ' Uploaded',
+        title: 'Uploaded',
         description: res.data.message || 'Question bank uploaded successfully'
       });
       setQbFile(null);
@@ -490,6 +464,24 @@ const AdminDashboardPage = () => {
     }
   };
 
+  const handleReviewCandidateMatch = async (candidateId, jobId, status) => {
+    const reviewKey = `${candidateId}:${jobId}`;
+    setReviewingMatch(reviewKey);
+    try {
+      await api.patch(`/api/jobs/matches/${candidateId}/${jobId}`, { status });
+      toast({ title: 'Match reviewed', description: `Candidate match ${status}.` });
+      await fetchJobCandidates(jobId);
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Review failed',
+        description: err?.response?.data?.message || 'Could not save the match decision',
+      });
+    } finally {
+      setReviewingMatch(null);
+    }
+  };
+
   const fetchAuditLog = async () => {
     try {
       const res = await api.get('/api/jobs/audit-log?limit=50');
@@ -510,7 +502,8 @@ const AdminDashboardPage = () => {
         ...jobForm,
         min_experience: parseInt(jobForm.min_experience) || 0,
         max_experience: jobForm.max_experience ? parseInt(jobForm.max_experience) : null,
-        sector_id: jobForm.sector_id && jobForm.sector_id !== 'none' ? parseInt(jobForm.sector_id) : null
+        sector_id: jobForm.sector_id && jobForm.sector_id !== 'none' ? parseInt(jobForm.sector_id) : null,
+        closes_at: jobForm.closes_at || null
       };
       if (editingJob) {
         await api.put(`/api/jobs/postings/${editingJob.id}`, payload);
@@ -523,9 +516,10 @@ const AdminDashboardPage = () => {
       setEditingJob(null);
       setJobForm({
         title: '', description: '', required_skills: '', preferred_skills: '',
-        min_experience: 0, max_experience: '', department: '', location: '',
+        min_experience: 0, max_experience: '', department: '', work_mode: 'On-Site',
         sector_id: '', status: 'active', employment_type: 'full-time',
-        experience_level: 'mid', salary_range: ''
+        experience_level: 'mid', salary_range: '', closes_at: '',
+        role_complexity_level: 'intermediate'
       });
       fetchJobPostings();
     } catch (err) {
@@ -541,23 +535,32 @@ const AdminDashboardPage = () => {
       title: job.title || '', description: job.description || '',
       required_skills: job.required_skills || '', preferred_skills: job.preferred_skills || '',
       min_experience: job.min_experience || 0, max_experience: job.max_experience || '',
-      department: job.department || '', location: job.location || '',
+      department: job.department || '', work_mode: job.work_mode || 'On-Site',
       sector_id: job.sector_id ? String(job.sector_id) : '',
       status: job.status || 'active', employment_type: job.employment_type || 'full-time',
-      experience_level: job.experience_level || 'mid', salary_range: job.salary_range || ''
+      experience_level: job.experience_level || 'mid', salary_range: job.salary_range || '',
+      closes_at: toJobClosingInputValue(job.closes_at),
+      role_complexity_level: job.role_complexity_level || 'intermediate'
     });
     setJobModalOpen(true);
   };
 
   const handleDeleteJob = async (jobId) => {
-    if (!confirm('Permanently delete this job posting? This cannot be undone.')) return;
+    if (!confirm('Remove this job posting? Jobs with hiring history will be closed and preserved.')) return;
     setDeletingJob(jobId);
     try {
-      await api.delete(`/api/jobs/postings/${jobId}`);
-      toast({ title: 'Success', description: 'Job posting deleted' });
+      const response = await api.delete(`/api/jobs/postings/${jobId}`);
+      toast({
+        title: response.data?.data?.action === 'archived' ? 'Job closed' : 'Job removed',
+        description: response.data?.message || 'Job posting updated',
+      });
       fetchJobPostings();
     } catch (err) {
-      toast({ variant: 'destructive', title: 'Error', description: 'Failed to delete job' });
+      toast({
+        variant: 'destructive',
+        title: 'Unable to remove job',
+        description: err?.response?.data?.message || 'Please try again.',
+      });
     } finally {
       setDeletingJob(null);
     }
@@ -572,191 +575,64 @@ const AdminDashboardPage = () => {
     }
   };
 
-  // Environment variable management
-  const handleEditEnvVar = (key) => {
-    setEditingEnvVar(key);
-    setEnvVarValue(''); // Don't pre-fill for security
-  };
-
-  const handleSaveEnvVar = async () => {
-    if (!editingEnvVar || !runtimeEnvMutationEnabled) return;
-
-    try {
-      await api.post('/api/admin/settings/env', {
-        name: editingEnvVar,
-        value: envVarValue
-      });
-
-      toast({ title: 'Success', description: `${editingEnvVar} updated successfully. Restart backend to apply changes.` });
-      setEditingEnvVar(null);
-      setEnvVarValue('');
-      fetchAllData(); // Refresh to show updated status
-    } catch (err) {
-      toast({ variant: 'destructive', title: 'Error', description: err?.response?.data?.message || 'Failed to update environment variable' });
-    }
-  };
-
-  const handleCancelEdit = () => {
-    setEditingEnvVar(null);
-    setEnvVarValue('');
-  };
-
-
   if (loading) {
     return <LoadingScreen message="Loading Admin Dashboard" />;
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Logo size="default" />
-            <Badge className="bg-indigo-600 text-white border-indigo-500 shadow-sm">ADMIN</Badge>
-          </div>
-          <div className="flex gap-2">
-            {/* Dashboard Navigation */}
-            <Select value="/admin" onValueChange={(val) => navigate(val)}>
-              <SelectTrigger className="w-[150px] bg-white border-slate-300 text-slate-700">
-                <LayoutDashboard className="w-4 h-4 mr-2" />
-                <SelectValue placeholder="Dashboards" />
-              </SelectTrigger>
-              <SelectContent className="bg-white border-slate-200">
-                <SelectItem value="/dashboard">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4" />
-                    Interviewer
-                  </div>
-                </SelectItem>
-                <SelectItem value="/proctor">
-                  <div className="flex items-center gap-2">
-                    <Eye className="w-4 h-4" />
-                    Proctor
-                  </div>
-                </SelectItem>
-                <SelectItem value="/admin">
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4" />
-                    Admin
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={fetchAllData} className="border-slate-300 text-slate-700 hover:bg-slate-50">
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh
-            </Button>
-            <Button variant="ghost" onClick={handleLogout} className="text-slate-700 hover:text-red-600">
-              <LogOut className="mr-2 w-4 h-4" />
-              Logout
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 border-blue-200 shadow-md hover:shadow-lg transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-600 text-sm font-medium">Total Users</p>
-                  <p className="text-4xl font-bold text-slate-900 mt-2">{dbStats?.total_users || 0}</p>
-                  <p className="text-xs text-slate-500 mt-2">All system users</p>
-                </div>
-                <Users className="w-12 h-12 text-blue-400 opacity-80" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-green-50 to-green-100/50 border-green-200 shadow-md hover:shadow-lg transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-600 text-sm font-medium">Total Candidates</p>
-                  <p className="text-4xl font-bold text-slate-900 mt-2">{dbStats?.total_candidates || 0}</p>
-                  <p className="text-xs text-slate-500 mt-2">Active candidates</p>
-                </div>
-                <UserPlus className="w-12 h-12 text-green-400 opacity-80" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-purple-50 to-purple-100/50 border-purple-200 shadow-md hover:shadow-lg transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-600 text-sm font-medium">Assessments</p>
-                  <p className="text-4xl font-bold text-slate-900 mt-2">{dbStats?.total_assessments || 0}</p>
-                  <p className="text-xs text-slate-500 mt-2">Total assessments</p>
-                </div>
-                <BarChart3 className="w-12 h-12 text-purple-400 opacity-80" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-amber-50 to-amber-100/50 border-amber-200 shadow-md hover:shadow-lg transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-slate-600 text-sm font-medium">DB Tables</p>
-                  <p className="text-4xl font-bold text-slate-900 mt-2">{dbTables.length}</p>
-                  <p className="text-xs text-slate-500 mt-2">Active tables</p>
-                </div>
-                <Database className="w-12 h-12 text-amber-400 opacity-80" />
-              </div>
-            </CardContent>
-          </Card>
+    <WorkspaceShell
+      role="admin"
+      title="Hiring operations"
+      description="Manage staff access, applicants, open roles, assessment content, and the system audit trail."
+      user={user}
+      onRefresh={fetchAllData}
+      refreshing={loading}
+      onSignOut={handleLogout}
+    >
+        <div className="mb-6 grid gap-4 sm:grid-cols-3">
+          <MetricCard label="Staff accounts" value={dbStats?.total_users || 0} hint="All authorized users" icon={Users} />
+          <MetricCard label="Candidates" value={dbStats?.total_candidates || 0} hint="Across the hiring lifecycle" icon={UserPlus} tone="success" />
+          <MetricCard label="Assessments" value={dbStats?.total_assessments || 0} hint="Created assessment sessions" icon={BarChart3} tone="neutral" />
         </div>
 
         {/* Main Tabs */}
-        <Tabs defaultValue="users" className="space-y-6">
-          <TabsList className="bg-white border-slate-200 shadow-md">
-            <TabsTrigger value="users" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700">
-              <Users className="w-4 h-4 mr-2" />
-              Users
+        <Tabs defaultValue="users" className="space-y-5">
+          <TabsList className="w-full justify-start" aria-label="Admin workspace sections">
+            <TabsTrigger value="users">
+              <Users className="mr-2 h-4 w-4" />
+              Staff
             </TabsTrigger>
-            <TabsTrigger value="candidates" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700">
-              <UserPlus className="w-4 h-4 mr-2" />
+            <TabsTrigger value="candidates">
+              <UserPlus className="mr-2 h-4 w-4" />
               Candidates
             </TabsTrigger>
-            <TabsTrigger value="absence-details" className="data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700" onClick={fetchAbsenceCandidates}>
-              <AlertTriangle className="w-4 h-4 mr-2" />
-              Absence of Details
+            <TabsTrigger value="absence-details" onClick={fetchAbsenceCandidates}>
+              <AlertTriangle className="mr-2 h-4 w-4" />
+              Missing details
             </TabsTrigger>
-            <TabsTrigger value="email-logs" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700" onClick={fetchEmailLogs}>
-              <Mail className="w-4 h-4 mr-2" />
-              Email Logs
+            <TabsTrigger value="email-logs" onClick={fetchEmailLogs}>
+              <Mail className="mr-2 h-4 w-4" />
+              Email activity
             </TabsTrigger>
-            <TabsTrigger value="job-postings" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700" onClick={fetchJobPostings}>
-              <Briefcase className="w-4 h-4 mr-2" />
-              Job Postings
+            <TabsTrigger value="job-postings" onClick={fetchJobPostings}>
+              <Briefcase className="mr-2 h-4 w-4" />
+              Roles
             </TabsTrigger>
-            <TabsTrigger value="bulk-upload" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700" onClick={fetchJobPostings}>
-              <Upload className="w-4 h-4 mr-2" />
-              Bulk Upload
+            <TabsTrigger value="bulk-upload" onClick={fetchJobPostings}>
+              <Upload className="mr-2 h-4 w-4" />
+              Resume import
             </TabsTrigger>
-            <TabsTrigger value="question-bank" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700" onClick={fetchQuestionBanks}>
-              <BookOpen className="w-4 h-4 mr-2" />
-              Question Bank
+            <TabsTrigger value="question-bank" onClick={fetchQuestionBanks}>
+              <BookOpen className="mr-2 h-4 w-4" />
+              Questions
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700" onClick={fetchAnalytics}>
-              <BarChart3 className="w-4 h-4 mr-2" />
+            <TabsTrigger value="analytics" onClick={fetchAnalytics}>
+              <BarChart3 className="mr-2 h-4 w-4" />
               Analytics
             </TabsTrigger>
-            <TabsTrigger value="audit-log" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700" onClick={fetchAuditLog}>
-              <Shield className="w-4 h-4 mr-2" />
-              Audit Log
-            </TabsTrigger>
-            <TabsTrigger value="database" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700">
-              <Database className="w-4 h-4 mr-2" />
-              Database
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700">
-              <Settings className="w-4 h-4 mr-2" />
-              Settings
+            <TabsTrigger value="audit-log" onClick={fetchAuditLog}>
+              <Shield className="mr-2 h-4 w-4" />
+              Audit trail
             </TabsTrigger>
           </TabsList>
 
@@ -770,6 +646,7 @@ const AdminDashboardPage = () => {
             setEditingUser={setEditingUser}
             setUserForm={setUserForm}
             setUserModalOpen={setUserModalOpen}
+            currentUserRole={user?.role}
           />
 
           <CandidatesTab
@@ -821,6 +698,8 @@ const AdminDashboardPage = () => {
             openEditJob={openEditJob}
             handleDeleteJob={handleDeleteJob}
             fetchJobCandidates={fetchJobCandidates}
+            handleReviewCandidateMatch={handleReviewCandidateMatch}
+            reviewingMatch={reviewingMatch}
           />
 
           <BulkUploadTab
@@ -864,26 +743,7 @@ const AdminDashboardPage = () => {
             auditLogs={auditLogs}
           />
 
-          <DatabaseTab
-            dbTables={dbTables}
-            selectedTable={selectedTable}
-            tableData={tableData}
-            fetchTableData={fetchTableData}
-          />
-
-          <SettingsTab
-            envStatus={envStatus}
-            editingEnvVar={editingEnvVar}
-            envVarValue={envVarValue}
-            setEnvVarValue={setEnvVarValue}
-            handleEditEnvVar={handleEditEnvVar}
-            handleSaveEnvVar={handleSaveEnvVar}
-            handleCancelEdit={handleCancelEdit}
-            canEdit={localStorage.getItem('userRole') === 'super_admin'}
-            runtimeMutationEnabled={runtimeEnvMutationEnabled}
-          />
         </Tabs>
-      </main>
 
       <UserModal
         userModalOpen={userModalOpen}
@@ -893,6 +753,8 @@ const AdminDashboardPage = () => {
         setUserForm={setUserForm}
         savingUser={savingUser}
         handleSaveUser={handleSaveUser}
+        sectors={sectors}
+        currentUserRole={user?.role}
       />
 
       <CandidateModal
@@ -926,7 +788,7 @@ const AdminDashboardPage = () => {
         setEnhancingSector={setEnhancingSector}
         handleSaveSector={handleSaveSector}
       />
-    </div>
+    </WorkspaceShell>
   );
 };
 

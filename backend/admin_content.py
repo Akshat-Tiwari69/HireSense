@@ -223,7 +223,7 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
 
         with open(filepath, 'rb') as f:
             if filepath.lower().endswith('.pdf'):
-                from PyPDF2 import PdfReader
+                from pypdf import PdfReader
                 pdf = PdfReader(f)
                 resume_text = " ".join([page.extract_text() or '' for page in pdf.pages])
             else:
@@ -239,7 +239,13 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
                 candidate_id = insert_candidate_application(
                     name=name, email=email, phone='',
                     resume_path=filepath,
-                    parsed_data={'skills': [], 'experience': 0, 'education': '', 'match_score': 0, 'shortlist_status': 'Pending Review'},
+                    parsed_data={
+                        'skills': [],
+                        'experience': 0,
+                        'education': '',
+                        'match_score': 0,
+                        'shortlist_status': None,
+                    },
                     job_id=int(job_id),
                     ai_reasoning='Resume text could not be extracted; manual review required.',
                     pros=None, cons=None, status='absence_of_details',
@@ -259,7 +265,7 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
                     job_description.get('skills', []), job_description.get('min_experience', 0)
                 )
         except Exception as ai_err:
-            logger.warning(f"[BULK] AI extraction failed for {filename}: {ai_err}")
+            logger.warning("[BULK] AI extraction failed (%s)", type(ai_err).__name__)
 
         ai_analysis = None
         try:
@@ -270,7 +276,7 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
             if ai_analysis and 'enhanced_match_score' in ai_analysis:
                 parsed_data['match_score'] = ai_analysis['enhanced_match_score']
         except Exception as ai_err:
-            logger.warning(f"[BULK] AI analysis failed for {filename}: {ai_err}")
+            logger.warning("[BULK] AI analysis failed (%s)", type(ai_err).__name__)
             ai_analysis = {
                 "pros": ["Resume uploaded successfully"],
                 "cons": ["AI analysis unavailable - manual review recommended"],
@@ -327,11 +333,15 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
         result['status'] = 'success'
         if missing_details:
             result['error'] = f'Saved with Absence of Details (missing: {", ".join(missing_details)})'
-        logger.info(f"[BULK] Processed {filename} -> {name} <{email}> score={result['match_score']} status={candidate_status}")
+        logger.info(
+            "[BULK] Stored candidate %s with status %s",
+            candidate_id,
+            candidate_status,
+        )
 
-    except Exception as e:
+    except Exception:
         result['error'] = 'Resume processing failed'
-        logger.exception("[BULK] Error processing %s: %s", filename, e)
+        logger.exception("[BULK] Resume processing failed")
         with contextlib.suppress(OSError):
             os.remove(filepath)
 
@@ -356,7 +366,7 @@ def _extract_text_from_file(filepath):
         chunks.append(value)
 
     if filepath.lower().endswith('.pdf'):
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
         with open(filepath, 'rb') as f:
             pdf = PdfReader(f)
             for page in pdf.pages:
@@ -704,17 +714,21 @@ def upload_question_bank():
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO custom_question_bank
-                (filename, original_filename, file_path, questions_text, parsed_questions, uploaded_by, description, tags)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (original_filename, file_path, questions_text, parsed_questions, uploaded_by, description, tags)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
-            """, (unique_filename, original_filename, filepath,
+            """, (original_filename, filepath,
                   questions_text, _json.dumps(parsed_questions),
                   user_id, description, tags))
             qb_id = cur.fetchone()[0]
             conn.commit()
         stored = True
 
-        logger.info(f"[CUSTOM QB] Uploaded question bank #{qb_id}: {file.filename} ({len(parsed_questions)} questions parsed)")
+        logger.info(
+            "[CUSTOM QB] Uploaded question bank #%s (%s questions parsed)",
+            qb_id,
+            len(parsed_questions),
+        )
 
         return jsonify({
             'status': 'success',

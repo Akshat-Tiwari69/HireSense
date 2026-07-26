@@ -6,7 +6,6 @@ import psycopg2
 import pytest
 
 import user_db
-from app import app
 from user_db import DuplicateEmailError
 
 
@@ -62,23 +61,13 @@ def test_create_user_maps_unique_violation_to_duplicate_email(monkeypatch):
         user_db.create_user("user@example.com", "hash", "interviewer", "User")
 
 
-def test_registration_race_returns_conflict(monkeypatch):
-    monkeypatch.setattr("auth.get_user_by_email", lambda _email: None)
-    monkeypatch.setattr("auth.hash_password", lambda _password: "hash")
+def test_user_lookup_by_id_returns_sector_assignment(monkeypatch):
+    @contextmanager
+    def connection_factory():
+        yield _Connection(
+            _Cursor((1, "reviewer@example.com", "recruiter", "Reviewer", None, None, 12))
+        )
 
-    def duplicate(*_args, **_kwargs):
-        raise DuplicateEmailError("Email already exists")
+    monkeypatch.setattr(user_db, "db_connection", connection_factory)
 
-    monkeypatch.setattr("auth.create_user", duplicate)
-    response = app.test_client().post(
-        "/api/auth/register",
-        json={
-            "email": "race@example.com",
-            "password": "password123",
-            "role": "interviewer",
-            "name": "Race User",
-        },
-    )
-
-    assert response.status_code == 409
-    assert response.get_json()["message"] == "User with this email already exists"
+    assert user_db.get_user_by_id(1)["sector_id"] == 12

@@ -2,12 +2,18 @@
 
 import io
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from flask_jwt_extended import create_access_token
 
-from admin_content import _extract_resume_zip, _normalize_parsed_questions
+import admin_content
+from admin_content import (
+    _extract_resume_zip,
+    _normalize_parsed_questions,
+    _process_single_resume,
+)
 from app import app
 
 
@@ -101,3 +107,102 @@ def test_bulk_upload_rejects_rar_archives():
 
     assert response.status_code == 400
     assert response.get_json()["message"] == "Please upload a .zip file"
+
+
+def test_unreadable_bulk_resume_has_no_fake_shortlist_decision(monkeypatch, tmp_path):
+    import pypdf
+    import resume_parser
+
+    resume_path = tmp_path / "unreadable.pdf"
+    resume_path.write_bytes(b"not-a-real-pdf")
+    captured = {}
+
+    class Page:
+        @staticmethod
+        def extract_text():
+            return ""
+
+    class Reader:
+        pages = [Page()]
+
+    monkeypatch.setattr(pypdf, "PdfReader", lambda _stream: Reader())
+    monkeypatch.setattr(resume_parser, "parse_resume", lambda *_args: {})
+
+    def fake_insert_candidate_application(**kwargs):
+        captured.update(kwargs)
+        return 17
+
+    monkeypatch.setattr(
+        admin_content,
+        "insert_candidate_application",
+        fake_insert_candidate_application,
+    )
+
+    result = _process_single_resume(
+        str(resume_path),
+        resume_path.name,
+        {"skills": [], "min_experience": 0},
+        {"title": "Engineer"},
+        3,
+    )
+
+    assert result["status"] == "success"
+    assert captured["parsed_data"]["shortlist_status"] is None
+
+
+def test_question_bank_persists_one_canonical_filename(monkeypatch, tmp_path):
+    class Cursor:
+        def execute(self, query, params):
+            self.query = " ".join(query.split())
+            self.params = params
+
+        @staticmethod
+        def fetchone():
+            return (17,)
+
+    class Connection:
+        def __init__(self):
+            self.cursor_instance = Cursor()
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            pass
+
+    connection = Connection()
+
+    @contextmanager
+    def fake_db_connection():
+        yield connection
+
+    monkeypatch.setattr(admin_content, "db_connection", fake_db_connection)
+    monkeypatch.setattr(
+        admin_content, "get_upload_subdirectory", lambda *args, **kwargs: tmp_path
+    )
+    monkeypatch.setattr(
+        admin_content, "_extract_text_from_file", lambda *args: "Q" * 40
+    )
+    monkeypatch.setattr(
+        admin_content,
+        "_parse_questions_from_text",
+        lambda *args: [{"question": "What is Python?"}],
+    )
+
+    with app.app_context():
+        token = create_access_token(
+            identity="1",
+            additional_claims={"role": "admin", "name": "Admin"},
+        )
+
+    response = app.test_client().post(
+        "/api/admin/question-bank/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"file": (io.BytesIO(b"question bank"), "questions.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    assert "(original_filename, file_path" in connection.cursor_instance.query
+    assert "(filename, original_filename" not in connection.cursor_instance.query
+    assert len(connection.cursor_instance.params) == 7

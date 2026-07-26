@@ -1,17 +1,26 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, Check, Eye, EyeOff, Loader2, LockKeyhole } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+
+import Logo from '../components/Logo';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../hooks/use-toast';
-import Logo from '../components/Logo';
 import { api } from '../services/api';
+
+const routeForRole = (role) => {
+  if (['admin', 'super_admin'].includes(role)) return '/admin';
+  if (role === 'proctor') return '/proctor';
+  return '/dashboard';
+};
 
 const LoginPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
+  const { signIn, signOut, status, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -19,165 +28,148 @@ const LoginPage = () => {
   const [errors, setErrors] = useState({});
   const [loginError, setLoginError] = useState('');
 
+  useEffect(() => {
+    if (status === 'authenticated') {
+      navigate(routeForRole(user?.role), { replace: true });
+    }
+  }, [navigate, status, user?.role]);
+
   const validateForm = () => {
-    const newErrors = {};
-    if (!email) {
-      newErrors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Invalid email format';
-    }
-    if (!password) {
-      newErrors.password = 'Password is required';
-    }
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const nextErrors = {};
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) nextErrors.email = 'Enter your work email.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) nextErrors.email = 'Enter a valid email address.';
+    if (!password) nextErrors.password = 'Enter your password.';
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
   };
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  const handleLogin = async (event) => {
+    event.preventDefault();
     if (!validateForm()) return;
 
     setLoading(true);
     setLoginError('');
+    signOut();
     try {
-      const res = await api.post('/api/auth/login', { email, password });
-      const token = res?.data?.data?.access_token;
-      const userRole = res?.data?.data?.user?.role;
-      const userId = res?.data?.data?.user?.id;
-      if (!token) throw new Error('No token received');
-
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('userEmail', email);
-      localStorage.setItem('userRole', userRole);
-      if (userId) localStorage.setItem('user_id', String(userId));
-      toast({ title: 'Login successful', description: 'Welcome back!' });
-
-      // Redirect based on role
-      if (userRole === 'admin' || userRole === 'super_admin') {
-        navigate('/admin');
-      } else if (userRole === 'proctor') {
-        navigate('/proctor');
-      } else {
-        navigate('/dashboard');
-      }
-    } catch (err) {
-      const message = err?.response?.data?.message || 'Invalid credentials. Please check your email and password.';
-      setLoginError(message);
-      toast({
-        variant: 'destructive',
-        title: 'Login failed',
-        description: message,
+      const response = await api.post('/api/auth/login', {
+        email: email.trim(),
+        password,
       });
+      const token = response?.data?.data?.access_token;
+      const authenticatedUser = response?.data?.data?.user;
+      if (!token || !authenticatedUser?.role) throw new Error('Invalid login response');
+
+      signIn({ token, user: authenticatedUser });
+      toast({ title: 'Signed in', description: `Welcome back${authenticatedUser.name ? `, ${authenticatedUser.name}` : ''}.` });
+      navigate(routeForRole(authenticatedUser.role), { replace: true });
+    } catch (error) {
+      signOut();
+      const message = error?.response?.data?.message || 'We could not sign you in with those credentials.';
+      setLoginError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4 sm:p-6">
-      <Card className="w-full max-w-md shadow-2xl border-none">
-        <CardHeader className="space-y-4 text-center pb-6">
-          <div className="flex justify-center">
-            <div className="p-3 bg-indigo-50 rounded-xl">
-              <Logo variant="icon" size="large" />
-            </div>
-          </div>
-          <div>
-            <CardTitle className="text-2xl sm:text-3xl font-bold text-slate-900">Welcome Back</CardTitle>
-            <CardDescription className="text-sm sm:text-base text-slate-600 mt-2">
-              Sign in to access your dashboard
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4" aria-label="Login form">
-            {loginError && (
-              <div className="bg-red-50 border border-red-300 rounded-lg p-4 mb-4">
-                <p className="text-sm text-red-800 font-medium">
-                  <strong>Login Failed:</strong> {loginError}
-                </p>
-                <p className="text-xs text-red-600 mt-1">
-                  Please verify your email and password and try again.
-                </p>
-              </div>
-            )}
+  const accessMessage = loginError || (location.state?.accessDenied
+    ? 'This account is not authorized for the requested workspace.'
+    : '');
 
+  return (
+    <main className="grid min-h-screen bg-card lg:grid-cols-[.92fr_1.08fr]">
+      <section className="relative hidden overflow-hidden bg-[#0b1220] p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-14">
+        <div aria-hidden="true" className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(148,163,184,.09)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,.09)_1px,transparent_1px)] [background-size:40px_40px]" />
+        <div aria-hidden="true" className="absolute -left-32 top-1/3 h-96 w-96 rounded-full bg-primary/25 blur-[120px]" />
+        <Link to="/" className="relative z-10 w-fit"><Logo className="text-white" /></Link>
+        <div className="relative z-10 max-w-lg">
+          <p className="text-xs font-semibold uppercase tracking-[.16em] text-blue-300">Secure staff workspace</p>
+          <h1 className="display-face mt-4 text-5xl leading-tight">The right context, before the next decision.</h1>
+          <p className="mt-5 text-lg leading-8 text-slate-300">Review applicants, coordinate assessments, and record outcomes in the workspace assigned to your role.</p>
+          <div className="mt-8 space-y-3 text-sm text-slate-300">
+            {['Server-verified staff sessions', 'Role-scoped candidate access', 'Separate automated and human decisions'].map((item) => (
+              <div key={item} className="flex items-center gap-3"><span className="flex h-6 w-6 items-center justify-center rounded-md bg-white/10"><Check className="h-3.5 w-3.5 text-emerald-300" /></span>{item}</div>
+            ))}
+          </div>
+        </div>
+        <p className="relative z-10 text-xs text-slate-500">HireSense hiring operations</p>
+      </section>
+
+      <section className="flex min-h-screen items-center justify-center px-5 py-10 sm:px-8">
+        <div className="page-enter w-full max-w-[430px]">
+          <div className="mb-10 flex items-center justify-between lg:hidden">
+            <Link to="/"><Logo /></Link>
+            <Button asChild variant="ghost" size="sm"><Link to="/"><ArrowLeft />Home</Link></Button>
+          </div>
+
+          <div className="mb-8">
+            <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-primary"><LockKeyhole className="h-5 w-5" /></div>
+            <p className="eyebrow">Staff access</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">Sign in to HireSense</h1>
+            <p className="mt-3 text-muted-foreground">Use the account issued by your hiring administrator.</p>
+          </div>
+
+          {accessMessage && (
+            <div role="alert" className="mb-5 rounded-lg border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              {accessMessage}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-5" noValidate>
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-slate-700">Email</Label>
+              <Label htmlFor="email">Work email</Label>
               <Input
                 id="email"
                 name="email"
                 type="email"
-                placeholder="Enter your email"
                 value={email}
-                onChange={(e) => { setEmail(e.target.value); setLoginError(''); }}
-                className={`h-11 ${errors.email ? 'border-red-500' : ''}`}
-                aria-label="Email address"
-                aria-invalid={!!errors.email}
-                aria-describedby={errors.email ? "email-error" : undefined}
-                required
+                onChange={(event) => { setEmail(event.target.value); setErrors((current) => ({ ...current, email: '' })); setLoginError(''); }}
+                placeholder="name@company.com"
                 autoComplete="email"
+                aria-invalid={Boolean(errors.email)}
+                aria-describedby={errors.email ? 'email-error' : undefined}
+                autoFocus
               />
-              {errors.email && (
-                <p className="text-sm text-red-600">{errors.email}</p>
-              )}
+              {errors.email && <p id="email-error" className="text-sm text-destructive">{errors.email}</p>}
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-slate-700">Password</Label>
+              <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Input
                   id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Enter your password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => { setPassword(e.target.value); setLoginError(''); }}
-                  className={`h-11 pr-10 ${errors.password ? 'border-red-500' : ''}`}
-                  aria-label="Password"
+                  onChange={(event) => { setPassword(event.target.value); setErrors((current) => ({ ...current, password: '' })); setLoginError(''); }}
+                  placeholder="Enter your password"
                   autoComplete="current-password"
+                  aria-invalid={Boolean(errors.password)}
+                  aria-describedby={errors.password ? 'password-error' : undefined}
+                  className="pr-11"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 transition-colors"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              {errors.password && (
-                <p className="text-sm text-red-600">{errors.password}</p>
-              )}
+              {errors.password && <p id="password-error" className="text-sm text-destructive">{errors.password}</p>}
             </div>
 
-            <Button
-              type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-700 h-11 text-base font-medium transition-all duration-300 hover:scale-[1.02]"
-              disabled={loading}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                'Sign In'
-              )}
+            <Button type="submit" size="lg" className="w-full" disabled={loading}>
+              {loading ? <><Loader2 className="animate-spin" />Verifying account…</> : 'Continue to workspace'}
             </Button>
           </form>
 
-          <div className="mt-6 text-center">
-            <Button
-              variant="link"
-              onClick={() => navigate('/')}
-              className="text-slate-600 hover:text-indigo-600"
-            >
-              ← Back to home
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+          <p className="mt-7 text-center text-xs leading-5 text-muted-foreground">
+            Access is logged and restricted to your assigned role. Need access? Contact your HireSense administrator.
+          </p>
+        </div>
+      </section>
+    </main>
   );
 };
 

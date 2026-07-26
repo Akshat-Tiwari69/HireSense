@@ -242,6 +242,26 @@ def test_coding_problem_rejects_invalid_shape_and_normalizes_valid_shape():
     ]
 
 
+def test_coding_problem_canonicalizes_legacy_python_function_signature():
+    generator = _generator_without_provider()
+    generator.client = MagicMock()
+    raw_problem = {
+        "title": "Count distinct elements",
+        "description": "Return the number of distinct values.",
+        "starter_code": {
+            "function_signature": "def count_distinct_elements(arr: List[int]) -> int:"
+        },
+        "test_cases": [{"input": "[1, 1, 2]", "expected": "2"}],
+    }
+
+    with patch.object(generator, "_generate_problem_from_api", return_value=raw_problem):
+        problem = generator.generate_coding_problem(["Python"], difficulty="easy")
+
+    assert set(problem["starter_code"]) == {"python"}
+    assert problem["starter_code"]["python"].endswith("\n    pass")
+    assert "from __future__ import annotations" in problem["starter_code"]["python"]
+
+
 def test_test_cases_and_psychometric_outputs_have_strict_shapes():
     generator = _generator_without_provider()
     generator.client = MagicMock()

@@ -1,387 +1,255 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BriefcaseBusiness,
+  Check,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  LockKeyhole,
+  MapPin,
+  UploadCloud,
+  X,
+} from 'lucide-react';
+import { Link, useLocation, useParams } from 'react-router-dom';
+
+import Logo from '../components/Logo';
+import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { Upload, CheckCircle, Loader2, FileText, Briefcase, MapPin, Clock, AlertCircle } from 'lucide-react';
-import { useToast } from '../hooks/use-toast';
-import Logo from '../components/Logo';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { api } from '../services/api';
 
+const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
+const ACCEPTED_EXTENSIONS = new Set(['pdf', 'docx']);
+
 const ApplyPage = () => {
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const location = useLocation();
+  const { jobId } = useParams();
+  const fileInputRef = useRef(null);
+  const [jobs, setJobs] = useState([]);
+  const [jobsState, setJobsState] = useState('loading');
+  const [selectedJobId, setSelectedJobId] = useState(jobId || String(location.state?.job?.id || ''));
+  const [contact, setContact] = useState({ name: '', email: '', phone: '' });
   const [file, setFile] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [candidateInfo, setCandidateInfo] = useState({ name: '', email: '' });
+  const [dragActive, setDragActive] = useState(false);
   const [errors, setErrors] = useState({});
   const [uploadError, setUploadError] = useState('');
-  const [dragActive, setDragActive] = useState(false);
-
-  // Job postings state
-  const [jobPostings, setJobPostings] = useState([]);
-  const [loadingJobs, setLoadingJobs] = useState(true);
-  const [selectedJobId, setSelectedJobId] = useState('');
-
+  const [submitting, setSubmitting] = useState(false);
+  const [receipt, setReceipt] = useState(null);
 
   useEffect(() => {
-    fetchActiveJobs();
-  }, []);
+    let active = true;
+    api.get('/api/jobs/postings?status=active')
+      .then(({ data }) => {
+        if (!active) return;
+        const openJobs = data?.data || [];
+        setJobs(openJobs);
+        setJobsState('ready');
+        if (jobId && !openJobs.some((job) => String(job.id) === String(jobId))) {
+          setSelectedJobId('');
+          setUploadError('That role is no longer open. Choose another position before submitting.');
+        }
+      })
+      .catch(() => active && setJobsState('error'));
+    return () => { active = false; };
+  }, [jobId]);
 
-  const fetchActiveJobs = async () => {
-    try {
-      const res = await api.get('/api/jobs/postings?status=active');
-      setJobPostings(res.data.data || []);
-    } catch (err) {
-      console.warn('Could not load job postings:', err);
-    } finally {
-      setLoadingJobs(false);
+  const selectedJob = useMemo(
+    () => jobs.find((job) => String(job.id) === String(selectedJobId)) || location.state?.job || null,
+    [jobs, location.state?.job, selectedJobId],
+  );
+
+  const chooseFile = (nextFile) => {
+    if (!nextFile) return;
+    const extension = nextFile.name.split('.').pop()?.toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.has(extension)) {
+      setErrors((current) => ({ ...current, file: 'Choose a PDF or DOCX resume.' }));
+      return;
     }
-  };
-
-  const validateForm = () => {
-    const newErrors = {};
-    if (!selectedJobId) newErrors.job = 'Please select a job to apply for';
-    if (!file) newErrors.file = 'Resume is required';
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
+    if (nextFile.size > MAX_FILE_SIZE) {
+      setErrors((current) => ({ ...current, file: `Resume files must be ${MAX_FILE_SIZE_MB} MB or smaller.` }));
+      return;
     }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileChange(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileChange = (selectedFile) => {
-    if (selectedFile) {
-      const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-      if (!validTypes.includes(selectedFile.type)) {
-        toast({
-          variant: 'destructive',
-          title: 'Invalid file type',
-          description: 'Please upload a PDF or DOCX file',
-        });
-        return;
-      }
-      if (selectedFile.size > 5 * 1024 * 1024) {
-        toast({
-          variant: 'destructive',
-          title: 'File too large',
-          description: 'File size must be less than 5MB',
-        });
-        return;
-      }
-      setFile(selectedFile);
-      setErrors(prev => ({ ...prev, file: '' }));
-      setUploadError(''); // Clear any previous upload errors
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validateForm()) return;
-
-    setLoading(true);
+    setFile(nextFile);
+    setErrors((current) => ({ ...current, file: '' }));
     setUploadError('');
+  };
+
+  const validate = () => {
+    const nextErrors = {};
+    if (!selectedJobId) nextErrors.job = 'Choose the position you are applying for.';
+    if (!contact.name.trim()) nextErrors.name = 'Enter your full name.';
+    if (!contact.email.trim()) nextErrors.email = 'Enter your email address.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email.trim())) nextErrors.email = 'Enter a valid email address.';
+    if (!file) nextErrors.file = 'Attach your resume.';
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!validate()) return;
+    setSubmitting(true);
+    setUploadError('');
+
+    const form = new FormData();
+    form.append('file', file);
+    form.append('job_id', selectedJobId);
+    form.append('name', contact.name.trim());
+    form.append('email', contact.email.trim());
+    if (contact.phone.trim()) form.append('phone', contact.phone.trim());
+
     try {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('job_id', selectedJobId);
-
-      const res = await api.post('/api/resume/upload', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const response = await api.post('/api/resume/upload', form);
+      const data = response?.data?.data || {};
+      setReceipt({
+        name: contact.name.trim(),
+        email: contact.email.trim(),
+        jobTitle: data.selected_job?.title || selectedJob?.title,
       });
-
-      // Store candidate info from response
-      const name = res.data?.candidate?.name || res.data?.data?.candidate?.name || 'Candidate';
-      const email = res.data?.candidate?.email || res.data?.data?.candidate?.email || '';
-      setCandidateInfo({ name, email });
-
-      setSubmitted(true);
-      toast({
-        title: 'Application submitted!',
-        description: 'Your resume is being analyzed by our AI.',
-      });
-      console.log('Upload response', res.data);
-    } catch (err) {
-      const message = err?.response?.data?.message || 'Upload failed';
-      setUploadError(message);
-      toast({
-        variant: 'destructive',
-        title: 'Upload failed',
-        description: message,
-      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error) {
+      setUploadError(error?.response?.data?.message || 'The application could not be submitted. Please try again.');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  if (submitted) {
+  if (receipt) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4 sm:p-6">
-        <Card className="w-full max-w-md shadow-2xl border-none text-center">
-          <CardContent className="pt-12 pb-12">
-            <div className="flex justify-center mb-6">
-              <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-12 h-12 text-emerald-600" />
-              </div>
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-4">
-              Thank You{candidateInfo.name ? `, ${candidateInfo.name}` : ''}!
-            </h2>
-            <p className="text-slate-600 mb-4 text-base sm:text-lg">
-              Your application has been successfully submitted.
-            </p>
-            {candidateInfo.email && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                <p className="text-sm text-blue-900">
-                  <strong>Contact Email:</strong> {candidateInfo.email}
-                </p>
-                <p className="text-xs text-blue-700 mt-2">
-                  You will be contacted on this email if selected for the next round.
-                </p>
-              </div>
-            )}
-            <div className="bg-indigo-50 p-4 rounded-lg mb-6">
-              <p className="text-sm text-indigo-800">
-                <strong>Next Steps:</strong> Our AI is evaluating your application. If selected, you'll receive an email with assessment details within 3-5 business days.
-              </p>
-            </div>
-
-            <Button
-              onClick={() => navigate('/')}
-              className="bg-indigo-600 hover:bg-indigo-700"
-            >
-              Back to Home
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
+        <div className="page-enter surface-card w-full max-w-xl rounded-2xl bg-card p-7 text-center sm:p-10">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-success"><CheckCircle2 className="h-7 w-7" /></div>
+          <p className="eyebrow mt-7">Application received</p>
+          <h1 className="display-face mt-3 text-4xl">Thank you, {receipt.name}.</h1>
+          <p className="mx-auto mt-4 max-w-md leading-7 text-muted-foreground">Your application{receipt.jobTitle ? ` for ${receipt.jobTitle}` : ''} is safely in the hiring queue. The team will contact you at <span className="font-medium text-foreground">{receipt.email}</span> if the process moves forward.</p>
+          <div className="mt-7 rounded-xl border bg-muted/45 p-4 text-left text-sm">
+            <div className="flex gap-3"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span>Your resume and application were stored successfully.</span></div>
+            <div className="mt-3 flex gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><span>Do not submit the same application again; updates should go through the recruiter.</span></div>
+          </div>
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <Button asChild><Link to="/">Return home</Link></Button>
+            <Button asChild variant="outline"><Link to="/jobs">View other roles</Link></Button>
+          </div>
+        </div>
+      </main>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 py-8 sm:py-12 px-4 sm:px-6">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-6 sm:mb-8">
-          <div className="flex items-center justify-center mb-4">
-            <Logo size="default" />
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3">Apply for Position</h1>
-          <p className="text-base sm:text-lg text-slate-600">Select a role and upload your resume — AI will score you against that specific job</p>
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card">
+        <div className="page-wrap flex h-16 items-center justify-between">
+          <Link to="/"><Logo /></Link>
+          <Button asChild variant="ghost" size="sm"><Link to="/jobs"><ArrowLeft />Open roles</Link></Button>
         </div>
+      </header>
 
-        {/* Step 1: Select Job */}
-        <Card className={`shadow-lg border-2 mb-6 transition-colors ${selectedJobId ? 'border-emerald-300 bg-emerald-50/30' : errors.job ? 'border-red-300' : 'border-slate-200'}`}>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-sm font-bold">1</div>
-              <Briefcase className="w-5 h-5 text-indigo-600" />
-              Select the Position You're Applying For
-            </CardTitle>
-            <CardDescription>Your resume will be evaluated specifically against this role's requirements</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loadingJobs ? (
-              <div className="flex items-center gap-2 text-slate-500 py-4 justify-center">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Loading open positions...
-              </div>
-            ) : jobPostings.length === 0 ? (
-              <div className="text-center py-6 text-slate-500">
-                <AlertCircle className="w-8 h-8 mx-auto mb-2 text-amber-500" />
-                <p className="font-medium">No open positions at the moment</p>
-                <p className="text-sm mt-1">Check back later or upload your resume for general consideration</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {jobPostings.map((job) => {
-                  const isSelected = selectedJobId === String(job.id);
-                  const skills = job.required_skills_list || (job.required_skills ? job.required_skills.split(',').map(s => s.trim()).filter(Boolean) : []);
-                  return (
-                    <div
-                      key={job.id}
-                      onClick={() => { setSelectedJobId(String(job.id)); setErrors(prev => ({ ...prev, job: '' })); }}
-                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 ${
-                        isSelected
-                          ? 'border-indigo-500 bg-indigo-50 shadow-md ring-2 ring-indigo-200'
-                          : 'border-slate-200 bg-white hover:border-indigo-300 hover:shadow-sm'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                              isSelected ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
-                            }`}>
-                              {isSelected && <CheckCircle className="w-3 h-3 text-white" />}
-                            </div>
-                            <h4 className="font-semibold text-slate-900">{job.title}</h4>
-                          </div>
-                          <div className="flex items-center gap-3 mt-1 ml-6 text-xs text-slate-500">
-                            {job.department && <span>{job.department}</span>}
-                            {job.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{job.location}</span>}
-                            {job.experience_level && (
-                              <Badge className="bg-indigo-100 text-indigo-800 text-xs">
-                                {job.experience_level.charAt(0).toUpperCase() + job.experience_level.slice(1)}
-                              </Badge>
-                            )}
-                            {job.employment_type && (
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{job.employment_type}</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      {skills.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-2 ml-6">
-                          {skills.slice(0, 6).map((skill, i) => (
-                            <Badge key={i} className="bg-blue-100 text-blue-800 text-xs">{skill}</Badge>
-                          ))}
-                          {skills.length > 6 && (
-                            <Badge className="bg-slate-100 text-slate-600 text-xs">+{skills.length - 6}</Badge>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+      <main className="page-wrap grid gap-10 py-10 lg:grid-cols-[.68fr_1.32fr] lg:py-14">
+        <aside className="lg:sticky lg:top-10 lg:h-fit">
+          <p className="eyebrow">Candidate application</p>
+          <h1 className="display-face mt-3 text-balance text-4xl sm:text-5xl">Tell us where your experience can make an impact.</h1>
+          <p className="mt-5 max-w-md leading-7 text-muted-foreground">Choose one open role, provide reliable contact details, and attach the resume you want the hiring team to review.</p>
+          <div className="mt-8 space-y-4 border-t pt-6 text-sm text-muted-foreground">
+            <p className="flex gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-primary" />Your resume is available only to authorized hiring staff.</p>
+            <p className="flex gap-3"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" />Automated extraction supports review; people make the final hiring decision.</p>
+          </div>
+        </aside>
+
+        <form onSubmit={handleSubmit} className="page-enter surface-card rounded-2xl bg-card p-5 sm:p-8" noValidate>
+          <section className="border-b pb-8">
+            <div className="mb-5 flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-primary">1</span>
+              <div><h2 className="text-lg font-semibold">Choose a role</h2><p className="text-sm text-muted-foreground">Applications are evaluated against a specific open position.</p></div>
+            </div>
+            {jobsState === 'loading' && <div className="flex h-10 items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading open positions…</div>}
+            {jobsState === 'error' && <div role="alert" className="rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">Open positions could not be loaded. Refresh before submitting.</div>}
+            {jobsState === 'ready' && jobs.length === 0 && <div className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">There are no active positions accepting applications right now.</div>}
+            {jobs.length > 0 && (
+              <Select value={selectedJobId} onValueChange={(value) => { setSelectedJobId(value); setErrors((current) => ({ ...current, job: '' })); }}>
+                <SelectTrigger
+                  aria-label="Open role"
+                  aria-invalid={Boolean(errors.job)}
+                  aria-describedby={errors.job ? 'job-error' : undefined}
+                ><BriefcaseBusiness className="mr-2 h-4 w-4 text-muted-foreground" /><SelectValue placeholder="Select an open position" /></SelectTrigger>
+                <SelectContent>{jobs.map((job) => <SelectItem key={job.id} value={String(job.id)}>{job.title}{job.work_mode ? ` · ${job.work_mode}` : ''}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+            {errors.job && <p id="job-error" className="mt-2 text-sm text-destructive">{errors.job}</p>}
+            {selectedJob && (
+              <div className="mt-4 rounded-xl border bg-muted/35 p-4">
+                <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{selectedJob.title}</span>{selectedJob.experience_level && <Badge variant="secondary" className="capitalize">{selectedJob.experience_level}</Badge>}</div>
+                <div className="mt-2 flex flex-wrap gap-4 text-sm text-muted-foreground">{selectedJob.department && <span>{selectedJob.department}</span>}{selectedJob.work_mode && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{selectedJob.work_mode}</span>}</div>
               </div>
             )}
-            {errors.job && <p className="text-sm text-red-600 mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.job}</p>}
-          </CardContent>
-        </Card>
+          </section>
 
-        <Card className="shadow-2xl border-none">
-          <CardHeader>
-            <CardTitle className="text-xl sm:text-2xl flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-sm font-bold">2</div>
-              Upload Your Resume
-            </CardTitle>
-            <CardDescription className="text-sm sm:text-base">
-              {selectedJobId && jobPostings.length > 0
-                ? `AI will score your resume against: ${jobPostings.find(j => String(j.id) === selectedJobId)?.title || 'Selected Position'}`
-                : 'We auto-detect your name, email, and phone from the resume. No manual entry needed.'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <Label>Resume Upload *</Label>
-                <div
-                  className={`border-2 border-dashed rounded-lg p-6 sm:p-8 text-center transition-all duration-300 ${dragActive
-                    ? 'border-indigo-500 bg-indigo-50'
-                    : errors.file
-                      ? 'border-red-500'
-                      : 'border-slate-300 hover:border-indigo-400'
-                    }`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  {file ? (
-                    <div className="space-y-3">
-                      <FileText className="w-10 h-10 sm:w-12 sm:h-12 text-indigo-600 mx-auto" />
-                      <p className="font-medium text-slate-900 text-sm sm:text-base">{file.name}</p>
-                      <p className="text-xs sm:text-sm text-slate-600">{(file.size / 1024).toFixed(2)} KB</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setFile(null)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload className="w-10 h-10 sm:w-12 sm:h-12 text-slate-400 mx-auto mb-4" />
-                      <p className="text-slate-700 font-medium mb-2 text-sm sm:text-base">
-                        Drop your resume here or click to browse
-                      </p>
-                      <p className="text-xs sm:text-sm text-slate-500 mb-4">PDF or DOCX, max 5MB</p>
-                      <Input
-                        type="file"
-                        className="hidden"
-                        id="file-upload"
-                        accept=".pdf,.doc,.docx"
-                        onChange={(e) => handleFileChange(e.target.files[0])}
-                      />
-                      <Label
-                        htmlFor="file-upload"
-                        className="cursor-pointer inline-block px-4 sm:px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm sm:text-base"
-                      >
-                        Choose File
-                      </Label>
-                    </>
-                  )}
-                </div>
-                {errors.file && <p className="text-sm text-red-600">{errors.file}</p>}
-              </div>
-
-              {uploadError && (
-                <div className="bg-red-50 border border-red-300 rounded-lg p-4 mb-4">
-                  <p className="text-sm text-red-800 font-medium">
-                    <strong>Upload Failed:</strong> {uploadError}
-                  </p>
-                  <p className="text-xs text-red-600 mt-1">
-                    Please ensure your resume contains a valid email address or try a different file format.
-                  </p>
-                </div>
-              )}
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-800">
-                  <strong>Privacy Notice:</strong> We process your resume to extract contact details and evaluate your application. Resume content may be processed by the configured AI provider.
-                </p>
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 h-11 sm:h-12 text-base font-medium transition-all duration-300 hover:scale-[1.02]"
-                disabled={loading}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Submitting Application...
-                  </>
-                ) : (
-                  'Submit Application'
-                )}
-              </Button>
-            </form>
-
-            <div className="mt-6 text-center">
-              <Button
-                variant="link"
-                onClick={() => navigate('/')}
-                className="text-slate-600 hover:text-indigo-600"
-              >
-                ← Back to home
-              </Button>
+          <section className="border-b py-8">
+            <div className="mb-5 flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-primary">2</span>
+              <div><h2 className="text-lg font-semibold">Contact details</h2><p className="text-sm text-muted-foreground">We use these details for application communication.</p></div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2"><Label htmlFor="name">Full name</Label><Input id="name" value={contact.name} onChange={(event) => setContact((current) => ({ ...current, name: event.target.value }))} autoComplete="name" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? 'name-error' : undefined} />{errors.name && <p id="name-error" className="text-sm text-destructive">{errors.name}</p>}</div>
+              <div className="space-y-2"><Label htmlFor="email">Email address</Label><Input id="email" type="email" value={contact.email} onChange={(event) => setContact((current) => ({ ...current, email: event.target.value }))} autoComplete="email" aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? 'email-error' : undefined} />{errors.email && <p id="email-error" className="text-sm text-destructive">{errors.email}</p>}</div>
+              <div className="space-y-2"><Label htmlFor="phone">Phone <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="phone" type="tel" value={contact.phone} onChange={(event) => setContact((current) => ({ ...current, phone: event.target.value }))} autoComplete="tel" /></div>
+            </div>
+          </section>
+
+          <section className="pt-8">
+            <div className="mb-5 flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-primary">3</span>
+              <div><h2 className="text-lg font-semibold">Attach your resume</h2><p className="text-sm text-muted-foreground">PDF or DOCX · maximum {MAX_FILE_SIZE_MB} MB.</p></div>
+            </div>
+            <div
+              onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={(event) => { event.preventDefault(); setDragActive(false); }}
+              onDrop={(event) => { event.preventDefault(); setDragActive(false); chooseFile(event.dataTransfer.files?.[0]); }}
+              className={`rounded-xl border border-dashed p-5 transition-colors ${dragActive ? 'border-primary bg-accent' : errors.file ? 'border-destructive bg-destructive/5' : 'border-input bg-muted/25'}`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx"
+                className="sr-only"
+                aria-label="Resume file"
+                aria-invalid={Boolean(errors.file)}
+                aria-describedby={errors.file ? 'resume-error' : undefined}
+                onChange={(event) => chooseFile(event.target.files?.[0])}
+              />
+              {file ? (
+                <div className="flex items-center gap-4">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-card text-primary shadow-sm"><FileText className="h-5 w-5" /></span>
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{file.name}</p><p className="mt-0.5 text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(2)} MB</p></div>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }} aria-label="Remove resume"><X /></Button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full flex-col items-center py-5 text-center">
+                  <UploadCloud className="h-7 w-7 text-primary" />
+                  <span className="mt-3 text-sm font-semibold">Drop your resume here or choose a file</span>
+                  <span className="mt-1 text-xs text-muted-foreground">The server validates the document before it is accepted.</span>
+                </button>
+              )}
+            </div>
+            {errors.file && <p id="resume-error" className="mt-2 text-sm text-destructive">{errors.file}</p>}
+
+            {uploadError && <div role="alert" className="mt-5 rounded-lg border border-destructive/25 bg-destructive/5 p-4 text-sm text-destructive">{uploadError}</div>}
+
+            <div className="mt-6 rounded-lg border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
+              By submitting, you confirm the information is yours to share and acknowledge the <Link to="/privacy" className="font-medium text-primary hover:underline">candidate privacy notice</Link>.
+            </div>
+
+            <Button type="submit" size="lg" className="mt-6 w-full sm:w-auto" disabled={submitting || jobsState !== 'ready' || jobs.length === 0}>
+              {submitting ? <><Loader2 className="animate-spin" />Submitting securely…</> : <>Submit application <ArrowRight /></>}
+            </Button>
+          </section>
+        </form>
+      </main>
     </div>
   );
 };

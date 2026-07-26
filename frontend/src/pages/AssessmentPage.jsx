@@ -1,1259 +1,682 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  CheckCircle, Loader2, Video, VideoOff,
-  Eye, ShieldAlert, Timer, AlertTriangle
+  AlertTriangle,
+  BookOpen,
+  Check,
+  Clock3,
+  Code2,
+  LoaderCircle,
+  ShieldCheck,
+  Video,
+  VideoOff,
 } from 'lucide-react';
+
+import CodingSection from '../components/assessment/CodingSection';
+import MCQSection from '../components/assessment/MCQSection';
+import PsychometricSection from '../components/assessment/PsychometricSection';
+import Logo from '../components/Logo';
+import { Button } from '../components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import { useToast } from '../hooks/use-toast';
 import { useProctorStream } from '../hooks/useProctorStream';
-import Logo from '../components/Logo';
+import {
+  finalizeAssessmentSubmission,
+  formatAssessmentTime,
+  getCodeLanguages,
+  getStarterCode,
+  normalizeSavedMcqAnswers,
+  normalizeSavedPsychometricAnswers,
+  resolveAssessmentToken,
+} from '../lib/assessment';
 import { api } from '../services/api';
-import MCQSection from '../components/assessment/MCQSection';
-import CodingSection from '../components/assessment/CodingSection';
-import PsychometricSection from '../components/assessment/PsychometricSection';
-import { Progress } from '../components/ui/progress';
 
-// Code execution is proxied through our backend to prevent direct external API calls
-const CODE_EXEC_URL = '/api/interviewee/run-code';
-
-const LANGUAGE_CONFIG = {
-  javascript: { runtime: 'javascript', version: '18.15.0', extension: 'js' },
-  python: { runtime: 'python', version: '3.10.0', extension: 'py' },
-  java: { runtime: 'java', version: '15.0.2', extension: 'java' },
-  cpp: { runtime: 'c++', version: '10.2.0', extension: 'cpp' },
-  c: { runtime: 'c', version: '10.2.0', extension: 'c' },
+const SECTION_META = {
+  knowledge: { label: 'Knowledge', icon: BookOpen },
+  coding: { label: 'Practical exercise', icon: Code2 },
+  workstyle: { label: 'Work style', icon: ShieldCheck },
 };
 
+const getErrorMessage = (error, fallback) => error?.response?.data?.message || fallback;
+
 const AssessmentPage = () => {
-  const navigate = useNavigate();
   const { toast } = useToast();
-  const { token } = useParams();
+  const videoRef = useRef(null);
+  const submitRef = useRef(null);
+  const submittingRef = useRef(false);
+  const syncingRef = useRef(false);
+  const pendingSavesRef = useRef(new Set());
+  const answerVersionRef = useRef(new Map());
+  const questionStartedAtRef = useRef(new Map());
+  const cameraErrorReportedRef = useRef('');
 
-  // Assessment state
+  const [accessToken] = useState(() => {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    return resolveAssessmentToken(hash.get('token'));
+  });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [assessmentData, setAssessmentData] = useState(null);
-  const [assessmentId, setAssessmentId] = useState(null);
-  const [candidateName, setCandidateName] = useState('');
-  const [isTechnicalRole, setIsTechnicalRole] = useState(true);
-
-  // Section navigation
-  const [currentSection, setCurrentSection] = useState(0);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-
-  // Answers
+  const [error, setError] = useState('');
+  const [session, setSession] = useState(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [currentSection, setCurrentSection] = useState('knowledge');
+  const [mcqQuestion, setMcqQuestion] = useState(0);
+  const [workstyleQuestion, setWorkstyleQuestion] = useState(0);
   const [mcqAnswers, setMcqAnswers] = useState({});
-  const [code, setCode] = useState('');
-  const [language, setLanguage] = useState('javascript');
+  const [psychometricAnswers, setPsychometricAnswers] = useState({});
+  const [savingMcqId, setSavingMcqId] = useState(null);
+  const [savingPsychometricId, setSavingPsychometricId] = useState(null);
+  const [language, setLanguage] = useState('python');
+  const [codes, setCodes] = useState({});
+  const [savedSolution, setSavedSolution] = useState(null);
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
-  const [psychometricAnswers, setPsychometricAnswers] = useState({});
-
-  // Coding test results
-  const [testsPassed, setTestsPassed] = useState(false);
-  const [codeSaved, setCodeSaved] = useState(false);
-  const [testsPassedCount, setTestsPassedCount] = useState(0);
-  const [totalTestsCount, setTotalTestsCount] = useState(0);
-
-  // Timer
-  const [timeRemaining, setTimeRemaining] = useState(3600); // 60 minutes default
-
-  // Submission
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-
-  // Proctoring
-  const [proctoringEnabled, setProctoringEnabled] = useState(true);
-  const [cameraStream, setCameraStream] = useState(null);
-  const [cameraError, setCameraError] = useState(null);
-  const [faceDetected, setFaceDetected] = useState(false);
-  const [faceCount, setFaceCount] = useState(0);
-  const [detectionInitialized, setDetectionInitialized] = useState(false);
+  const [proctoringActive, setProctoringActive] = useState(false);
   const [violationCount, setViolationCount] = useState(0);
-  const [violationsList, setViolationsList] = useState([]);
-  const [lastViolationType, setLastViolationType] = useState(null);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const screenshotCanvasRef = useRef(null);
-  const faceDetectionIntervalRef = useRef(null);
-  const noFaceCountRef = useRef(0);
-  const multipleFaceCountRef = useRef(0);
-  const verifyAssessmentRef = useRef(null);
-  const reportViolationRef = useRef(null);
-  const autoSubmitRef = useRef(null);
 
-  // Live streaming to interviewer
-  const { isStreaming, streamError } = useProctorStream(
+  const assessmentId = session?.assessment_id;
+  const questions = useMemo(() => session?.mcq_questions || [], [session]);
+  const problem = session?.coding_problem || null;
+  const scenarios = useMemo(() => session?.psychometric_scenarios || [], [session]);
+  const currentCode = codes[language] || '';
+  const codeSaved = savedSolution?.language === language && savedSolution?.code === currentCode;
+  const isTechnical = Boolean(session?.is_technical_role && problem);
+
+  const sections = useMemo(() => [
+    ...(questions.length ? ['knowledge'] : []),
+    ...(isTechnical ? ['coding'] : []),
+    ...(scenarios.length ? ['workstyle'] : []),
+  ], [isTechnical, questions.length, scenarios.length]);
+
+  const { mediaStream, isStreaming, streamError } = useProctorStream(
     assessmentId,
-    token,
-    proctoringEnabled && assessmentId != null
+    accessToken,
+    Boolean(proctoringActive && !submitted),
   );
 
-  // Verify token and load assessment
   useEffect(() => {
-    if (!token) {
-      setError('No assessment token provided. Please use the link from your invitation email.');
-      setLoading(false);
-      return;
+    if (window.location.hash) {
+      window.history.replaceState(null, document.title, '/assessment');
     }
+  }, []);
 
-    verifyAssessmentRef.current?.();
-  }, [token]);
-
-  // Log submitted state changes
   useEffect(() => {
-    console.log('Submitted state changed to:', submitted);
-    if (submitted) {
-      console.log('RENDERING COMPLETION SCREEN - Assessment successfully submitted!');
-    }
-  }, [submitted]);
+    if (!mediaStream || !videoRef.current) return;
+    videoRef.current.srcObject = mediaStream;
+    videoRef.current.play().catch(() => {});
+  }, [mediaStream]);
 
-  // Auto-redirect after submission
   useEffect(() => {
-    if (!submitted) return;
-
-    const timer = setTimeout(() => {
-      console.log('Auto-redirecting to home after assessment submission');
-      navigate('/');
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [navigate, submitted]);
-
-  const verifyAndLoadAssessment = async () => {
-    try {
-      // First verify the token
-      const verifyRes = await api.get(`/api/interviewee/assessment/verify/${token}`);
-      const verifyData = verifyRes.data.data;
-
-      setCandidateName(verifyData.candidate_name);
-      setProctoringEnabled(verifyData.proctoring_enabled);
-
-      if (!verifyData.can_start && !verifyData.already_started) {
-        setError(`Assessment not available yet. Scheduled for ${new Date(verifyData.scheduled_time).toLocaleString()}. You can start ${verifyData.minutes_until_start > 0 ? 'in ' + verifyData.minutes_until_start + ' minutes' : 'within the 30-minute window'}.`);
-        setLoading(false);
-        return;
-      }
-
-      // Start or resume assessment
-      const startRes = await api.post(`/api/interviewee/assessment/start-by-token/${token}`);
-      const { data } = startRes.data;
-
-      // Store URL token in sessionStorage so api.js interceptor can attach
-      // X-Assessment-Token to all subsequent interviewee route requests.
-      sessionStorage.setItem('assessmentToken', token);
-
-      setAssessmentData(data);
-      setAssessmentId(data.assessment_id);
-      setIsTechnicalRole(data.is_technical_role !== false); // Default to true if null/undefined
-
-      // Use remaining_seconds if resuming, otherwise full duration
-      const remainingTime = data.remaining_seconds ?? (data.duration_minutes * 60);
-      setTimeRemaining(remainingTime);
-
-      if (data.is_resume) {
-        console.log(`Resuming assessment, ${remainingTime} seconds remaining`);
-
-        // Load saved MCQ answers (convert letter A,B,C,D to index 0,1,2,3)
-        if (data.saved_mcq_answers && Object.keys(data.saved_mcq_answers).length > 0) {
-          const letterToIndex = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
-          const convertedMcqAnswers = {};
-          for (const [qId, letter] of Object.entries(data.saved_mcq_answers)) {
-            convertedMcqAnswers[qId] = letterToIndex[letter] ?? letter;
-          }
-          console.log('Loading saved MCQ answers:', convertedMcqAnswers);
-          setMcqAnswers(convertedMcqAnswers);
-        }
-
-        // Load saved psychometric answers (now returns selected option index directly)
-        if (data.saved_psychometric_answers && Object.keys(data.saved_psychometric_answers).length > 0) {
-          const convertedPsychAnswers = {};
-          for (const [qId, optionIndex] of Object.entries(data.saved_psychometric_answers)) {
-            convertedPsychAnswers[qId] = optionIndex; // Already the option index
-          }
-          console.log('Loading saved psychometric answers:', convertedPsychAnswers);
-          setPsychometricAnswers(convertedPsychAnswers);
-        }
-
-        // Load saved coding submission
-        if (data.saved_coding) {
-          console.log('Loading saved coding submission:', data.saved_coding);
-          setCode(data.saved_coding.code);
-          setLanguage(data.saved_coding.language);
-        }
-      }
-
-      // Set initial code (only if not resuming with saved code)
-      if (data.coding_problem && !data.saved_coding) {
-        setCode(getStarterCode(data.coding_problem, 'javascript'));
-      }
-
+    if (!accessToken) {
+      setError('This assessment link is missing its access token. Open the latest invitation from your email.');
       setLoading(false);
-
-      // Start proctoring if enabled
-      if (verifyData.proctoring_enabled) {
-        startProctoring();
-      }
-
-    } catch (err) {
-      const message = err?.response?.data?.message || 'Failed to load assessment';
-      setError(message);
-      setLoading(false);
-    }
-  };
-  verifyAssessmentRef.current = verifyAndLoadAssessment;
-
-  const getStarterCode = (problem, lang) => {
-    if (problem.starter_code && problem.starter_code[lang]) {
-      return problem.starter_code[lang];
+      return undefined;
     }
 
-    // Fallback templates
-    const templates = {
-      javascript: `// ${problem.title}\n// ${problem.description?.slice(0, 100) || ''}\n\nfunction solution(input) {\n  // Write your code here\n  \n  return result;\n}\n\n// Test your solution\nconsole.log(solution("test"));`,
-      python: `# ${problem.title}\n# ${problem.description?.slice(0, 100) || ''}\n\ndef solution(input):\n    # Write your code here\n    \n    return result\n\n# Test your solution\nprint(solution("test"))`,
-      java: `// ${problem.title}\n// ${problem.description?.slice(0, 100) || ''}\n\npublic class Main {\n    public static void main(String[] args) {\n        // Write your code here\n        System.out.println("Hello, World!");\n    }\n}`,
-      cpp: `// ${problem.title}\n// ${problem.description?.slice(0, 100) || ''}\n\n#include <iostream>\nusing namespace std;\n\nint main() {\n    // Write your code here\n    cout << "Hello, World!" << endl;\n    return 0;\n}`,
-    };
-    return templates[lang] || templates.javascript;
-  };
-
-  // Camera and face detection
-  const startProctoring = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 320, height: 240 }
-      });
-      setCameraStream(stream);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-
-        // Wait for video to be ready before starting face detection
-        videoRef.current.onloadedmetadata = () => {
-          console.log('Video metadata loaded, dimensions:', videoRef.current.videoWidth, videoRef.current.videoHeight);
-          videoRef.current.play().then(() => {
-            console.log('Video playing, starting face detection in 1 second...');
-            // Small delay to ensure video frame is available
-            setTimeout(() => {
-              console.log('Starting face detection now');
-              startFaceDetection();
-            }, 1000);
-          }).catch(err => {
-            console.error('Video play error:', err);
-            setTimeout(() => startFaceDetection(), 1000); // Try anyway
-          });
-        };
-      }
-
-    } catch (err) {
-      console.error('Camera error:', err);
-      setCameraError('Camera access denied. Proctoring cannot monitor without camera access.');
-      reportViolation('camera_denied', 'Candidate denied camera access', 'high');
-    }
-  };
-
-  const startFaceDetection = () => {
-    // Enhanced face detection with multiple face and no face detection
-    faceDetectionIntervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !canvasRef.current) {
-        console.log('Refs not ready');
-        return;
-      }
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-
-      // Check video dimensions - use fallback if needed
-      const videoWidth = video.videoWidth || 320;
-      const videoHeight = video.videoHeight || 240;
-
-      if (video.readyState < 2) {
-        console.log('Video not ready, readyState:', video.readyState);
-        return;
-      }
-
-      const ctx = canvas.getContext('2d');
-      canvas.width = videoWidth;
-      canvas.height = videoHeight;
-      ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
-
+    const controller = new AbortController();
+    const loadAssessment = async () => {
       try {
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const detectionResult = detectFaces(imageData, canvas.width, canvas.height);
-
-        console.log('Face detection result:', detectionResult.count, 'faces detected');
-        setFaceCount(detectionResult.count);
-        setDetectionInitialized(true);
-
-        if (detectionResult.count === 0) {
-          // No face detected
-          noFaceCountRef.current++;
-          multipleFaceCountRef.current = 0;
-
-          if (noFaceCountRef.current >= 2) { // 2 consecutive checks (6 seconds)
-            setFaceDetected(false);
-            if (lastViolationType !== 'no_face') {
-              const screenshot = await captureScreenshot();
-              reportViolation('no_face', 'No face detected in camera - candidate may have left', 'high', screenshot);
-              setLastViolationType('no_face');
-            }
-          }
-        } else if (detectionResult.count > 1) {
-          // Multiple faces detected
-          multipleFaceCountRef.current++;
-          noFaceCountRef.current = 0;
-
-          if (multipleFaceCountRef.current >= 2) { // 2 consecutive checks
-            setFaceDetected(true);
-            if (lastViolationType !== 'multiple_faces') {
-              const screenshot = await captureScreenshot();
-              reportViolation('multiple_faces', `Multiple faces detected (${detectionResult.count} people visible) - possible assistance`, 'critical', screenshot);
-              setLastViolationType('multiple_faces');
-            }
-          }
-        } else {
-          // Single face detected - normal
-          noFaceCountRef.current = 0;
-          multipleFaceCountRef.current = 0;
-          setFaceDetected(true);
-          setLastViolationType(null);
+        const verifyResponse = await api.get('/api/interviewee/assessment/verify', {
+          signal: controller.signal,
+        });
+        const verification = verifyResponse.data?.data || {};
+        if (!verification.can_start && !verification.already_started) {
+          const scheduled = verification.scheduled_time
+            ? new Date(verification.scheduled_time).toLocaleString()
+            : 'the scheduled time';
+          throw new Error(`This assessment can be opened within 30 minutes of ${scheduled}.`);
         }
-      } catch (e) {
-        console.error('Face detection error:', e);
-      }
-    }, 3000); // Check every 3 seconds
-  };
 
-  const detectFaces = (imageData, width, height) => {
-    // Simplified face detection using vertical stripe analysis
-    // Counts distinct skin-colored regions in horizontal bands
-    const { data } = imageData;
+        const startResponse = await api.post('/api/interviewee/assessment/start', null, {
+          signal: controller.signal,
+        });
+        const data = startResponse.data?.data;
+        if (!data?.assessment_id) throw new Error('The assessment session could not be created.');
 
-    // Divide image into vertical stripes and count skin pixels in each
-    const numStripes = 30;
-    const stripeWidth = Math.floor(width / numStripes);
-    const skinPerStripe = new Array(numStripes).fill(0);
-    const totalPerStripe = new Array(numStripes).fill(0);
+        const savedMcq = normalizeSavedMcqAnswers(data.saved_mcq_answers);
+        const savedWorkstyle = normalizeSavedPsychometricAnswers(data.saved_psychometric_answers);
+        const availableProblem = data.is_technical_role ? data.coding_problem : null;
+        const savedCoding = data.saved_coding;
+        const problemLanguages = getCodeLanguages(availableProblem);
+        const initialLanguage = problemLanguages.includes(savedCoding?.language)
+          ? savedCoding.language
+          : (problemLanguages[0] || '');
+        const initialCode = savedCoding?.code || getStarterCode(availableProblem, initialLanguage);
+        const initialSections = [
+          ...(data.mcq_questions?.length ? ['knowledge'] : []),
+          ...(availableProblem ? ['coding'] : []),
+          ...(data.psychometric_scenarios?.length ? ['workstyle'] : []),
+        ];
 
-    // Only analyze upper 2/3 of image (where faces typically are)
-    const analyzeHeight = Math.floor(height * 0.75);
-
-    for (let y = 0; y < analyzeHeight; y++) {
-      for (let x = 0; x < width; x++) {
-        const stripeIdx = Math.min(Math.floor(x / stripeWidth), numStripes - 1);
-        const idx = (y * width + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-
-        totalPerStripe[stripeIdx]++;
-        if (isSkinTone(r, g, b)) {
-          skinPerStripe[stripeIdx]++;
+        setSession({ ...data, coding_problem: availableProblem });
+        setMcqAnswers(savedMcq);
+        setPsychometricAnswers(savedWorkstyle);
+        setLanguage(initialLanguage);
+        setCodes({ [initialLanguage]: initialCode });
+        setSavedSolution(savedCoding ? { language: initialLanguage, code: initialCode } : null);
+        setTimeRemaining(Math.max(0, Number(data.remaining_seconds) || 0));
+        setCurrentSection(initialSections[0] || 'knowledge');
+        setProctoringActive(Boolean(data.proctoring_enabled));
+      } catch (loadError) {
+        if (loadError?.code === 'ERR_CANCELED') return;
+        const status = loadError?.response?.status;
+        if ([400, 403, 404, 409].includes(status)) {
+          window.sessionStorage.removeItem('assessmentToken');
         }
+        setError(getErrorMessage(loadError, loadError.message || 'Unable to load this assessment.'));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
       }
-    }
-
-    // Calculate skin density per stripe
-    const skinDensity = skinPerStripe.map((skin, i) =>
-      totalPerStripe[i] > 0 ? skin / totalPerStripe[i] : 0
-    );
-
-    // Find peaks (local maxima) in skin density - these are likely faces
-    const threshold = 0.08; // Minimum skin density to consider
-    const peaks = [];
-
-    for (let i = 2; i < numStripes - 2; i++) {
-      const current = skinDensity[i];
-      if (current > threshold) {
-        // Check if this is a local maximum (higher than neighbors)
-        const isLocalMax = current >= skinDensity[i - 1] &&
-          current >= skinDensity[i + 1] &&
-          current >= skinDensity[i - 2] &&
-          current >= skinDensity[i + 2];
-
-        // Also check if it's significantly above the average nearby
-        const nearby = (skinDensity[i - 2] + skinDensity[i - 1] + skinDensity[i + 1] + skinDensity[i + 2]) / 4;
-        const isSignificant = current > nearby * 0.8 || current > threshold * 1.5;
-
-        if (isLocalMax && isSignificant) {
-          peaks.push({ stripe: i, density: current });
-        }
-      }
-    }
-
-    // Merge peaks that are too close together (same face)
-    const mergedPeaks = [];
-    for (const peak of peaks) {
-      const lastPeak = mergedPeaks[mergedPeaks.length - 1];
-      if (lastPeak && peak.stripe - lastPeak.stripe < 5) {
-        // Too close, merge with previous (keep the higher one)
-        if (peak.density > lastPeak.density) {
-          mergedPeaks[mergedPeaks.length - 1] = peak;
-        }
-      } else {
-        mergedPeaks.push(peak);
-      }
-    }
-
-    // Calculate total skin coverage to determine if there's any face at all
-    const totalSkinDensity = skinDensity.reduce((a, b) => a + b, 0) / numStripes;
-
-    console.log('Skin density per stripe:', skinDensity.map(d => d.toFixed(2)).join(', '));
-    console.log('Peaks found:', mergedPeaks.length, 'Total avg density:', totalSkinDensity.toFixed(3));
-
-    // Determine face count
-    let faceCount = 0;
-
-    if (totalSkinDensity < 0.02) {
-      // Very little skin visible - no face
-      faceCount = 0;
-    } else if (mergedPeaks.length === 0 && totalSkinDensity > 0.05) {
-      // No clear peaks but significant skin - probably 1 face filling frame
-      faceCount = 1;
-    } else {
-      faceCount = Math.max(mergedPeaks.length, totalSkinDensity > 0.03 ? 1 : 0);
-    }
-
-    return {
-      count: faceCount,
-      peaks: mergedPeaks,
-      totalDensity: totalSkinDensity
     };
-  };
 
-  const isSkinTone = (r, g, b) => {
-    // Multi-range skin detection for various skin tones
-    // Based on RGB color space rules
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
+    loadAssessment();
+    return () => controller.abort();
+  }, [accessToken]);
 
-    // Rule 1: General skin tone in uniform daylight
-    const rule1 = r > 95 && g > 40 && b > 20 &&
-      max - min > 15 && Math.abs(r - g) > 15 && r > g && r > b;
+  const captureScreenshot = useCallback(() => {
+    const video = videoRef.current;
+    if (!video?.videoWidth || !video?.videoHeight) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.min(video.videoWidth, 640);
+    canvas.height = Math.round(canvas.width * (video.videoHeight / video.videoWidth));
+    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.7);
+  }, []);
 
-    // Rule 2: Skin tone under flashlight or lateral illumination
-    const rule2 = r > 220 && g > 210 && b > 170 &&
-      Math.abs(r - g) <= 15 && r > b && g > b;
-
-    // Rule 3: Darker skin tones
-    const rule3 = r > 60 && g > 40 && b > 20 &&
-      r > g && r > b && (r - g) > 10 && (r - b) > 10 &&
-      max - min > 10 && max - min < 80;
-
-    return rule1 || rule2 || rule3;
-  };
-
-  const captureScreenshot = async () => {
-    if (!videoRef.current) return null;
-
+  const reportViolation = useCallback(async (type, description, severity = 'medium', includeScreenshot = false) => {
+    if (!assessmentId || submitted) return;
     try {
-      const video = videoRef.current;
-      const canvas = screenshotCanvasRef.current || document.createElement('canvas');
-      if (!screenshotCanvasRef.current) {
-        screenshotCanvasRef.current = canvas;
-      }
-
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
-
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-
-      // Add timestamp watermark
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.fillRect(5, canvas.height - 25, 200, 20);
-      ctx.fillStyle = '#000';
-      ctx.font = '12px Arial';
-      ctx.fillText(new Date().toLocaleString(), 10, canvas.height - 10);
-
-      // Convert to base64 data URL
-      return canvas.toDataURL('image/jpeg', 0.7);
-    } catch (err) {
-      console.error('Failed to capture screenshot:', err);
-      return null;
-    }
-  };
-
-  const reportViolation = async (type, description, severity = 'medium', screenshot = null) => {
-    if (!assessmentId) return;
-
-    try {
-      const payload = {
+      const response = await api.post(`/api/interviewee/assessment/${assessmentId}/violation`, {
         violation_type: type,
-        description: description,
-        severity: severity
-      };
-
-      // Include screenshot if provided
-      if (screenshot) {
-        payload.screenshot = screenshot;
-      }
-
-      const res = await api.post(`/api/interviewee/assessment/${assessmentId}/violation`, payload);
-
-      setViolationCount(res.data.data.total_violations);
-
-      // Add to violations list for display
-      const newViolation = {
-        id: res.data.data.violation_id,
-        type: type,
-        description: description,
-        severity: severity,
-        timestamp: new Date().toLocaleTimeString()
-      };
-      setViolationsList(prev => [...prev, newViolation]);
-
-      // Different toast styles based on severity
-      const toastConfig = {
-        variant: 'destructive',
-        title: severity === 'critical' ? ' Critical Violation' : 'Warning',
-        description: `Proctoring violation detected: ${description}`,
-      };
-
-      if (type === 'multiple_faces') {
-        toastConfig.title = ' Multiple Faces Detected';
-      } else if (type === 'no_face') {
-        toastConfig.title = ' No Face Detected';
-      } else if (type === 'tab_switch') {
-        toastConfig.title = ' Tab Switch Detected';
-      }
-
-      toast(toastConfig);
-    } catch (err) {
-      console.error('Failed to report violation:', err);
+        description,
+        severity,
+        screenshot: includeScreenshot ? captureScreenshot() : null,
+      });
+      setViolationCount(Number(response.data?.data?.total_violations) || 0);
+    } catch {
+      // Monitoring must never erase candidate work or block assessment controls.
     }
-  };
-  reportViolationRef.current = reportViolation;
+  }, [assessmentId, captureScreenshot, submitted]);
 
-  // Tab visibility monitoring
   useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.hidden && assessmentId && !submitted) {
-        const screenshot = await captureScreenshot();
-        reportViolationRef.current?.('tab_switch', 'Candidate switched away from assessment tab', 'high', screenshot);
+    if (!assessmentId || submitted) return undefined;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        reportViolation(
+          'tab_hidden',
+          'The assessment tab was hidden while the session was active.',
+          'medium',
+          true,
+        );
       }
     };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [assessmentId, reportViolation, submitted]);
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  useEffect(() => {
+    if (!streamError || !assessmentId || cameraErrorReportedRef.current === streamError) return;
+    cameraErrorReportedRef.current = streamError;
+    reportViolation('camera_interrupted', streamError, 'high');
+  }, [assessmentId, reportViolation, streamError]);
+
+  useEffect(() => {
+    if (!assessmentId || submitted) return undefined;
+    const warnBeforeLeaving = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
   }, [assessmentId, submitted]);
 
-  // Timer
   useEffect(() => {
-    if (loading || submitted || !assessmentData) return;
-
-    const timer = setInterval(() => {
-      setTimeRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          autoSubmitRef.current?.();
+    if (!assessmentId || submitted) return undefined;
+    const timer = window.setInterval(() => {
+      setTimeRemaining((remaining) => {
+        if (remaining <= 1) {
+          window.queueMicrotask(() => submitRef.current?.(true));
           return 0;
         }
-        return prev - 1;
+        return remaining - 1;
       });
     }, 1000);
+    return () => window.clearInterval(timer);
+  }, [assessmentId, submitted]);
 
-    return () => clearInterval(timer);
-  }, [loading, submitted, assessmentData]);
-
-  // Sync time to server every 30 seconds (for resume functionality)
   useEffect(() => {
-    if (loading || submitted || !assessmentId || !assessmentData) return;
-
-    const totalDuration = (assessmentData.duration_minutes || 60) * 60;
-
-    const syncTimer = setInterval(() => {
-      const elapsed = totalDuration - timeRemaining;
-      if (elapsed > 0) {
-        api.post(`/api/interviewee/assessment/${assessmentId}/sync-time`, {
-          time_elapsed_seconds: elapsed
-        }).catch(err => {
-          console.warn('Failed to sync time:', err);
-        });
-      }
-    }, 30000); // Every 30 seconds
-
-    return () => clearInterval(syncTimer);
-  }, [loading, submitted, assessmentId, assessmentData, timeRemaining]);
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
-      if (faceDetectionIntervalRef.current) {
-        clearInterval(faceDetectionIntervalRef.current);
+    if (!assessmentId || submitted) return undefined;
+    const syncTime = async () => {
+      if (syncingRef.current || document.visibilityState === 'hidden') return;
+      syncingRef.current = true;
+      try {
+        const response = await api.get(`/api/interviewee/assessment/${assessmentId}/remaining-time`);
+        const remaining = Math.max(0, Number(response.data?.data?.remaining_seconds) || 0);
+        setTimeRemaining(remaining);
+        if (remaining === 0) submitRef.current?.(true);
+      } catch {
+        // The local countdown continues; the next sync or submission remains server-authoritative.
+      } finally {
+        syncingRef.current = false;
       }
     };
-  }, [cameraStream]);
+    const interval = window.setInterval(syncTime, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') syncTime();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [assessmentId, submitted]);
 
-  const handleAutoSubmit = () => {
-    toast({
-      title: "Time's up!",
-      description: 'Your assessment has been automatically submitted.',
-    });
-    handleSubmit();
+  useEffect(() => {
+    const question = currentSection === 'knowledge'
+      ? questions[mcqQuestion]
+      : currentSection === 'workstyle'
+        ? scenarios[workstyleQuestion]
+        : null;
+    if (question) {
+      questionStartedAtRef.current.set(`${currentSection}:${question.id}`, Date.now());
+    }
+  }, [currentSection, mcqQuestion, questions, scenarios, workstyleQuestion]);
+
+  const trackSave = (request) => {
+    pendingSavesRef.current.add(request);
+    request.then(
+      () => pendingSavesRef.current.delete(request),
+      () => pendingSavesRef.current.delete(request),
+    );
+    return request;
   };
-  autoSubmitRef.current = handleAutoSubmit;
 
-  // Code execution using Piston API
-  const handleRunCode = useCallback(async () => {
-    setIsRunning(true);
-    setOutput('Running code...\n');
+  const handleMcqAnswer = async (questionId, answerIndex) => {
+    const previous = mcqAnswers[questionId];
+    const version = (answerVersionRef.current.get(`mcq:${questionId}`) || 0) + 1;
+    answerVersionRef.current.set(`mcq:${questionId}`, version);
+    setMcqAnswers((answers) => ({ ...answers, [questionId]: answerIndex }));
+    setSavingMcqId(questionId);
+    const startedAt = questionStartedAtRef.current.get(`knowledge:${questionId}`) || Date.now();
+    const timeSpent = Math.min(3600, Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
 
     try {
-      const langConfig = LANGUAGE_CONFIG[language];
-      if (!langConfig) {
-        setOutput('Language not supported for execution.');
-        setIsRunning(false);
-        return;
-      }
-
-      const response = await api.post(CODE_EXEC_URL, {
-        language: langConfig.runtime,
-        version: langConfig.version,
-        filename: `main.${langConfig.extension}`,
-        code,
-      });
-
-      const result = response.data?.data;
-
-      if (result?.run) {
-        const stdout = result.run.stdout || '';
-        const stderr = result.run.stderr || '';
-        const output = stdout + (stderr ? `\nErrors:\n${stderr}` : '');
-        setOutput(output || 'Code executed successfully (no output)');
-      } else if (result?.message) {
-        setOutput(`Error: ${result.message}`);
-      } else {
-        setOutput('Execution failed. Please try again.');
-      }
-    } catch (err) {
-      setOutput(`Execution error: ${err.message}`);
-    } finally {
-      setIsRunning(false);
-    }
-  }, [language, code]);
-
-  const handleRunTestCases = async (testCases) => {
-    setIsRunning(true);
-    setOutput('Running test cases...\n\n');
-
-    const langConfig = LANGUAGE_CONFIG[language];
-    if (!langConfig) {
-      setOutput('Language not supported for execution.');
-      setIsRunning(false);
-      return;
-    }
-
-    let results = [];
-    let passed = 0;
-    let failed = 0;
-
-    // Filter visible test cases only
-    const visibleTests = testCases.filter(tc => !tc.is_hidden);
-
-    for (let i = 0; i < visibleTests.length; i++) {
-      const tc = visibleTests[i];
-
-      try {
-        // Create test wrapper code based on language
-        let testCode = code;
-
-        // Add test execution based on language
-        if (language === 'javascript') {
-          testCode += `\n\n// Test execution\nconsole.log(JSON.stringify(${tc.input.includes(',') ? `twoSum(${tc.input})` : `solution(${tc.input})`}));`;
-        } else if (language === 'python') {
-          testCode += `\n\n# Test execution\nprint(${tc.input.includes(',') ? `two_sum(${tc.input})` : `solution(${tc.input})`})`;
-        }
-
-        const response = await api.post(CODE_EXEC_URL, {
-          language: langConfig.runtime,
-          version: langConfig.version,
-          filename: `main.${langConfig.extension}`,
-          code: testCode,
-        });
-
-        const result = response.data?.data;
-
-        if (result?.run) {
-          const stdout = (result.run.stdout || '').trim();
-          const stderr = result.run.stderr || '';
-
-          const expectedClean = tc.expected.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false');
-          const actualClean = stdout.replace(/'/g, '"');
-
-          const isPassed = actualClean === expectedClean || stdout === tc.expected;
-
-          if (isPassed) {
-            passed++;
-            results.push(` Test ${i + 1}: PASSED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}\n`);
-          } else {
-            failed++;
-            results.push(` Test ${i + 1}: FAILED\n   Input: ${tc.input}\n   Expected: ${tc.expected}\n   Got: ${stdout}${stderr ? `\n   Error: ${stderr}` : ''}\n`);
-          }
-        } else {
-          failed++;
-          results.push(` Test ${i + 1}: ERROR\n   ${result?.message || 'Execution failed'}\n`);
-        }
-      } catch (err) {
-        failed++;
-        results.push(` Test ${i + 1}: ERROR\n   ${err.message}\n`);
-      }
-    }
-
-    const allPassed = passed === visibleTests.length;
-    setTestsPassed(allPassed);
-    setTestsPassedCount(passed);
-    setTotalTestsCount(visibleTests.length);
-
-    const summary = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n Results: ${passed}/${visibleTests.length} tests passed\n${allPassed ? ' All tests passed! Click "Submit Code" to save your solution.' : ` ${failed} test(s) failed`}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-
-    setOutput(results.join('\n') + summary);
-    setIsRunning(false);
-  };
-
-  const handleSubmitCode = async () => {
-    if (!assessmentId || !assessmentData?.coding_problem) return;
-
-    setIsRunning(true);
-    try {
-      const totalTests = assessmentData.coding_problem.test_cases?.filter(tc => !tc.is_hidden).length || 0;
-      await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
-        type: 'coding',
-        questionId: assessmentData.coding_problem.id,
-        language: language,
-        code: code,
-        testsPassed: testsPassedCount,
-        totalTests: totalTests || totalTestsCount
-      });
-
-      setCodeSaved(true);
-      toast({
-        title: "Code Submitted!",
-        description: "Your solution has been saved successfully.",
-      });
-    } catch (err) {
-      console.error('Failed to submit code:', err);
-      toast({
-        title: "Submission Failed",
-        description: "Failed to save your code. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsRunning(false);
-    }
-  };
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const handleMCQAnswer = useCallback(async (questionId, answerIndex) => {
-    setMcqAnswers(prev => ({ ...prev, [questionId]: answerIndex }));
-
-    // Auto-save the answer to backend
-    try {
-      const answerLetter = ['A', 'B', 'C', 'D'][answerIndex];
-      await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
+      await trackSave(api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
         type: 'mcq',
         questionId,
-        answer: answerLetter,
-        timeSpent: 0 // Could track actual time if needed
-      });
-    } catch (err) {
-      console.error('Failed to save MCQ answer:', err);
-    }
-  }, [assessmentId]);
-
-  const handlePsychometricAnswer = useCallback(async (scenarioId, answerIndex) => {
-    setPsychometricAnswers(prev => ({ ...prev, [scenarioId]: answerIndex }));
-
-    // Auto-save the answer to backend; score is calculated server-side
-    try {
-      const scenario = assessmentData?.psychometric_scenarios?.find(s => s.id === scenarioId);
-      if (scenario) {
-        await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
-          type: 'psychometric',
-          questionId: scenarioId,
-          trait: scenario.trait,
-          selectedOption: answerIndex,
+        answer: String.fromCharCode(65 + answerIndex),
+        timeSpent,
+      }));
+    } catch (saveError) {
+      if (answerVersionRef.current.get(`mcq:${questionId}`) === version) {
+        setMcqAnswers((answers) => {
+          const next = { ...answers };
+          if (previous === undefined) delete next[questionId];
+          else next[questionId] = previous;
+          return next;
         });
+        toast({ variant: 'destructive', title: 'Answer not saved', description: getErrorMessage(saveError, 'Try selecting the answer again.') });
       }
-    } catch (err) {
-      console.error('Failed to save psychometric answer:', err);
-    }
-  }, [assessmentId, assessmentData]);
-
-  const handleNextSection = () => {
-    const maxSection = isTechnicalRole ? 2 : 1;
-    if (currentSection < maxSection) {
-      setCurrentSection(prev => prev + 1);
-      setCurrentQuestion(0);
+    } finally {
+      if (answerVersionRef.current.get(`mcq:${questionId}`) === version) setSavingMcqId(null);
     }
   };
 
-  const handlePrevSection = () => {
-    if (currentSection > 0) {
-      setCurrentSection(prev => prev - 1);
-      setCurrentQuestion(0);
+  const handlePsychometricAnswer = async (questionId, answerIndex) => {
+    const previous = psychometricAnswers[questionId];
+    const version = (answerVersionRef.current.get(`workstyle:${questionId}`) || 0) + 1;
+    answerVersionRef.current.set(`workstyle:${questionId}`, version);
+    setPsychometricAnswers((answers) => ({ ...answers, [questionId]: answerIndex }));
+    setSavingPsychometricId(questionId);
+
+    try {
+      await trackSave(api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
+        type: 'psychometric',
+        questionId,
+        selectedOption: answerIndex,
+      }));
+    } catch (saveError) {
+      if (answerVersionRef.current.get(`workstyle:${questionId}`) === version) {
+        setPsychometricAnswers((answers) => {
+          const next = { ...answers };
+          if (previous === undefined) delete next[questionId];
+          else next[questionId] = previous;
+          return next;
+        });
+        toast({ variant: 'destructive', title: 'Response not saved', description: getErrorMessage(saveError, 'Try selecting the response again.') });
+      }
+    } finally {
+      if (answerVersionRef.current.get(`workstyle:${questionId}`) === version) setSavingPsychometricId(null);
     }
   };
 
-  const handleSubmit = async () => {
+  const handleLanguageChange = (nextLanguage) => {
+    setCodes((values) => ({
+      ...values,
+      [nextLanguage]: values[nextLanguage] ?? getStarterCode(problem, nextLanguage),
+    }));
+    setLanguage(nextLanguage);
+    setOutput('');
+  };
+
+  const updateCode = (value) => {
+    setCodes((values) => ({ ...values, [language]: value }));
+  };
+
+  const executeExample = async (index) => {
+    const response = await api.post('/api/interviewee/run-code', {
+      language,
+      code: currentCode,
+      problem_id: problem.id,
+      test_case_index: index,
+    });
+    return response.data?.data || {};
+  };
+
+  const handleRunCode = async () => {
+    setIsRunning(true);
+    setOutput('');
+    try {
+      const result = await executeExample(0);
+      const body = result.stderr || result.stdout || '(No output)';
+      setOutput(`${body}\n\nExpected: ${result.expected ?? '—'}\nResult: ${result.passed ? 'Passed' : 'Not passed'}`);
+    } catch (runError) {
+      setOutput(getErrorMessage(runError, 'Code execution is currently unavailable.'));
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const handleRunTests = async (testCases) => {
+    setIsRunning(true);
+    setOutput('');
+    try {
+      const results = [];
+      for (let index = 0; index < testCases.length; index += 1) {
+        // Execute sequentially to avoid overloading the sandbox service.
+        results.push(await executeExample(index));
+      }
+      setOutput(results.map((result, index) => [
+        `Example ${index + 1}: ${result.passed ? 'Passed' : 'Not passed'}`,
+        `Output: ${result.stderr || result.stdout || '(No output)'}`,
+        `Expected: ${result.expected ?? '—'}`,
+      ].join('\n')).join('\n\n'));
+    } catch (runError) {
+      setOutput(getErrorMessage(runError, 'Example execution is currently unavailable.'));
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const saveCode = useCallback(async ({ quiet = false } = {}) => {
+    if (!assessmentId || !problem || !currentCode.trim()) return false;
+    setIsRunning(true);
+    try {
+      await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
+        type: 'coding',
+        questionId: problem.id,
+        language,
+        code: currentCode,
+      });
+      setSavedSolution({ language, code: currentCode });
+      if (!quiet) toast({ title: 'Solution saved', description: 'Your latest code is included in the assessment.' });
+      return true;
+    } catch (saveError) {
+      if (!quiet) toast({ variant: 'destructive', title: 'Solution not saved', description: getErrorMessage(saveError, 'Please try again.') });
+      throw saveError;
+    } finally {
+      setIsRunning(false);
+    }
+  }, [assessmentId, currentCode, language, problem, toast]);
+
+  const handleSubmit = useCallback(async (automatic = false) => {
+    if (!assessmentId || submittingRef.current || submitted) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
-
+    setConfirmOpen(false);
     try {
-      console.log('Starting assessment submission for assessment ID:', assessmentId);
-
-      // Save coding solution before submitting
-      if (code && code.trim()) {
-        console.log('Saving coding solution...');
-        const totalTests = assessmentData?.coding_problem?.test_cases?.filter(tc => !tc.is_hidden).length || totalTestsCount;
-        await api.post(`/api/interviewee/assessment/${assessmentId}/submit-answer`, {
-          type: 'coding',
-          questionId: assessmentData?.coding_problem?.id || 1,
-          code: code,
-          language: language,
-          testsPassed: testsPassedCount,
-          totalTests: totalTests
-        });
-        console.log(`Coding solution saved: ${testsPassedCount}/${totalTests} tests passed`);
-      }
-
-      // Stop proctoring
-      console.log('Stopping camera and proctoring...');
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
-      if (faceDetectionIntervalRef.current) {
-        clearInterval(faceDetectionIntervalRef.current);
-      }
-
-      // Complete assessment (backend calculates scores)
-      console.log('Completing assessment...');
-      const response = await api.post(`/api/interviewee/assessment/${assessmentId}/complete`);
-      console.log('Assessment completion response:', response);
-      console.log('Response data:', response.data);
-      console.log('Response status:', response.data.status);
-
-      if (response.data.status === 'success') {
-        console.log(' Assessment status is success');
-        console.log(' Current submitted state before setSubmitted:', submitted);
-        console.log(' About to call setSubmitted(true)');
-
-        sessionStorage.removeItem('assessmentToken');
-
-        // Use a callback to verify state was set
-        setSubmitted(true);
-
-        console.log(' Called setSubmitted(true)');
-        console.log(' Current submitted state in same block:', submitted); // Will still be false here (closure)
-
-        toast({
-          title: 'Assessment submitted!',
-          description: 'Your responses have been recorded.',
-        });
-      } else {
-        console.error(' Assessment status is not success:', response.data.status);
-        throw new Error(response.data.message || 'Unknown error');
-      }
-    } catch (err) {
-      console.error(' Submission error:', err);
-      console.error(' Error response:', err.response?.data);
-      console.error(' Error message:', err.message);
-      toast({
-        variant: 'destructive',
-        title: 'Submission Error',
-        description: err.response?.data?.message || 'Failed to submit. Please try again.',
+      await Promise.allSettled([...pendingSavesRef.current]);
+      const { saveError } = await finalizeAssessmentSubmission({
+        automatic,
+        shouldSaveCode: isTechnical && Boolean(currentCode.trim()) && !codeSaved,
+        saveCode,
+        complete: () => api.post(`/api/interviewee/assessment/${assessmentId}/complete`),
       });
+      setSubmitted(true);
+      setProctoringActive(false);
+      window.sessionStorage.removeItem('assessmentToken');
+      toast({
+        title: automatic ? 'Time ended — assessment submitted' : 'Assessment submitted',
+        description: saveError
+          ? 'Your saved responses were submitted; the final unsaved code could not be included.'
+          : 'Your responses are safely recorded.',
+      });
+    } catch (submitError) {
+      toast({ variant: 'destructive', title: 'Submission failed', description: getErrorMessage(submitError, 'Your work is still saved. Please try again.') });
     } finally {
       setIsSubmitting(false);
+      submittingRef.current = false;
+    }
+  }, [assessmentId, codeSaved, currentCode, isTechnical, saveCode, submitted, toast]);
+
+  submitRef.current = handleSubmit;
+
+  const moveSection = (offset) => {
+    const index = sections.indexOf(currentSection);
+    const next = sections[index + offset];
+    if (next) {
+      setCurrentSection(next);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
-  // Define sections dynamic based on role type
-  const sections = useMemo(() => {
-    const base = ['MCQ'];
-    if (isTechnicalRole) base.push('Coding');
-    base.push('Psychometric');
-    return base;
-  }, [isTechnicalRole]);
-  const progressPercentage = ((currentSection + 1) / sections.length) * 100;
+  const completion = {
+    knowledge: questions.length > 0 && questions.every(({ id }) => mcqAnswers[id] !== undefined),
+    coding: !isTechnical || codeSaved,
+    workstyle: scenarios.length > 0 && scenarios.every(({ id }) => psychometricAnswers[id] !== undefined),
+  };
+  const unanswered = questions.filter(({ id }) => mcqAnswers[id] === undefined).length
+    + scenarios.filter(({ id }) => psychometricAnswers[id] === undefined).length;
 
-
-  // Loading state - early return AFTER all hooks
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 flex items-center justify-center p-6">
-        <Card className="w-full max-w-md bg-white shadow-md hover:shadow-xl transition-all duration-300 border-slate-200">
-          <CardContent className="pt-12 pb-12 text-center">
-            <Loader2 className="w-12 h-12 animate-spin mx-auto text-indigo-400 mb-4" />
-            <p className="text-white text-lg">Loading your assessment...</p>
-            <p className="text-slate-600 text-sm mt-2">Please wait while we verify your access</p>
-          </CardContent>
-        </Card>
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
+        <div className="text-center">
+          <Logo size="large" />
+          <LoaderCircle className="mx-auto mt-8 h-6 w-6 animate-spin text-blue-600" aria-hidden="true" />
+          <p className="mt-3 text-sm text-slate-600">Preparing your assessment…</p>
+        </div>
+      </main>
     );
   }
 
-  // Error state - early return AFTER all hooks
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 flex items-center justify-center p-6">
-        <Card className="w-full max-w-md bg-white shadow-md hover:shadow-xl transition-all duration-300 border-slate-200">
-          <CardContent className="pt-12 pb-12 text-center">
-            <ShieldAlert className="w-16 h-16 text-red-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-4">Assessment Unavailable</h2>
-            <p className="text-slate-700 mb-6">{error}</p>
-            <Button onClick={() => navigate('/')} className="bg-indigo-600 hover:bg-indigo-700">
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6 py-16">
+        <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <Logo size="large" />
+          <div className="mx-auto mt-8 flex h-11 w-11 items-center justify-center rounded-full bg-amber-50">
+            <AlertTriangle className="h-5 w-5 text-amber-700" aria-hidden="true" />
+          </div>
+          <h1 className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">Assessment unavailable</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-600">{error}</p>
+          <Button asChild variant="outline" className="mt-7"><Link to="/">Return home</Link></Button>
+        </div>
+      </main>
     );
   }
 
-  // Submitted state - early return AFTER all hooks
   if (submitted) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 flex items-center justify-center p-6">
-        <Card className="w-full max-w-md bg-white shadow-md hover:shadow-xl transition-all duration-300 border-slate-200 text-center">
-          <CardContent className="pt-12 pb-12">
-            <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <CheckCircle className="w-12 h-12 text-emerald-400" />
-            </div>
-            <h2 className="text-3xl font-bold text-white mb-4">Assessment Complete!</h2>
-            <p className="text-slate-700 mb-8 text-lg">
-              Thank you, {candidateName}. Your assessment has been submitted successfully.
-            </p>
-            <div className="bg-indigo-900/50 p-4 rounded-lg mb-6">
-              <p className="text-sm text-indigo-200">
-                <strong>What's Next:</strong> Our team will review your responses and contact you with the final decision within 3-5 business days.
-              </p>
-            </div>
-            <p className="text-slate-600 text-xs mb-4">
-              Redirecting to home page in 5 seconds...
-            </p>
-            <Button onClick={() => navigate('/')} className="bg-indigo-600 hover:bg-indigo-700">
-              Return to Home Now
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6 py-16">
+        <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <Logo size="large" />
+          <div className="mx-auto mt-8 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50">
+            <Check className="h-6 w-6 text-emerald-700" aria-hidden="true" />
+          </div>
+          <h1 className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">Assessment submitted</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-600">Thank you, {session?.candidate_name}. Your responses are recorded and the hiring team will contact you about next steps.</p>
+          <Button asChild className="mt-7"><Link to="/">Return home</Link></Button>
+        </div>
+      </main>
     );
   }
 
+  const timerUrgent = timeRemaining <= 300;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-900 py-6 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <Card className="mb-6 bg-gradient-to-r from-slate-800 to-slate-900 shadow-2xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between flex-wrap gap-6">
-              <div className="flex items-center gap-4">
-                <Logo variant="icon" size="default" />
-                <div>
-                  <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">
-                    Technical Assessment
-                  </h1>
-                  <p className="text-slate-400 text-sm">Welcome, <span className="text-slate-200 font-semibold">{candidateName}</span></p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 flex-wrap justify-end">
-                {/* Proctoring Status */}
-                {proctoringEnabled && (
-                  <div className="flex items-center gap-2">
-                    {cameraError ? (
-                      <Badge className="bg-red-600/80 text-white border-0 gap-1 px-3 py-1">
-                        <VideoOff className="w-3 h-3" />
-                        Camera Error
-                      </Badge>
-                    ) : faceCount > 1 ? (
-                      <Badge className="bg-red-600 animate-pulse text-white border-0 gap-1 px-3 py-1">
-                        <AlertTriangle className="w-3 h-3" />
-                        {faceCount} Faces Detected!
-                      </Badge>
-                    ) : faceDetected ? (
-                      <Badge className="bg-emerald-600/80 text-white border-0 gap-1 px-3 py-1">
-                        <Eye className="w-3 h-3" />
-                        Monitoring Active
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-amber-600 animate-pulse text-white border-0 gap-1 px-3 py-1">
-                        <AlertTriangle className="w-3 h-3" />
-                        No Face Detected
-                      </Badge>
-                    )}
-                    {isStreaming && (
-                      <Badge className="bg-purple-600 animate-pulse text-white border-0 gap-1 px-3 py-1">
-                        <Video className="w-3 h-3" />
-                        Being Monitored
-                      </Badge>
-                    )}
-                    {streamError && (
-                      <Badge className="bg-orange-600 text-white border-0 gap-1 px-3 py-1">
-                        Stream Error
-                      </Badge>
-                    )}
-                    {violationCount > 0 && (
-                      <Badge className="bg-red-600 text-white border-0 gap-1 px-3 py-1 font-semibold">
-                        <ShieldAlert className="w-3 h-3" />
-                        {violationCount} Warning{violationCount > 1 ? 's' : ''}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-
-                {/* Timer - More prominent when time is low */}
-                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg font-mono font-bold transition-all duration-300 ${timeRemaining < 300
-                  ? 'bg-red-600/30 border-2 border-red-500 shadow-lg shadow-red-500/50'
-                  : timeRemaining < 600
-                    ? 'bg-amber-600/30 border-2 border-amber-500'
-                    : 'bg-slate-700/50 border border-slate-600'
-                  }`}>
-                  <Timer className={`w-5 h-5 ${timeRemaining < 300 ? 'text-red-400 animate-pulse' :
-                    timeRemaining < 600 ? 'text-amber-400' :
-                      'text-slate-300'
-                    }`} />
-                  <span className={`text-lg ${timeRemaining < 300 ? 'text-red-400' :
-                    timeRemaining < 600 ? 'text-amber-400' :
-                      'text-slate-200'
-                    }`}>
-                    {formatTime(timeRemaining)}
-                  </span>
-                </div>
-              </div>
+    <div className="min-h-screen bg-slate-50 text-slate-950">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-[1480px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-4">
+            <Logo size="small" />
+            <div className="hidden h-6 w-px bg-slate-200 sm:block" />
+            <div className="hidden min-w-0 sm:block">
+              <p className="truncate text-sm font-medium text-slate-950">{session?.candidate_name}</p>
+              <p className="text-xs text-slate-500">Candidate assessment</p>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Progress Section */}
-        <Card className="mb-6 bg-gradient-to-r from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-6 mb-5">
-              {sections.map((section, idx) => (
-                <div key={section} className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-semibold transition-all duration-300 ${idx < currentSection
-                    ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white' :
-                    idx === currentSection
-                      ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-2 ring-indigo-400'
-                      : 'bg-slate-600 text-slate-300'
-                    }`}>
-                    {idx < currentSection ? (
-                      <CheckCircle className="w-5 h-5" />
-                    ) : (
-                      <span>{idx + 1}</span>
-                    )}
-                  </div>
-                  <span className={`text-sm font-medium transition-colors ${idx === currentSection ? 'text-white font-bold' :
-                    idx < currentSection ? 'text-emerald-400' :
-                      'text-slate-400'
-                    }`}>
-                    {sections[idx]}
-                  </span>
-                  {idx < sections.length - 1 && <div className="w-16 h-1 bg-gradient-to-r from-slate-600 to-transparent rounded-full" />}
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              <Progress value={progressPercentage} className="h-2.5 bg-slate-700 rounded-full" />
-              <p className="text-xs text-slate-400 text-center">{progressPercentage.toFixed(0)}% Complete</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Assessment Content */}
-          <div className="lg:col-span-3">
-            {currentSection === 0 && (
-              <MCQSection
-                questions={assessmentData?.mcq_questions || []}
-                currentQuestion={currentQuestion}
-                mcqAnswers={mcqAnswers}
-                onAnswer={handleMCQAnswer}
-                onNextSection={handleNextSection}
-                setCurrentQuestion={setCurrentQuestion}
-              />
-            )}
-            {isTechnicalRole ? (
-              <>
-                {currentSection === 1 && (
-                  <CodingSection
-                    problem={assessmentData?.coding_problem}
-                    language={language}
-                    setLanguage={setLanguage}
-                    code={code}
-                    setCode={setCode}
-                    output={output}
-                    isRunning={isRunning}
-                    testsPassed={testsPassed}
-                    codeSaved={codeSaved}
-                    onRunCode={handleRunCode}
-                    onRunTests={handleRunTestCases}
-                    onSubmitCode={handleSubmitCode}
-                    onNextSection={handleNextSection}
-                    onPrevSection={handlePrevSection}
-                    getStarterCode={getStarterCode}
-                  />
-                )}
-                {currentSection === 2 && (
-                  <PsychometricSection
-                    scenarios={assessmentData?.psychometric_scenarios || []}
-                    currentQuestion={currentQuestion}
-                    psychometricAnswers={psychometricAnswers}
-                    onAnswer={handlePsychometricAnswer}
-                    onPrevSection={handlePrevSection}
-                    onSubmit={handleSubmit}
-                    isSubmitting={isSubmitting}
-                    setCurrentQuestion={setCurrentQuestion}
-                  />
-                )}
-              </>
-            ) : (
-              <>
-                {currentSection === 1 && (
-                  <PsychometricSection
-                    scenarios={assessmentData?.psychometric_scenarios || []}
-                    currentQuestion={currentQuestion}
-                    psychometricAnswers={psychometricAnswers}
-                    onAnswer={handlePsychometricAnswer}
-                    onPrevSection={handlePrevSection}
-                    onSubmit={handleSubmit}
-                    isSubmitting={isSubmitting}
-                    setCurrentQuestion={setCurrentQuestion}
-                  />
-                )}
-              </>
-            )}
           </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold tabular-nums ${timerUrgent ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50 text-slate-800'}`} aria-label={`${formatAssessmentTime(timeRemaining)} remaining`}>
+              <Clock3 className="h-4 w-4" aria-hidden="true" />
+              {formatAssessmentTime(timeRemaining)}
+            </div>
+            <Button type="button" size="sm" variant="outline" onClick={() => setConfirmOpen(true)}>Submit</Button>
+          </div>
+        </div>
+      </header>
 
-          {/* Proctoring Camera Feed */}
-          {proctoringEnabled && (
-            <div className="lg:col-span-1">
-              <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl border-slate-700 sticky top-6 hover:shadow-2xl transition-all duration-300">
-                <CardHeader className="pb-3 border-b border-slate-700">
-                  <CardTitle className="text-white text-sm flex items-center gap-2 font-bold">
-                    <Video className="w-4 h-4 text-emerald-400" />
-                    Proctoring Camera
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="relative aspect-video bg-slate-900 rounded-lg overflow-hidden border border-slate-700 shadow-lg">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                    <canvas ref={canvasRef} className="hidden" />
-                    {cameraError && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-slate-900/95 backdrop-blur">
-                        <div className="text-center p-4">
-                          <VideoOff className="w-8 h-8 text-red-400 mx-auto mb-2" />
-                          <p className="text-red-400 text-xs font-medium">{cameraError}</p>
-                        </div>
-                      </div>
-                    )}
-                    {faceCount > 1 && !cameraError && (
-                      <div className="absolute inset-0 border-4 border-red-500 animate-pulse rounded-lg">
-                        <div className="absolute bottom-2 left-2 right-2">
-                          <Badge className="bg-red-600 w-full justify-center text-white border-0 gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            {faceCount} Faces - Only 1 Allowed!
-                          </Badge>
-                        </div>
-                      </div>
-                    )}
-                    {faceCount === 0 && detectionInitialized && !cameraError && (
-                      <div className="absolute inset-0 border-4 border-amber-500 animate-pulse rounded-lg">
-                        <div className="absolute bottom-2 left-2 right-2">
-                          <Badge className="bg-amber-600 w-full justify-center text-white border-0 gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            No Face Detected
-                          </Badge>
-                        </div>
-                      </div>
-                    )}
-                    {faceCount === 1 && !cameraError && (
-                      <div className="absolute top-2 right-2">
-                        <Badge className="bg-emerald-600 text-white border-0 gap-1">
-                          <CheckCircle className="w-3 h-3" />
-                           1 Face
-                        </Badge>
-                      </div>
-                    )}
-                    {/* Show detecting state when camera just started */}
-                    {!detectionInitialized && !cameraError && (
-                      <div className="absolute top-2 right-2">
-                        <Badge className="bg-blue-600 text-white border-0 gap-1 animate-pulse">
-                          Detecting...
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-slate-400 text-xs mt-3 text-center font-medium">
-                    Stay visible in frame • Only 1 person allowed
-                  </p>
-                </CardContent>
-              </Card>
+      <main className="mx-auto grid max-w-[1480px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:px-8 lg:py-8">
+        <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+          <nav className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm" aria-label="Assessment sections">
+            {sections.map((section, index) => {
+              const { label, icon: Icon } = SECTION_META[section];
+              const active = section === currentSection;
+              return (
+                <button
+                  key={section}
+                  type="button"
+                  onClick={() => setCurrentSection(section)}
+                  aria-current={active ? 'step' : undefined}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${active ? 'bg-slate-950 font-medium text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'}`}
+                >
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-md text-xs ${active ? 'bg-white/15' : 'bg-slate-100'}`}>{index + 1}</span>
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  {completion[section] && <Check className={`h-4 w-4 ${active ? 'text-emerald-300' : 'text-emerald-600'}`} aria-label="Complete" />}
+                </button>
+              );
+            })}
+          </nav>
 
-              {/* Violations Panel */}
-              {violationsList.length > 0 && (
-                <Card className="mt-4 bg-gradient-to-br from-red-900/30 to-slate-900 shadow-2xl border-red-800/50">
-                  <CardHeader className="pb-2 border-b border-red-800/50">
-                    <CardTitle className="text-white text-sm flex items-center gap-2 font-bold">
-                      <ShieldAlert className="w-4 h-4 text-red-400" />
-                      Violations ({violationsList.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-3 max-h-60 overflow-y-auto">
-                    <div className="space-y-2">
-                      {violationsList.map((violation, idx) => (
-                        <div
-                          key={violation.id || idx}
-                          className={`p-2 rounded-lg border text-xs ${violation.severity === 'high'
-                            ? 'bg-red-900/40 border-red-700 text-red-300'
-                            : violation.severity === 'medium'
-                              ? 'bg-amber-900/40 border-amber-700 text-amber-300'
-                              : 'bg-slate-800 border-slate-700 text-slate-300'
-                            }`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <Badge className={`text-[10px] px-1.5 py-0 ${violation.type === 'tab_switch' ? 'bg-blue-600' :
-                              violation.type === 'multiple_faces' ? 'bg-red-600' :
-                                violation.type === 'no_face' ? 'bg-amber-600' :
-                                  violation.type === 'face_not_detected' ? 'bg-amber-600' :
-                                    'bg-slate-600'
-                              }`}>
-                              {violation.type === 'tab_switch' ? ' Tab' :
-                                violation.type === 'multiple_faces' ? ' Multi-Face' :
-                                  violation.type === 'no_face' || violation.type === 'face_not_detected' ? ' No Face' :
-                                    violation.type}
-                            </Badge>
-                            <span className="text-[10px] text-slate-500">{violation.timestamp}</span>
-                          </div>
-                          <p className="text-[11px] truncate">{violation.description}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+          {session?.proctoring_enabled && (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="aspect-video bg-slate-950">
+                {mediaStream ? (
+                  <video ref={videoRef} muted playsInline className="h-full w-full object-cover [transform:scaleX(-1)]" aria-label="Your camera preview" />
+                ) : (
+                  <div className="flex h-full items-center justify-center"><VideoOff className="h-6 w-6 text-slate-500" /></div>
+                )}
+              </div>
+              <div className="p-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+                  <span className={`h-2 w-2 rounded-full ${isStreaming ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  {isStreaming ? 'Proctoring connected' : 'Connecting camera'}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Camera video and tab visibility are monitored during this session.</p>
+                {streamError && <p className="mt-2 text-xs leading-5 text-red-700">{streamError}</p>}
+                {violationCount > 0 && <p className="mt-2 text-xs text-slate-500">Session events recorded: {violationCount}</p>}
+              </div>
             </div>
           )}
+
+          {!session?.proctoring_enabled && (
+            <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+              <div className="flex items-center gap-2 font-medium text-slate-900"><Video className="h-4 w-4" /> Camera not required</div>
+              <p className="mt-1 text-xs leading-5">This assessment does not use live video proctoring.</p>
+            </div>
+          )}
+        </aside>
+
+        <div className="min-w-0">
+          {currentSection === 'knowledge' && (
+            <MCQSection
+              questions={questions}
+              currentQuestion={mcqQuestion}
+              mcqAnswers={mcqAnswers}
+              onAnswer={handleMcqAnswer}
+              onNextSection={() => moveSection(1)}
+              setCurrentQuestion={setMcqQuestion}
+              savingQuestionId={savingMcqId}
+            />
+          )}
+          {currentSection === 'coding' && (
+            <CodingSection
+              problem={problem}
+              language={language}
+              onLanguageChange={handleLanguageChange}
+              code={currentCode}
+              setCode={updateCode}
+              output={output}
+              isRunning={isRunning}
+              codeSaved={codeSaved}
+              onRunCode={handleRunCode}
+              onRunTests={handleRunTests}
+              onSubmitCode={() => saveCode()}
+              onNextSection={() => moveSection(1)}
+              onPrevSection={() => moveSection(-1)}
+            />
+          )}
+          {currentSection === 'workstyle' && (
+            <PsychometricSection
+              scenarios={scenarios}
+              currentQuestion={workstyleQuestion}
+              psychometricAnswers={psychometricAnswers}
+              onAnswer={handlePsychometricAnswer}
+              onPrevSection={() => moveSection(-1)}
+              onSubmit={() => setConfirmOpen(true)}
+              isSubmitting={isSubmitting}
+              setCurrentQuestion={setWorkstyleQuestion}
+              savingQuestionId={savingPsychometricId}
+            />
+          )}
         </div>
-      </div>
+      </main>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Submit assessment?</DialogTitle>
+            <DialogDescription>
+              Submission is final. Saved responses will be scored and you will not be able to reopen the session.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+            {unanswered > 0 ? (
+              <p className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />You still have {unanswered} unanswered {unanswered === 1 ? 'item' : 'items'}.</p>
+            ) : (
+              <p className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />Every multiple-choice and work-style item has an answer.</p>
+            )}
+            {isTechnical && !codeSaved && <p className="mt-2">Your latest code will be saved automatically before submission.</p>}
+          </div>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)} disabled={isSubmitting}>Continue working</Button>
+            <Button type="button" onClick={() => handleSubmit(false)} disabled={isSubmitting}>
+              {isSubmitting && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
+              Submit assessment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

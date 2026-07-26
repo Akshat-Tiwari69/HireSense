@@ -4,25 +4,23 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 
 import socketio
 from eventlet.semaphore import Semaphore
 
+from assessment_db import hash_assessment_token
 from db_config import get_connection, return_connection
+from security_headers import configured_cors_origins
 from user_db import get_user_by_id, user_auth_version
 
 
 logger = logging.getLogger(__name__)
 
-_configured_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:5174,http://localhost:3000,http://127.0.0.1:5173",
-)
-_allowed_origins = [origin.strip() for origin in _configured_origins.split(",") if origin.strip()]
+_allowed_origins = configured_cors_origins()
 sio = socketio.Server(
     cors_allowed_origins=_allowed_origins,
     async_mode="eventlet",
+    max_http_buffer_size=256 * 1024,
     logger=False,
     engineio_logger=False,
 )
@@ -31,6 +29,9 @@ sio = socketio.Server(
 active_rooms = {}
 # {sid: {'type': 'candidate'|'interviewer', 'assessment_id': int, ...}}
 connections = {}
+# Every accepted socket is authenticated during the Engine.IO handshake. Keeping
+# this separate from room membership bounds idle authenticated sockets too.
+authenticated_sockets = {}
 _state_lock = Semaphore(1)
 
 # Injected by app.py so handlers can decode staff JWTs in Flask context.
@@ -67,12 +68,12 @@ def _verify_candidate_token(access_token, assessment_id):
         cursor.execute("""
             SELECT 1
             FROM scheduled_assessments sa
-            JOIN assessments a ON a.id = sa.assessment_id
-            WHERE sa.access_token = %s
+                    JOIN assessments a ON a.scheduled_assessment_id = sa.id
+            WHERE sa.access_token_hash = %s
               AND a.id = %s
               AND sa.status = 'in_progress'
               AND a.status IN ('started', 'in_progress')
-        """, (access_token, assessment_id))
+        """, (hash_assessment_token(access_token), assessment_id))
         return cursor.fetchone() is not None
     except Exception:
         logger.exception("Candidate token verification failed for assessment %s", assessment_id)
@@ -97,13 +98,19 @@ def _verify_interviewer_jwt(token):
             decoded = decode_token(token)
         role = decoded.get("role")
         user_id = _positive_int(decoded.get("sub"))
-        if role not in {"interviewer", "proctor", "admin", "super_admin"} or user_id is None:
+        if role not in {
+            "interviewer", "recruiter", "sector_admin", "proctor", "admin", "super_admin"
+        } or user_id is None:
             return None
         user = get_user_by_id(user_id)
         if (
             not user
             or user.get("role") != role
             or decoded.get("user_auth_version") != user_auth_version(user)
+            or (
+                role in {"recruiter", "sector_admin"}
+                and user.get("sector_id") is None
+            )
         ):
             return None
         return user_id, role
@@ -121,13 +128,15 @@ def _verify_staff_assessment_access(user_id, role, assessment_id):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT sa.interviewer_id, sa.proctor_id
+            SELECT sa.interviewer_id, sa.proctor_id, c.sector_id, staff.sector_id
             FROM assessments a
             JOIN scheduled_assessments sa ON sa.id = a.scheduled_assessment_id
+            JOIN candidates c ON c.id = a.candidate_id
+            JOIN users staff ON staff.id = %s
             WHERE a.id = %s
               AND a.status IN ('started', 'in_progress')
               AND sa.status = 'in_progress'
-        """, (assessment_id,))
+        """, (user_id, assessment_id))
         assignment = cursor.fetchone()
         if assignment is None:
             return False
@@ -135,6 +144,12 @@ def _verify_staff_assessment_access(user_id, role, assessment_id):
             return True
         if role == "interviewer":
             return assignment[0] == user_id
+        if role in {"recruiter", "sector_admin"}:
+            return (
+                assignment[0] == user_id
+                and assignment[2] is not None
+                and assignment[2] == assignment[3]
+            )
         return role == "proctor" and assignment[1] == user_id
     except Exception:
         logger.exception("Staff access verification failed for assessment %s", assessment_id)
@@ -151,8 +166,54 @@ def _emit_error(sid, message):
     sio.emit("error", {"message": message}, room=sid)
 
 
+def _socket_identity_key(identity):
+    if identity.get("type") == "candidate":
+        return "candidate", identity.get("assessment_id")
+    return (
+        "staff",
+        identity.get("user_id"),
+        identity.get("assessment_id"),
+    )
+
+
 @sio.event
-def connect(sid, environ):
+def connect(sid, environ, auth=None):
+    if not isinstance(auth, dict):
+        return False
+    assessment_id = _positive_int(auth.get("assessment_id"))
+    if assessment_id is None:
+        return False
+
+    requested_role = auth.get("role")
+    if requested_role == "candidate":
+        access_token = auth.get("access_token")
+        if not _verify_candidate_token(access_token, assessment_id):
+            return False
+        identity = {"type": "candidate", "assessment_id": assessment_id}
+    elif requested_role == "staff":
+        staff = _verify_interviewer_jwt(auth.get("token"))
+        if staff is None:
+            return False
+        user_id, role = staff
+        if not _verify_staff_assessment_access(user_id, role, assessment_id):
+            return False
+        identity = {
+            "type": "interviewer",
+            "assessment_id": assessment_id,
+            "user_id": user_id,
+            "role": role,
+        }
+    else:
+        return False
+
+    identity_key = _socket_identity_key(identity)
+    with _state_lock:
+        if any(
+            _socket_identity_key(existing) == identity_key
+            for existing in authenticated_sockets.values()
+        ):
+            return False
+        authenticated_sockets[sid] = identity
     logger.info("Proctoring socket connected: %s", sid)
     return True
 
@@ -163,6 +224,7 @@ def disconnect(sid):
     candidate_notification = None
     interviewer_notifications = []
     with _state_lock:
+        authenticated_sockets.pop(sid, None)
         connection = connections.pop(sid, None)
         if connection is None:
             return
@@ -194,12 +256,14 @@ def join_as_candidate(sid, data):
         _emit_error(sid, "Invalid join payload")
         return
     assessment_id = _positive_int(data.get("assessment_id"))
-    access_token = data.get("access_token")
-    if assessment_id is None or not isinstance(access_token, str) or not access_token:
-        _emit_error(sid, "Missing assessment_id or access_token")
-        return
-    if not _verify_candidate_token(access_token, assessment_id):
-        _emit_error(sid, "Invalid or expired assessment token")
+    with _state_lock:
+        authenticated = authenticated_sockets.get(sid, {})
+    if (
+        assessment_id is None
+        or authenticated.get("type") != "candidate"
+        or authenticated.get("assessment_id") != assessment_id
+    ):
+        _emit_error(sid, "Socket authentication required for this assessment")
         return
 
     join_error = None
@@ -243,14 +307,16 @@ def join_as_interviewer(sid, data):
     if assessment_id is None:
         _emit_error(sid, "Missing assessment_id")
         return
-    staff = _verify_interviewer_jwt(data.get("token"))
-    if staff is None:
-        _emit_error(sid, "Unauthorized; valid staff JWT required")
+    with _state_lock:
+        authenticated = authenticated_sockets.get(sid, {})
+    if (
+        authenticated.get("type") != "interviewer"
+        or authenticated.get("assessment_id") != assessment_id
+    ):
+        _emit_error(sid, "Socket authentication required for this assessment")
         return
-    user_id, role = staff
-    if not _verify_staff_assessment_access(user_id, role, assessment_id):
-        _emit_error(sid, "Not assigned to this active assessment")
-        return
+    user_id = authenticated["user_id"]
+    role = authenticated["role"]
 
     join_error = None
     candidate_sid = None
@@ -386,16 +452,16 @@ def get_active_assessments(sid, data):
     authorized = False
     assessments = []
     with _state_lock:
-        authorized = connections.get(sid, {}).get("type") == "interviewer"
+        connection = connections.get(sid, {})
+        assessment_id = connection.get("assessment_id")
+        room = active_rooms.get(assessment_id)
+        authorized = connection.get("type") == "interviewer" and room is not None
         if authorized:
-            assessments = [
-                {
-                    "assessment_id": assessment_id,
-                    "has_candidate": room.get("candidate") is not None,
-                    "interviewer_count": len(room.get("interviewers", [])),
-                }
-                for assessment_id, room in active_rooms.items()
-            ]
+            assessments = [{
+                "assessment_id": assessment_id,
+                "has_candidate": room.get("candidate") is not None,
+                "interviewer_count": len(room.get("interviewers", [])),
+            }]
     if not authorized:
         _emit_error(sid, "Not authorized")
         return

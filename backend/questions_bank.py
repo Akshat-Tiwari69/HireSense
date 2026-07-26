@@ -3,6 +3,55 @@ Question bank for assessments
 Provides MCQ questions, coding problems, and psychometric scenarios
 """
 
+import re
+
+
+_LANGUAGE_ALIASES = {
+    "python": "python",
+    "python3": "python",
+    "py": "python",
+    "javascript": "javascript",
+    "js": "javascript",
+    "node": "javascript",
+    "node.js": "javascript",
+    "nodejs": "javascript",
+}
+
+
+def get_starter_function_name(starter_code, language):
+    """Return the callable name only for code the preview harness understands."""
+    if not isinstance(starter_code, str):
+        return None
+    if language == "python":
+        match = re.search(r"^def\s+(\w+)\s*\(", starter_code, re.MULTILINE)
+    elif language == "javascript":
+        match = re.search(r"function\s+(\w+)\s*\(", starter_code)
+    else:
+        return None
+    return match.group(1) if match else None
+
+
+def normalize_starter_code(starter_code):
+    """Canonicalize provider output to runnable language/source pairs."""
+    if not isinstance(starter_code, dict):
+        return {}
+
+    normalized = {}
+    for raw_language, raw_source in starter_code.items():
+        language = _LANGUAGE_ALIASES.get(str(raw_language).strip().casefold())
+        source = raw_source.strip() if isinstance(raw_source, str) else ""
+        if language and source and get_starter_function_name(source, language):
+            normalized.setdefault(language, source)
+
+    legacy_signature = starter_code.get("function_signature")
+    if "python" not in normalized and isinstance(legacy_signature, str):
+        signature = legacy_signature.strip()
+        if re.fullmatch(r"def\s+\w+\s*\([^\n]*\)\s*(?:->\s*[^:]+)?\s*:", signature):
+            source = f"from __future__ import annotations\n\n{signature}\n    pass"
+            normalized["python"] = source
+
+    return normalized
+
 def get_mcq_questions(count=10):
     """Return sample MCQ questions"""
     questions = [
@@ -90,7 +139,8 @@ def get_psychometric_scenarios(count=3):
                 'Take over their work without discussing',
                 'Ignore it and focus on your own tasks'
             ],
-            'trait': 'teamwork'
+            'trait': 'teamwork',
+            'optimal_choice': 1,
         },
         {
             'id': 2,
@@ -101,7 +151,8 @@ def get_psychometric_scenarios(count=3):
                 'Wait until the next sprint to address it',
                 'Ignore it if it seems minor'
             ],
-            'trait': 'responsibility'
+            'trait': 'responsibility',
+            'optimal_choice': 1,
         },
         {
             'id': 3,
@@ -112,7 +163,8 @@ def get_psychometric_scenarios(count=3):
                 'Explain the concerns and suggest alternatives',
                 'Implement it but make it hard to use'
             ],
-            'trait': 'communication'
+            'trait': 'communication',
+            'optimal_choice': 2,
         }
     ]
     return scenarios[:count]

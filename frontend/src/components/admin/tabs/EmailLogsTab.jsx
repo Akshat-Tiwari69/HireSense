@@ -1,79 +1,74 @@
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 import { Badge } from '../../ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 import { TabsContent } from '../../ui/tabs';
+import StatusBadge from '../../workspace/StatusBadge';
+import { Mail } from 'lucide-react';
+
+const formatEmailType = (emailType) => (
+  emailType
+    ? emailType.split('_').map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(' ')
+    : 'Unknown'
+);
 
 const EmailLogsTab = ({ emailLogs }) => (
   <TabsContent value="email-logs">
-    <Card className="bg-white border-none shadow-md hover:shadow-lg transition-all duration-300">
-      <CardHeader>
-        <CardTitle className="text-slate-900">Email Logs</CardTitle>
-        <CardDescription className="text-slate-600">History of system emails sent to candidates and users</CardDescription>
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle>Email activity</CardTitle>
+        <CardDescription>Delivery history for candidate and staff notifications.</CardDescription>
       </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow className="border-slate-200">
-              <TableHead className="text-slate-700">Time</TableHead>
-              <TableHead className="text-slate-700">Recipient</TableHead>
-              <TableHead className="text-slate-700">Type</TableHead>
-              <TableHead className="text-slate-700">Subject</TableHead>
-              <TableHead className="text-slate-700">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {emailLogs.length === 0 ? (
+      <CardContent className="pt-5">
+        {emailLogs.length === 0 ? (
+          <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
+            <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <Mail className="h-5 w-5" />
+            </span>
+            <p className="font-medium text-foreground">No email activity yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">Notification delivery attempts will appear here.</p>
+          </div>
+        ) : (
+          <Table className="min-w-[860px]" aria-label="Email delivery activity">
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-slate-500">
-                  No email logs found
-                </TableCell>
+                <TableHead>Sent at</TableHead>
+                <TableHead>Recipient</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Subject</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ) : (
-              emailLogs.map((log) => (
-                <TableRow key={log.id} className="border-slate-200">
-                  <TableCell className="text-slate-600 text-xs">
+            </TableHeader>
+            <TableBody>
+              {emailLogs.map((log) => (
+                <TableRow key={log.id}>
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                     {new Date(log.sent_at).toLocaleString()}
                   </TableCell>
-                  <TableCell className="text-slate-700">
-                    <div className="flex flex-col">
-                      <span className="text-slate-900">{log.recipient_name}</span>
-                      <span className="text-xs text-slate-500">{log.recipient_email}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-slate-700">
-                    <Badge variant="outline" className="border-slate-300 text-slate-700">
-                      {log.email_type
-                        ? log.email_type
-                          .split('_')
-                          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                          .join(' ')
-                        : 'Unknown'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-slate-700 max-w-xs truncate" title={log.subject}>
-                    {log.subject}
+                  <TableCell>
+                    <p className="font-medium text-foreground">{log.recipient_name || 'Unnamed recipient'}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{log.recipient_email}</p>
                   </TableCell>
                   <TableCell>
-                    {log.status === 'sent' ? (
-                      <Badge className="bg-green-900 text-green-200 hover:bg-green-800">
-                        Sent
-                      </Badge>
-                    ) : (
-                      <div className="flex flex-col items-start gap-1">
-                        <Badge className="bg-red-900 text-red-200 hover:bg-red-800">
-                          Failed
-                        </Badge>
-                        <span className="text-xs text-red-400 max-w-[150px] truncate" title={log.error_message}>
-                          {log.error_message}
-                        </span>
-                      </div>
-                    )}
+                    <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                      {formatEmailType(log.email_type)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="max-w-xs truncate text-foreground" title={log.subject}>
+                    {log.subject || 'No subject'}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={log.status || 'unknown'} />
+                    {log.status !== 'sent' && log.error_message ? (
+                      <p className="mt-1 max-w-[220px] truncate text-xs text-red-700" title={log.error_message}>
+                        {log.error_message}
+                      </p>
+                    ) : null}
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </CardContent>
     </Card>
   </TabsContent>

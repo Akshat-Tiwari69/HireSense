@@ -1,211 +1,159 @@
-import { Button } from '../ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import Editor from '@monaco-editor/react';
 import {
-  Code, AlertTriangle, Zap, Terminal, Play, CheckCircle, Loader2, ChevronLeft, ChevronRight
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  LoaderCircle,
+  Play,
+  Save,
+  Terminal,
 } from 'lucide-react';
+
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { CODE_LANGUAGE_OPTIONS, getCodeLanguages } from '../../lib/assessment';
 
 const CodingSection = ({
   problem,
   language,
-  setLanguage,
+  onLanguageChange,
   code,
   setCode,
   output,
   isRunning,
-  testsPassed,
   codeSaved,
   onRunCode,
   onRunTests,
   onSubmitCode,
   onNextSection,
   onPrevSection,
-  getStarterCode,
 }) => {
   if (!problem) {
-    return <p className="text-slate-400 text-center py-8">No coding problem available</p>;
+    return <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No coding exercise is assigned.</p>;
   }
 
+  const visibleCases = (problem.test_cases || []).filter((testCase) => !testCase.is_hidden);
+  const availableLanguages = new Set(getCodeLanguages(problem));
+  const languageOptions = CODE_LANGUAGE_OPTIONS.filter(([value]) => availableLanguages.has(value));
+
   return (
-    <div className="space-y-6">
-      {/* Problem Description */}
-      <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-white flex items-center gap-3">
-              <Code className="w-6 h-6 text-emerald-400" />
-              <span className="bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-                {problem.title}
-              </span>
-            </CardTitle>
-            <Badge className={`${
-              problem.difficulty === 'Easy' ? 'bg-emerald-600' :
-              problem.difficulty === 'Medium' ? 'bg-amber-600' : 'bg-red-600'
-            }`}>
-              {problem.difficulty}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="bg-slate-700/40 p-5 rounded-lg border border-slate-600">
-            <p className="text-slate-200 whitespace-pre-line leading-relaxed">{problem.description}</p>
+    <section className="space-y-6" aria-labelledby="coding-heading">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Practical exercise</p>
+          <h2 id="coding-heading" className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">{problem.title}</h2>
+        </div>
+        <Badge variant="outline" className="capitalize">{problem.difficulty || 'Standard'}</Badge>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)]">
+        <aside className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-label="Problem details">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-950">Task</h3>
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">{problem.description}</p>
           </div>
 
           {problem.example && (
-            <div className="bg-indigo-900/30 border border-indigo-700/50 p-5 rounded-lg">
-              <p className="text-indigo-300 font-semibold mb-3 flex items-center gap-2">
-                <Zap className="w-4 h-4" /> Example:
-              </p>
-              <pre className="text-slate-300 text-sm font-mono bg-slate-900/50 p-3 rounded border border-slate-700 overflow-x-auto">
-                {problem.example}
-              </pre>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-950">Example</h3>
+              <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs leading-6 text-slate-100">{problem.example}</pre>
             </div>
           )}
 
-          {problem.constraints && problem.constraints.length > 0 && (
+          {problem.constraints?.length > 0 && (
             <div>
-              <p className="text-slate-300 font-semibold mb-3 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" /> Constraints:
-              </p>
-              <ul className="text-slate-400 text-sm space-y-2 pl-6">
-                {problem.constraints.map((c, idx) => (
-                  <li key={idx} className="list-disc">{c}</li>
-                ))}
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+                <CircleAlert className="h-4 w-4 text-slate-500" aria-hidden="true" />
+                Constraints
+              </h3>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600">
+                {problem.constraints.map((constraint) => <li key={constraint}>{constraint}</li>)}
               </ul>
             </div>
           )}
 
-          {problem.test_cases && problem.test_cases.length > 0 && (
+          {visibleCases.length > 0 && (
             <div>
-              <p className="text-slate-300 font-semibold mb-3">Test Cases:</p>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {problem.test_cases.filter(tc => !tc.is_hidden).map((tc, idx) => (
-                  <div key={idx} className="bg-slate-700/50 border border-slate-600 p-4 rounded-lg text-sm">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-slate-400">Input:</span>
-                        <code className="text-emerald-400 ml-2 font-mono">{tc.input}</code>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Expected:</span>
-                        <code className="text-cyan-400 ml-2 font-mono">{tc.expected}</code>
-                      </div>
-                    </div>
+              <h3 className="text-sm font-semibold text-slate-950">Visible examples</h3>
+              <div className="mt-2 space-y-2">
+                {visibleCases.map((testCase, index) => (
+                  <div key={`${testCase.input}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <p><span className="font-medium text-slate-500">Input:</span> <code className="text-slate-900">{testCase.input}</code></p>
+                    <p className="mt-1"><span className="font-medium text-slate-500">Expected:</span> <code className="text-slate-900">{testCase.expected}</code></p>
                   </div>
                 ))}
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </aside>
 
-      {/* Code Editor */}
-      <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-white">Your Solution</CardTitle>
-            <Select value={language} onValueChange={(val) => {
-              setLanguage(val);
-              setCode(getStarterCode(problem, val));
-            }}>
-              <SelectTrigger className="w-48 bg-slate-700 border-slate-600 text-white hover:bg-slate-600">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-950">Solution</p>
+              <p className="text-xs text-slate-500">Changes are saved only when you select Save solution.</p>
+            </div>
+            <Select value={language} onValueChange={onLanguageChange} disabled={!languageOptions.length}>
+              <SelectTrigger className="w-40" aria-label="Programming language">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700">
-                <SelectItem value="javascript">JavaScript</SelectItem>
-                <SelectItem value="python">Python</SelectItem>
-                <SelectItem value="java">Java</SelectItem>
-                <SelectItem value="cpp">C++</SelectItem>
+              <SelectContent>
+                {languageOptions.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="border-2 border-slate-700 rounded-lg overflow-hidden shadow-lg">
-            <Editor
-              height="380px"
-              language={language}
-              value={code}
-              onChange={(value) => setCode(value || '')}
-              theme="vs-dark"
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                wordWrap: 'on',
-                padding: { top: 12, bottom: 12 }
-              }}
-            />
-          </div>
 
-          <div className="flex gap-3">
-            <Button
-              onClick={onRunCode}
-              disabled={isRunning}
-              className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2 font-semibold"
-            >
-              {isRunning ? <><Loader2 className="w-4 h-4 animate-spin" />Executing...</> : <><Play className="w-4 h-4" />Run Code</>}
+          <textarea
+            data-code-editor="true"
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            spellCheck="false"
+            rows={19}
+            maxLength={100000}
+            aria-label="Code solution"
+            className="block w-full resize-y border-0 bg-slate-950 px-4 py-4 font-mono text-[13px] leading-6 text-slate-100 outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+          />
+
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-3">
+            <Button type="button" variant="outline" onClick={onRunCode} disabled={isRunning || !code.trim()}>
+              {isRunning ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+              Run code
             </Button>
-
-            {problem.test_cases && problem.test_cases.length > 0 && (
-              <Button
-                onClick={() => onRunTests(problem.test_cases)}
-                disabled={isRunning}
-                variant="outline"
-                className="border-indigo-600 text-indigo-300 hover:bg-indigo-900/50 hover:text-indigo-100 gap-2 font-semibold"
-              >
-                {isRunning ? <><Loader2 className="w-4 h-4 animate-spin" />Testing...</> : <><CheckCircle className="w-4 h-4" />Run Tests</>}
+            {visibleCases.length > 0 && (
+              <Button type="button" variant="outline" onClick={() => onRunTests(visibleCases)} disabled={isRunning || !code.trim()}>
+                <Check className="mr-2 h-4 w-4" />
+                Run examples
               </Button>
             )}
-
-            {testsPassed && !codeSaved && (
-              <Button
-                onClick={onSubmitCode}
-                disabled={isRunning}
-                className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 gap-2 font-semibold animate-pulse"
-              >
-                <CheckCircle className="w-4 h-4" />Submit Code
-              </Button>
-            )}
-
-            {codeSaved && (
-              <Button disabled className="bg-green-800 text-green-200 gap-2 font-semibold cursor-default">
-                <CheckCircle className="w-4 h-4" />Code Saved
-              </Button>
-            )}
+            <Button type="button" onClick={onSubmitCode} disabled={isRunning || !code.trim() || codeSaved}>
+              <Save className="mr-2 h-4 w-4" />
+              {codeSaved ? 'Solution saved' : 'Save solution'}
+            </Button>
           </div>
 
           {output && (
-            <div className="bg-slate-900/80 border-2 border-slate-700 rounded-lg p-4 font-mono text-sm overflow-auto max-h-56">
-              <div className="text-emerald-400 font-semibold mb-2 flex items-center gap-2">
-                <Terminal className="w-4 h-4" /> Output:
-              </div>
-              <pre className="text-slate-300 whitespace-pre-wrap break-words">{output}</pre>
+            <div className="border-t border-slate-200 bg-slate-950 p-4" aria-live="polite">
+              <p className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.12em] text-slate-400">
+                <Terminal className="h-4 w-4" aria-hidden="true" /> Output
+              </p>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-100">{output}</pre>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <div className="flex justify-between gap-3 pt-4">
-        <Button
-          variant="outline"
-          onClick={onPrevSection}
-          className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
-        >
-          <ChevronLeft className="w-4 h-4" /> Previous Section
+      <div className="flex flex-col-reverse justify-between gap-3 sm:flex-row">
+        <Button type="button" variant="outline" onClick={onPrevSection}>
+          <ChevronLeft className="mr-2 h-4 w-4" />
+          Previous section
         </Button>
-        <Button
-          onClick={onNextSection}
-          className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
-        >
-          Next Section <ChevronRight className="w-4 h-4" />
+        <Button type="button" onClick={onNextSection}>
+          Continue
+          <ChevronRight className="ml-2 h-4 w-4" />
         </Button>
       </div>
-    </div>
+    </section>
   );
 };
 

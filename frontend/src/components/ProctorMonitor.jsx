@@ -1,205 +1,220 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import SimplePeer from 'simple-peer';
-import { X, Wifi, WifiOff, Video, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2, Video, Wifi, WifiOff } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { API_BASE_URL } from '../services/api';
-import './ProctorMonitor.css';
+import { useAuth } from '../contexts/AuthContext';
 
 const ProctorMonitor = ({ assessmentId, onClose }) => {
-    const [connected, setConnected] = useState(false);
-    const [candidatePresent, setCandidatePresent] = useState(false);
-    const [error, setError] = useState(null);
-    const [hasActiveStream, setHasActiveStream] = useState(false);
+  const { token, user } = useAuth();
+  const [connected, setConnected] = useState(false);
+  const [candidatePresent, setCandidatePresent] = useState(false);
+  const [error, setError] = useState(null);
+  const [hasActiveStream, setHasActiveStream] = useState(false);
 
-    const socketRef = useRef(null);
-    const peerRef = useRef(null);
-    const videoRef = useRef(null);
-    const handleOfferRef = useRef(null);
+  const socketRef = useRef(null);
+  const peerRef = useRef(null);
+  const videoRef = useRef(null);
+  const handleOfferRef = useRef(null);
 
-    useEffect(() => {
-        // Connect to Socket.IO server using dynamic API URL
-        const socket = io(API_BASE_URL, {
-            transports: ['websocket', 'polling']
+  const destroyPeer = useCallback(() => {
+    if (peerRef.current) {
+      peerRef.current.destroy();
+      peerRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setHasActiveStream(false);
+  }, []);
+
+  const handleOffer = useCallback((offer) => {
+    destroyPeer();
+
+    const peer = new SimplePeer({
+      initiator: false,
+      trickle: true,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      },
+    });
+
+    peerRef.current = peer;
+
+    peer.on('signal', (data) => {
+      if (data.type === 'answer') {
+        socketRef.current?.emit('webrtc_answer', {
+          assessment_id: assessmentId,
+          answer: data,
         });
+        return;
+      }
 
-        socketRef.current = socket;
+      socketRef.current?.emit('ice_candidate', {
+        assessment_id: assessmentId,
+        candidate: data,
+        target: 'candidate',
+      });
+    });
 
-        socket.on('connect', () => {
-            console.log('[PROCTOR] Connected to server');
-            setConnected(true);
+    peer.on('stream', (stream) => {
+      if (!videoRef.current) return;
+      videoRef.current.srcObject = stream;
+      setHasActiveStream(true);
+      setError(null);
+    });
 
-            const userId = localStorage.getItem('user_id') || '1';
-            const token = localStorage.getItem('authToken');
-            socket.emit('join_as_interviewer', {
-                assessment_id: assessmentId,
-                user_id: parseInt(userId),
-                token: token,
-            });
-        });
+    peer.on('error', () => {
+      setError('The secure video connection could not be established. Ask the candidate to reconnect their camera.');
+      setHasActiveStream(false);
+    });
 
-        socket.on('joined', (data) => {
-            console.log('[PROCTOR] Joined room:', data);
-            setCandidatePresent(data.candidate_present);
-        });
+    peer.signal(offer);
+  }, [assessmentId, destroyPeer]);
 
-        socket.on('candidate_joined', () => {
-            console.log('[PROCTOR] Candidate joined');
-            setCandidatePresent(true);
-            setError(null); // Clear any previous errors
-        });
+  handleOfferRef.current = handleOffer;
 
-        socket.on('webrtc_offer', (data) => {
-            console.log('[PROCTOR] Received WebRTC offer');
-            handleOfferRef.current?.(data.offer);
-        });
+  useEffect(() => {
+    const socket = io(API_BASE_URL, {
+      transports: ['websocket', 'polling'],
+      auth: {
+        role: 'staff',
+        assessment_id: assessmentId,
+        token,
+      },
+    });
 
-        socket.on('ice_candidate', (data) => {
-            console.log('[PROCTOR] Received ICE candidate');
-            if (peerRef.current) {
-                peerRef.current.signal(data.candidate);
-            }
-        });
+    socketRef.current = socket;
 
-        socket.on('candidate_disconnected', () => {
-            console.log('[PROCTOR] Candidate disconnected');
-            setCandidatePresent(false);
-            setHasActiveStream(false);
-            if (peerRef.current) {
-                peerRef.current.destroy();
-                peerRef.current = null;
-            }
-        });
+    socket.on('connect', () => {
+      setConnected(true);
+      setError(null);
+      socket.emit('join_as_interviewer', {
+        assessment_id: assessmentId,
+        user_id: user?.id,
+        token,
+      });
+    });
 
-        socket.on('error', (data) => {
-            console.error('[PROCTOR] Socket error:', data);
-            setError(data.message);
-        });
+    socket.on('joined', (data) => {
+      setCandidatePresent(Boolean(data?.candidate_present));
+    });
 
-        socket.on('disconnect', () => {
-            console.log('[PROCTOR] Disconnected from server');
-            setConnected(false);
-        });
+    socket.on('candidate_joined', () => {
+      setCandidatePresent(true);
+      setError(null);
+    });
 
-        return () => {
-            if (peerRef.current) {
-                peerRef.current.destroy();
-            }
-            socket.disconnect();
-        };
-    }, [assessmentId]);
+    socket.on('webrtc_offer', (data) => {
+      if (data?.offer) handleOfferRef.current?.(data.offer);
+    });
 
-    const handleOffer = (offer) => {
-        // Create peer connection as receiver
-        const peer = new SimplePeer({
-            initiator: false,
-            trickle: true,
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]
-            }
-        });
+    socket.on('ice_candidate', (data) => {
+      if (peerRef.current && data?.candidate) peerRef.current.signal(data.candidate);
+    });
 
-        peerRef.current = peer;
+    socket.on('candidate_disconnected', () => {
+      setCandidatePresent(false);
+      destroyPeer();
+    });
 
-        peer.on('signal', (data) => {
-            if (data.type === 'answer') {
-                console.log('[PROCTOR] Sending answer');
-                socketRef.current.emit('webrtc_answer', {
-                    assessment_id: assessmentId,
-                    answer: data
-                });
-            } else {
-                // ICE candidate
-                socketRef.current.emit('ice_candidate', {
-                    assessment_id: assessmentId,
-                    candidate: data,
-                    target: 'candidate'
-                });
-            }
-        });
+    socket.on('error', (data) => {
+      setError(data?.message || 'The monitoring service reported a connection error.');
+    });
 
-        peer.on('stream', (stream) => {
-            console.log('[PROCTOR] Received video stream');
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                setHasActiveStream(true);
-                setError(null); // Clear errors when stream is active
-            }
-        });
+    socket.on('connect_error', () => {
+      setConnected(false);
+      setError('Unable to reach the live monitoring service. Retrying automatically.');
+    });
 
-        peer.on('error', (err) => {
-            console.error('[PROCTOR] Peer error:', err);
-            setError(`Connection error: ${err.message}`);
-        });
+    socket.on('disconnect', () => {
+      setConnected(false);
+    });
 
-        peer.signal(offer);
+    return () => {
+      destroyPeer();
+      socket.disconnect();
+      socketRef.current = null;
     };
+  }, [assessmentId, destroyPeer, token, user?.id]);
 
-    handleOfferRef.current = handleOffer;
+  const streamLabel = hasActiveStream
+    ? 'Camera stream active'
+    : candidatePresent
+      ? 'Candidate connected; preparing stream'
+      : 'Waiting for candidate';
 
-    return (
-        <div className="proctor-monitor-overlay">
-            <div className="proctor-monitor-container">
-                <div className="proctor-monitor-header">
-                    <div className="header-left">
-                        <h2>Live Proctoring</h2>
-                        <div className="header-status-icons">
-                            {connected ? (
-                                <Wifi className="w-4 h-4 text-green-400" title="Connection Active" />
-                            ) : (
-                                <WifiOff className="w-4 h-4 text-red-400" title="Connection Lost" />
-                            )}
-                            {candidatePresent ? (
-                                <Video className="w-4 h-4 text-blue-400" title="Live Stream Active" />
-                            ) : (
-                                <Loader2 className="w-4 h-4 text-yellow-400 animate-spin" title="Awaiting Candidate" />
-                            )}
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="close-button" aria-label="Close">
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="flex max-h-[calc(100vh-1.5rem)] max-w-6xl flex-col gap-0 overflow-hidden border-slate-700 bg-slate-950 p-0 text-slate-200 shadow-xl sm:max-h-[calc(100vh-3rem)] sm:p-0 [&>button]:right-5 [&>button]:top-5 [&>button]:text-slate-300 [&>button]:opacity-100 [&>button]:focus:ring-blue-400 [&>button]:focus:ring-offset-slate-900 [&>button]:hover:bg-slate-800">
+        <DialogHeader className="border-b border-slate-800 bg-slate-900 px-4 py-4 pr-14 text-left sm:px-6 sm:pr-16">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-300">Authorized live view</p>
+            <DialogTitle className="mt-1 text-lg text-white sm:text-xl">Candidate monitor</DialogTitle>
+            <DialogDescription className="mt-1 text-slate-400">
+              Assessment #{assessmentId} · Use integrity events as review signals, not automatic conclusions.
+            </DialogDescription>
+          </div>
+        </DialogHeader>
 
-                <div className="proctor-monitor-content">
-
-                    <div className="video-container">
-                        {error && !hasActiveStream && (
-                            <div className="error-message">
-                                 {error}
-                            </div>
-                        )}
-
-                        {!candidatePresent && !error && (
-                            <div className="waiting-message">
-                                <div className="spinner"></div>
-                                <p>Waiting for candidate to join...</p>
-                            </div>
-                        )}
-
-                        <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            className="candidate-video"
-                            style={{ display: hasActiveStream ? 'block' : 'none' }}
-                        />
-                    </div>
-
-                    <div className="proctor-info">
-                        <p className="info-text">
-                             Monitor the candidate's camera feed during the assessment
-                        </p>
-                        <p className="info-text">
-                             This feed is secure and only visible to authorized interviewers
-                        </p>
-                    </div>
-                </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+          <div className="mb-4 flex flex-wrap gap-2" aria-live="polite">
+            <div className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-medium ${
+              connected
+                ? 'border-emerald-800 bg-emerald-950/60 text-emerald-300'
+                : 'border-red-800 bg-red-950/60 text-red-300'
+            }`}>
+              {connected ? <Wifi className="h-3.5 w-3.5" aria-hidden="true" /> : <WifiOff className="h-3.5 w-3.5" aria-hidden="true" />}
+              {connected ? 'Service connected' : 'Service reconnecting'}
             </div>
+            <div className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-medium ${
+              hasActiveStream
+                ? 'border-blue-800 bg-blue-950/60 text-blue-300'
+                : 'border-slate-700 bg-slate-900 text-slate-300'
+            }`}>
+              {candidatePresent && !hasActiveStream
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                : <Video className="h-3.5 w-3.5" aria-hidden="true" />}
+              {streamLabel}
+            </div>
+          </div>
+
+          <div className="relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-black sm:min-h-[30rem]">
+            {error && !hasActiveStream ? (
+              <div className="mx-6 max-w-lg rounded-lg border border-red-900 bg-red-950/70 p-5 text-center" role="alert">
+                <AlertCircle className="mx-auto h-6 w-6 text-red-300" aria-hidden="true" />
+                <p className="mt-3 text-sm font-medium text-red-100">Video unavailable</p>
+                <p className="mt-1 text-sm leading-6 text-red-300">{error}</p>
+              </div>
+            ) : null}
+
+            {!candidatePresent && !error ? (
+              <div className="px-6 text-center" aria-live="polite">
+                <Loader2 className="mx-auto h-7 w-7 animate-spin text-blue-300 motion-reduce:animate-none" aria-hidden="true" />
+                <p className="mt-4 text-sm font-medium text-slate-200">Waiting for the candidate</p>
+                <p className="mt-1 text-sm text-slate-500">The camera feed will appear when the assessment session connects.</p>
+              </div>
+            ) : null}
+
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className={`h-full w-full bg-black object-contain ${hasActiveStream ? 'block' : 'hidden'}`}
+              aria-label="Live candidate camera feed"
+            />
+          </div>
+
+          <div className="mt-4 flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-400">
+            <Video className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
+            <p>Only authorized staff can view this encrypted session feed. Review any detected event in context before recording a decision.</p>
+          </div>
         </div>
-    );
+      </DialogContent>
+    </Dialog>
+  );
 };
 
 export default ProctorMonitor;

@@ -158,7 +158,7 @@ The frontend is a single-page application built with React 18 and Vite 5.
 | `/login` | Login | Public |
 | `/jobs` | Job listings | Public |
 | `/apply/:jobId` | Application form | Public |
-| `/assessment/:token` | Assessment interface | Token-based |
+| `/assessment#token=…` | Assessment interface | Token stored in the fragment to keep it out of HTTP access logs |
 | `/interviewer` | Interviewer dashboard | JWT (interviewer) |
 | `/admin` | Admin dashboard | JWT (admin) |
 | `/proctor` | Proctor dashboard | JWT (proctor) |

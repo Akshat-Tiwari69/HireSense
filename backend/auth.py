@@ -1,6 +1,7 @@
 """
 Authentication Module
-Handles user registration, login, and JWT token management
+Handles staff login and JWT token management. Staff accounts are created only
+through the admin API.
 """
 
 from flask import Blueprint, request, jsonify
@@ -12,12 +13,10 @@ from flask_jwt_extended import (
 )
 import re
 import logging
-import time
+from time import perf_counter
 from functools import lru_cache
 from werkzeug.security import generate_password_hash, check_password_hash
 from user_db import (
-    DuplicateEmailError,
-    create_user,
     get_user_by_email,
     get_user_by_id,
     user_auth_version,
@@ -35,11 +34,10 @@ EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a
 # Valid roles (expanded for RBAC)
 VALID_ROLES = ['interviewer', 'admin', 'proctor', 'super_admin', 'sector_admin', 'recruiter']
 
-# Only low-privilege roles can self-register
-SELF_REGISTER_ROLES = ['interviewer']
-
 # Cache compiled regex pattern for validation (avoids recompiling on each request)
 _EMAIL_PATTERN_COMPILED = re.compile(EMAIL_PATTERN)
+_DUMMY_PASSWORD_HASH = generate_password_hash("timing-only-nonexistent-account")
+SLOW_LOGIN_SECONDS = 2.0
 
 
 @lru_cache(maxsize=128)
@@ -57,164 +55,26 @@ def hash_password(password):
 
 
 def verify_password(password, password_hash):
-    """Verify a password against its hash with optimized logging"""
-    logger.info("[AUTH] Verifying password...")
+    """Verify a password hash and fail closed for malformed legacy values."""
     try:
-        result = check_password_hash(password_hash, password)
-        if result:
-            logger.info("[OK] Password verification successful")
-        else:
-            logger.warning("[FAIL] Password verification failed")
-        return result
-    except Exception as e:
-        logger.warning("[WARN] Password verification error (invalid/legacy hash): %s", e)
+        return check_password_hash(password_hash, password)
+    except Exception as exc:
+        logger.warning(
+            "Password hash could not be verified (%s)",
+            type(exc).__name__,
+        )
         return False
 
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
-    """
-    Register a new user (interviewer or admin)
-    
-    Request body:
-    {
-        "email": "user@example.com",
-        "password": "securepassword",
-        "role": "interviewer",
-        "name": "John Doe"
-    }
-    
-    Returns:
-        201: User created successfully with user_id
-        400: Validation error or missing fields
-        409: Email already exists
-        500: Server error
-    """
-    try:
-        logger.info("="*80)
-        logger.info("[REG] USER REGISTRATION REQUEST")
-        logger.info("="*80)
-        
-        # Get request data
-        data = request.get_json(silent=True)
-
-        if not isinstance(data, dict):
-            return jsonify({
-                'status': 'error',
-                'message': 'A JSON object is required'
-            }), 400
-        
-        # Validate required fields
-        required_fields = ['email', 'password', 'role', 'name']
-        for field in required_fields:
-            if field not in data or not data[field]:
-                logger.error(f"[ERROR] Missing required field: {field}")
-                return jsonify({
-                    'status': 'error',
-                    'message': f'Missing required field: {field}'
-                }), 400
-        
-        if not all(isinstance(data[field], str) for field in required_fields):
-            return jsonify({
-                'status': 'error',
-                'message': 'Email, password, role, and name must be strings'
-            }), 400
-
-        email = data['email'].strip().lower()
-        password = data['password']
-        role = data['role'].strip().lower()
-        name = data['name'].strip()
-
-        if len(email) > 254 or len(password) > 128 or len(name) > 120:
-            return jsonify({
-                'status': 'error',
-                'message': 'One or more fields exceed the maximum allowed length'
-            }), 400
-        
-        logger.info(f"[REG] Attempt - Email: {email}, Role: {role}, Name: {name}")
-        
-        # Validate email format
-        if not validate_email(email):
-            logger.error(f"[ERROR] Invalid email format: {email}")
-            return jsonify({
-                'status': 'error',
-                'message': 'Invalid email format'
-            }), 400
-        
-        # Validate password length
-        if len(password) < 8:
-            logger.error("[ERROR] Password too short")
-            return jsonify({
-                'status': 'error',
-                'message': 'Password must be at least 8 characters long'
-            }), 400
-        
-        # Validate role
-        if role not in VALID_ROLES:
-            logger.error(f"[ERROR] Invalid role: {role}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Invalid role. Must be one of: {", ".join(VALID_ROLES)}'
-            }), 400
-
-        # Prevent self-service privileged account creation
-        if role not in SELF_REGISTER_ROLES:
-            logger.warning(f"[SECURITY] Blocked self-registration with privileged role: {role}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Self-registration is restricted. Allowed roles: {", ".join(SELF_REGISTER_ROLES)}'
-            }), 403
-        
-        # Validate name
-        if len(name) < 2:
-            logger.error("[ERROR] Name too short")
-            return jsonify({
-                'status': 'error',
-                'message': 'Name must be at least 2 characters long'
-            }), 400
-        
-        # Check if user already exists
-        logger.info(f"[CHECK] User exists: {email}")
-        existing_user = get_user_by_email(email)
-        if existing_user:
-            logger.warning(f"[WARN] User exists: {email}")
-            return jsonify({
-                'status': 'error',
-                'message': 'User with this email already exists'
-            }), 409
-        
-        # Hash password
-        password_hash = hash_password(password)
-        
-        # Create user
-        logger.info("[DB] Creating user in database...")
-        user_id = create_user(email, password_hash, role, name)
-        
-        logger.info(f"[OK] User registered - ID: {user_id}")
-        logger.info("="*80)
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'User registered successfully',
-            'data': {
-                'user_id': user_id,
-                'email': email,
-                'role': role,
-                'name': name
-            }
-        }), 201
-    
-    except DuplicateEmailError:
-        return jsonify({
-            'status': 'error',
-            'message': 'User with this email already exists'
-        }), 409
-    except Exception:
-        logger.exception("[ERROR] Registration error")
-        return jsonify({
-            'status': 'error',
-            'message': 'An error occurred during registration'
-        }), 500
+def _record_login_timing(request_started, lookup_seconds, verify_seconds):
+    total_seconds = perf_counter() - request_started
+    if total_seconds >= SLOW_LOGIN_SECONDS:
+        logger.warning(
+            "[AUTH] Slow login request: total=%.3fs lookup=%.3fs verify=%.3fs",
+            total_seconds,
+            lookup_seconds,
+            verify_seconds,
+        )
 
 
 @auth_bp.route('/login', methods=['POST'])
@@ -234,17 +94,13 @@ def login():
         401: Invalid credentials
         500: Server error
     """
+    request_started = perf_counter()
     try:
-        logger.info("="*80)
-        logger.info("[LOGIN] USER LOGIN REQUEST")
-        logger.info("="*80)
-        
         # Get request data
         data = request.get_json(silent=True)
         
         # Validate required fields
         if not isinstance(data, dict) or 'email' not in data or 'password' not in data:
-            logger.error("[ERROR] Missing email or password")
             return jsonify({
                 'status': 'error',
                 'message': 'Email and password are required'
@@ -264,41 +120,29 @@ def login():
                 'message': 'Invalid email or password'
             }), 400
         
-        logger.info(f"[LOGIN] Attempt: {email}")
-        
         # Get user from the user-domain data module.
-        logger.info("[DB] Looking up user...")
-        user_lookup_start = time.perf_counter()
+        user_lookup_start = perf_counter()
         user = get_user_by_email(email)
-        logger.info("[DB] Lookup done in %.3fs (found=%s)", time.perf_counter() - user_lookup_start, bool(user))
+        lookup_seconds = perf_counter() - user_lookup_start
+        logger.debug("[AUTH] User lookup completed in %.3fs", lookup_seconds)
         
-        if not user:
-            logger.warning(f"[WARN] User not found: {email}")
-            return jsonify({
-                'status': 'error',
-                'message': 'Invalid email or password'
-            }), 401
-        
-        logger.info(f"[OK] User found - Role: {user.get('role')}")
-        
-        # Verify password
-        try:
-            verify_start = time.perf_counter()
-            is_valid = verify_password(password, user['password_hash'])
-            logger.info("[AUTH] Verify done in %.3fs (ok=%s)", time.perf_counter() - verify_start, is_valid)
-        except Exception:
-            logger.exception("[ERROR] Password verification error")
-            return jsonify({'status': 'error', 'message': 'Authentication failed'}), 500
+        # Always perform one password-hash check so unknown accounts and wrong
+        # passwords have the same expensive code path and generic response.
+        verify_start = perf_counter()
+        password_hash = user.get('password_hash') if user else _DUMMY_PASSWORD_HASH
+        is_valid = verify_password(password, password_hash)
+        verify_seconds = perf_counter() - verify_start
+        logger.debug("[AUTH] Password verification completed in %.3fs", verify_seconds)
 
-        if not is_valid:
-            logger.warning(f"[WARN] Invalid password: {email}")
+        if not user or not is_valid:
+            _record_login_timing(request_started, lookup_seconds, verify_seconds)
+            logger.warning("[AUTH] Login rejected")
             return jsonify({
                 'status': 'error',
                 'message': 'Invalid email or password'
             }), 401
         
         # Create JWT token with user info (includes sector for RBAC)
-        logger.info("[JWT] Creating token...")
         additional_claims = {
             'role': user['role'],
             'name': user['name'],
@@ -310,10 +154,10 @@ def login():
             identity=str(user['id']),  # Convert to string - JWT requires string identity
             additional_claims=additional_claims
         )
+
+        _record_login_timing(request_started, lookup_seconds, verify_seconds)
         
-        logger.info("[OK] JWT token created successfully")
-        logger.info(f"[SUCCESS] LOGIN SUCCESSFUL - User: {email}, Role: {user['role']}")
-        logger.info("="*80)
+        logger.info("[AUTH] Login succeeded for user %s with role %s", user['id'], user['role'])
         
         return jsonify({
             'status': 'success',
@@ -336,12 +180,6 @@ def login():
             'status': 'error',
             'message': 'Login failed. Please try again later.'
         }), 500
-
-
-@auth_bp.route('/logout', methods=['POST'])
-def logout():
-    """Acknowledge logout; bearer-token removal happens in the client."""
-    return jsonify({'status': 'success', 'message': 'Logged out'}), 200
 
 
 @auth_bp.route('/me', methods=['GET'])

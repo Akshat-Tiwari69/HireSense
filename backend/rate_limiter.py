@@ -3,19 +3,48 @@ Rate Limiting Configuration for Flask Backend
 Prevents API abuse and ensures fair usage
 """
 
+import hashlib
 import os
-from flask import jsonify
+
+from flask import jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-def _limit_if_present(limiter, app, endpoint_name, limit):
+
+def _limit_if_present(limiter, app, endpoint_name, limit, **limit_options):
     """Attach a rate limit to endpoint if it exists."""
     endpoint = app.view_functions.get(endpoint_name)
     if endpoint is not None:
-        limiter.limit(limit)(endpoint)
+        app.view_functions[endpoint_name] = limiter.limit(
+            limit,
+            **limit_options,
+        )(endpoint)
         return True
     app.logger.warning("[RATE LIMIT] Endpoint not found: %s", endpoint_name)
     return False
+
+
+def _assessment_submission_key():
+    """Scope expensive submissions without storing bearer tokens in limiter keys."""
+    assessment_id = (request.view_args or {}).get('assessment_id', 'unknown')
+    token = request.headers.get('X-Assessment-Token', '').strip()
+    if token:
+        token_key = hashlib.sha256(token.encode('utf-8')).hexdigest()
+    else:
+        token_key = f"ip:{get_remote_address()}"
+    return f"assessment:{assessment_id}:{token_key}"
+
+
+def _not_a_coding_submission():
+    """Keep ordinary assessment autosaves outside the expensive-code quota."""
+    payload = request.get_json(silent=True)
+    return not (isinstance(payload, dict) and payload.get('type') == 'coding')
+
+
+def _not_screenshot_evidence():
+    """Keep lightweight telemetry outside the screenshot-storage quota."""
+    payload = request.get_json(silent=True)
+    return not (isinstance(payload, dict) and payload.get('screenshot') is not None)
 
 
 def init_rate_limiting(app):
@@ -39,7 +68,6 @@ def init_rate_limiting(app):
 
     # Auth endpoints - stricter limits
     _limit_if_present(limiter, app, 'auth.login', "10 per minute")
-    _limit_if_present(limiter, app, 'auth.register', "5 per minute")
 
     # File upload - limited
     _limit_if_present(limiter, app, 'resume.upload_resume', "10 per hour")
@@ -50,8 +78,26 @@ def init_rate_limiting(app):
     _limit_if_present(
         limiter,
         app,
+        'interviewee.interviewee_answers.submit_answer',
+        "6 per minute; 30 per hour",
+        key_func=_assessment_submission_key,
+        exempt_when=_not_a_coding_submission,
+        override_defaults=False,
+    )
+    _limit_if_present(
+        limiter,
+        app,
         'interviewee.interviewee_monitoring.report_violation',
         "120 per minute",
+    )
+    _limit_if_present(
+        limiter,
+        app,
+        'interviewee.interviewee_monitoring.report_violation',
+        "6 per minute; 20 per hour",
+        key_func=_assessment_submission_key,
+        exempt_when=_not_screenshot_evidence,
+        override_defaults=False,
     )
 
     @app.errorhandler(429)

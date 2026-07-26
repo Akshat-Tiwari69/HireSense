@@ -18,7 +18,7 @@ VALID_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 
 
 def _normalise_violation(
-    assessment_id, violation_type, description, severity, screenshot_url
+    assessment_id, violation_type, description, severity, screenshot_path
 ):
     if isinstance(assessment_id, bool) or not isinstance(assessment_id, int) or assessment_id <= 0:
         raise ValueError("assessment_id must be a positive integer")
@@ -41,11 +41,11 @@ def _normalise_violation(
         raise ValueError(f"severity must be one of: {', '.join(sorted(VALID_SEVERITIES))}")
     severity = severity.strip().lower()
 
-    if screenshot_url is not None:
-        if not isinstance(screenshot_url, str) or len(screenshot_url) > 500:
-            raise ValueError("screenshot_url must be a string of at most 500 characters")
+    if screenshot_path is not None:
+        if not isinstance(screenshot_path, str) or len(screenshot_path) > 500:
+            raise ValueError("screenshot_path must be a string of at most 500 characters")
 
-    return assessment_id, violation_type, description, severity, screenshot_url
+    return assessment_id, violation_type, description, severity, screenshot_path
 
 
 def _record_proctoring_violation(
@@ -53,10 +53,10 @@ def _record_proctoring_violation(
     violation_type,
     description,
     severity="medium",
-    screenshot_url=None,
+    screenshot_path=None,
 ):
     values = _normalise_violation(
-        assessment_id, violation_type, description, severity, screenshot_url
+        assessment_id, violation_type, description, severity, screenshot_path
     )
     conn = None
     cursor = None
@@ -75,7 +75,7 @@ def _record_proctoring_violation(
 
         cursor.execute(
             """INSERT INTO proctoring_violations
-               (assessment_id, violation_type, description, severity, screenshot_url)
+               (assessment_id, violation_type, description, severity, screenshot_path)
                VALUES (%s, %s, %s, %s, %s)
                RETURNING id""",
             values,
@@ -127,12 +127,12 @@ def record_proctoring_violation(
     violation_type,
     description,
     severity="medium",
-    screenshot_url=None,
+    screenshot_path=None,
 ):
     """Record one canonical violation and return its database ID."""
 
     violation_id, _ = _record_proctoring_violation(
-        assessment_id, violation_type, description, severity, screenshot_url
+        assessment_id, violation_type, description, severity, screenshot_path
     )
     return violation_id
 
@@ -142,23 +142,12 @@ def record_proctoring_violation_with_count(
     violation_type,
     description,
     severity="medium",
-    screenshot_url=None,
+    screenshot_path=None,
 ):
     """Record a violation and return ``(id, aggregate_count)`` atomically."""
 
     return _record_proctoring_violation(
-        assessment_id, violation_type, description, severity, screenshot_url
-    )
-
-
-def log_proctoring_event(assessment_id, event_type, severity, details):
-    """Backward-compatible adapter that writes to the canonical violation log."""
-
-    record_proctoring_violation(
-        assessment_id=assessment_id,
-        violation_type=event_type,
-        description=details,
-        severity=severity,
+        assessment_id, violation_type, description, severity, screenshot_path
     )
 
 
@@ -173,7 +162,7 @@ def get_violations_for_assessment(assessment_id):
         cursor = conn.cursor()
         cursor.execute(
             """SELECT id, assessment_id, violation_type, description, severity,
-                      screenshot_url, timestamp
+                      screenshot_path, timestamp
                FROM proctoring_violations
                WHERE assessment_id = %s
                ORDER BY timestamp DESC, id DESC""",

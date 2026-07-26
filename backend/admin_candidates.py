@@ -3,13 +3,13 @@ Admin candidate management routes — view, update, delete, and reset candidates
 """
 
 import logging
-import os
+from pathlib import Path
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from db_config import db_connection, get_connection, return_connection
 from admin_middleware import require_admin_role
 from auth import validate_email
-from storage_config import get_upload_root
+from storage_config import get_upload_root, is_within_upload_root
 
 logger = logging.getLogger(__name__)
 
@@ -22,20 +22,30 @@ _CANDIDATE_STATUSES = {
 _SHORTLIST_STATUSES = {'High Match', 'Potential', 'Reject'}
 
 
-def _remove_resume_file(resume_path):
-    if not resume_path:
+def _remove_upload_file(stored_path):
+    if not stored_path:
         return
-    upload_root = os.path.realpath(get_upload_root())
-    candidate_path = os.path.realpath(resume_path)
     try:
-        within_uploads = os.path.commonpath([upload_root, candidate_path]) == upload_root
-    except ValueError:
-        within_uploads = False
-    if within_uploads and os.path.isfile(candidate_path):
+        root = get_upload_root()
+        raw_path = str(stored_path)
+        if raw_path.startswith('/uploads/'):
+            candidate_path = root / raw_path.removeprefix('/uploads/')
+        else:
+            candidate_path = Path(raw_path)
+            if not candidate_path.is_absolute():
+                candidate_path = root / candidate_path
+        candidate_path = candidate_path.resolve()
+    except (OSError, TypeError, ValueError):
+        return
+    if is_within_upload_root(candidate_path) and candidate_path.is_file():
         try:
-            os.remove(candidate_path)
+            candidate_path.unlink()
         except OSError:
-            logger.warning("Failed to remove candidate resume %s", candidate_path, exc_info=True)
+            logger.warning("Failed to remove candidate upload", exc_info=True)
+
+
+def _remove_resume_file(resume_path):
+    _remove_upload_file(resume_path)
 
 
 @admin_candidates_bp.route('/absence-of-details', methods=['GET'])
@@ -47,8 +57,8 @@ def get_absence_of_details():
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT c.id, c.name, c.email, c.phone, c.resume_path,
-                   c.match_score, c.status, c.created_at,
+            SELECT c.id, c.name, c.email, c.phone, c.match_score,
+                   c.status, c.created_at,
                    c.best_match_job_id AS job_id,
                    jd.title AS job_title
             FROM candidates c
@@ -60,21 +70,17 @@ def get_absence_of_details():
 
         results = []
         for row in rows:
-            cid, name, email, phone, resume_path, match_score, status, created_at, job_id, job_title = row
+            cid, name, email, phone, match_score, status, created_at, job_id, job_title = row
             missing = []
             if not name or name.strip().lower() in ('unknown candidate', 'candidate') or name.strip() == '':
                 missing.append('name')
             if not email or email.endswith('@bulk-upload.local'):
                 missing.append('email')
-            if not phone or phone.strip() == '':
-                missing.append('phone')
-
             results.append({
                 'id': cid,
                 'name': name,
                 'email': email,
                 'phone': phone or '',
-                'resume_path': resume_path,
                 'match_score': match_score or 0,
                 'status': status,
                 'created_at': str(created_at) if created_at else None,
@@ -101,7 +107,7 @@ def get_all_candidates():
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, name, email, phone, resume_path, match_score,
+            SELECT id, name, email, phone, match_score,
                    shortlist_status, pros, cons, created_at, status
             FROM candidates ORDER BY id DESC
         """)
@@ -112,13 +118,12 @@ def get_all_candidates():
             'name': row[1],
             'email': row[2],
             'phone': row[3],
-            'resume_path': row[4],
-            'match_score': row[5],
-            'shortlist_status': row[6],
-            'pros': row[7],
-            'cons': row[8],
-            'created_at': row[9],
-            'status': row[10] or row[6] or 'Applied'
+            'match_score': row[4],
+            'shortlist_status': row[5],
+            'pros': row[6],
+            'cons': row[7],
+            'created_at': row[8],
+            'status': row[9] or 'applied'
         } for row in rows]
 
         return jsonify({'status': 'success', 'data': candidates}), 200
@@ -234,22 +239,35 @@ def delete_candidate(candidate_id):
         with db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT name, email, resume_path FROM candidates WHERE id = %s FOR UPDATE",
+                "SELECT resume_path FROM candidates WHERE id = %s FOR UPDATE",
                 (candidate_id,),
             )
             candidate = cursor.fetchone()
             if not candidate:
                 return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
 
-            candidate_name, candidate_email, resume_path = candidate
+            resume_path = candidate[0]
+            cursor.execute(
+                """
+                SELECT pv.screenshot_path
+                FROM proctoring_violations pv
+                JOIN assessments a ON a.id = pv.assessment_id
+                WHERE a.candidate_id = %s
+                  AND pv.screenshot_path IS NOT NULL
+                """,
+                (candidate_id,),
+            )
+            evidence_paths = [row[0] for row in cursor.fetchall()]
             logger.warning(
-                "[ADMIN ACTION] %s deleting candidate ID %s (%s, %s)",
-                admin_id, candidate_id, candidate_name, candidate_email,
+                "[ADMIN ACTION] %s deleting candidate ID %s",
+                admin_id, candidate_id,
             )
             cursor.execute("DELETE FROM candidates WHERE id = %s", (candidate_id,))
             conn.commit()
 
         _remove_resume_file(resume_path)
+        for evidence_path in evidence_paths:
+            _remove_upload_file(evidence_path)
 
         logger.info("[ADMIN ACTION] %s deleted candidate ID %s", admin_id, candidate_id)
 
@@ -275,16 +293,40 @@ def reset_candidate_status(candidate_id):
             if not candidate:
                 return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
 
+            cursor.execute(
+                """
+                SELECT
+                    EXISTS (
+                        SELECT 1
+                        FROM scheduled_assessments
+                        WHERE candidate_id = %s
+                          AND status IN ('scheduled', 'in_progress')
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM assessments
+                        WHERE candidate_id = %s
+                          AND status IN ('started', 'in_progress')
+                    )
+                """,
+                (candidate_id, candidate_id),
+            )
+            if cursor.fetchone()[0]:
+                return jsonify({
+                    'status': 'error',
+                    'message': (
+                        'Cancel or complete the active assessment before '
+                        'resetting this candidate'
+                    ),
+                }), 409
+
             logger.info(
                 "[ADMIN ACTION] %s resetting candidate ID %s (%s)",
                 admin_id, candidate_id, candidate[0],
             )
-            cursor.execute("DELETE FROM assessments WHERE candidate_id = %s", (candidate_id,))
-            cursor.execute("DELETE FROM scheduled_assessments WHERE candidate_id = %s", (candidate_id,))
             cursor.execute("""
                 UPDATE candidates
-                SET status = 'applied', shortlist_status = NULL,
-                    updated_at = CURRENT_TIMESTAMP
+                SET status = 'applied', updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
             """, (candidate_id,))
             conn.commit()

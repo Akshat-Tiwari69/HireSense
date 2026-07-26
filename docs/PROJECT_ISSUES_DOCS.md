@@ -67,13 +67,14 @@ The WebSocket server has TODO comments for verifying candidate access tokens and
 
 **Suggested fix:** authenticate Socket.IO connections with JWT for staff and signed assessment tokens for candidates, then verify room membership server-side.
 
-### 8. Uploaded resumes and violation screenshots are publicly served
+### 8. Resolved: uploaded resumes and violation screenshots were broadly served
 
-`backend/app.py` serves everything under `/uploads/<path:filename>`. Resume uploads and violation screenshots are stored under the upload directory.
+The generic `/uploads/<path:filename>` route has been removed. Resume and
+violation evidence access now goes through resource-specific authenticated
+endpoints with assignment/ownership checks.
 
-**Impact:** sensitive PII files can be accessed directly if URLs leak or are discovered.
-
-**Suggested fix:** store private files outside public static paths and provide authenticated download endpoints with role/ownership checks.
+Production must keep `UPLOAD_FOLDER` on private persistent storage and must not
+mount it as a public static directory.
 
 ### 9. Resume upload can leave orphan files and return success when DB insert fails
 

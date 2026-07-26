@@ -1,8 +1,9 @@
 import { Button } from '../../ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog';
 import { Input } from '../../ui/input';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../../ui/dialog';
 import { Label } from '../../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
+import { Loader2 } from 'lucide-react';
 
 const UserModal = ({
   userModalOpen,
@@ -12,64 +13,116 @@ const UserModal = ({
   setUserForm,
   savingUser,
   handleSaveUser,
+  sectors = [],
+  currentUserRole,
 }) => (
   <Dialog open={userModalOpen} onOpenChange={setUserModalOpen}>
-    <DialogContent className="bg-white border-slate-200 shadow-md">
+    <DialogContent>
       <DialogHeader>
-        <DialogTitle className="text-slate-900">{editingUser ? 'Edit User' : 'Add New User'}</DialogTitle>
-        <DialogDescription className="text-slate-600">
-          {editingUser ? 'Update user details' : 'Create a new user account'}
+        <DialogTitle>{editingUser ? 'Edit staff account' : 'Add staff account'}</DialogTitle>
+        <DialogDescription>
+          {editingUser ? 'Update profile details and access level.' : 'Create credentials for a hiring team member.'}
         </DialogDescription>
       </DialogHeader>
-      <div className="space-y-4 py-4">
+
+      <form
+        className="space-y-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleSaveUser();
+        }}
+      >
         <div className="space-y-2">
-          <Label className="text-slate-700">Name</Label>
+          <Label htmlFor="staff-name">Name</Label>
           <Input
+            id="staff-name"
+            autoComplete="name"
             value={userForm.name}
-            onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-            className="bg-white border-slate-300 text-slate-900"
+            onChange={(event) => setUserForm({ ...userForm, name: event.target.value })}
+            required
           />
         </div>
         <div className="space-y-2">
-          <Label className="text-slate-700">Email</Label>
+          <Label htmlFor="staff-email">Email</Label>
           <Input
+            id="staff-email"
             type="email"
+            autoComplete="email"
             value={userForm.email}
-            onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-            className="bg-white border-slate-300 text-slate-900"
+            onChange={(event) => setUserForm({ ...userForm, email: event.target.value })}
+            required
           />
         </div>
         <div className="space-y-2">
-          <Label className="text-slate-700">Password {editingUser && '(leave blank to keep current)'}</Label>
+          <Label htmlFor="staff-password">
+            Password {editingUser ? <span className="font-normal text-muted-foreground">(leave blank to keep current)</span> : null}
+          </Label>
           <Input
+            id="staff-password"
             type="password"
+            autoComplete="new-password"
             value={userForm.password}
-            onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-            className="bg-white border-slate-300 text-slate-900"
+            onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
+            required={!editingUser}
           />
         </div>
         <div className="space-y-2">
-          <Label className="text-slate-700">Role</Label>
-          <Select value={userForm.role} onValueChange={(v) => setUserForm({ ...userForm, role: v })}>
-            <SelectTrigger className="bg-white border-slate-300 text-slate-900">
+          <Label htmlFor="staff-role">Role</Label>
+          <Select
+            value={userForm.role}
+            onValueChange={(role) => setUserForm({
+              ...userForm,
+              role,
+              sector_id: ['recruiter', 'sector_admin'].includes(role) ? userForm.sector_id : '',
+            })}
+          >
+            <SelectTrigger id="staff-role">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-white border-slate-200 shadow-md">
+            <SelectContent>
               <SelectItem value="interviewer">Interviewer</SelectItem>
               <SelectItem value="proctor">Proctor</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="recruiter">Recruiter</SelectItem>
+              <SelectItem value="sector_admin">Sector administrator</SelectItem>
+              {currentUserRole === 'super_admin' ? (
+                <>
+                  <SelectItem value="admin">Administrator</SelectItem>
+                  <SelectItem value="super_admin">Super administrator</SelectItem>
+                </>
+              ) : null}
             </SelectContent>
           </Select>
         </div>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={() => setUserModalOpen(false)} className="border-slate-300 text-slate-700">
-          Cancel
-        </Button>
-        <Button onClick={handleSaveUser} disabled={savingUser} className="bg-indigo-600 hover:bg-indigo-700">
-          {editingUser ? 'Update' : 'Create'}
-        </Button>
-      </DialogFooter>
+
+        {['recruiter', 'sector_admin'].includes(userForm.role) ? (
+          <div className="space-y-2">
+            <Label htmlFor="staff-sector">Sector</Label>
+            <Select
+              value={String(userForm.sector_id || '')}
+              onValueChange={(sector_id) => setUserForm({ ...userForm, sector_id })}
+              required
+            >
+              <SelectTrigger id="staff-sector" aria-required="true">
+                <SelectValue placeholder="Select a sector" />
+              </SelectTrigger>
+              <SelectContent>
+                {sectors.map((sector) => (
+                  <SelectItem key={sector.id} value={String(sector.id)}>{sector.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">A sector assignment is required for this role.</p>
+          </div>
+        ) : null}
+
+        <DialogFooter className="border-t pt-5">
+          <Button type="button" variant="outline" onClick={() => setUserModalOpen(false)}>Cancel</Button>
+          <Button type="submit" disabled={savingUser}>
+            {savingUser ? <Loader2 className="animate-spin" /> : null}
+            {savingUser ? 'Saving' : editingUser ? 'Save changes' : 'Create account'}
+          </Button>
+        </DialogFooter>
+      </form>
     </DialogContent>
   </Dialog>
 );

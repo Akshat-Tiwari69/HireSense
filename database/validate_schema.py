@@ -22,34 +22,41 @@ import re
 import secrets
 import sys
 
+try:
+    from .schema_contract import (
+        APP_TABLES,
+        FORBIDDEN_COLUMNS,
+        FORBIDDEN_INDEXES,
+        FORBIDDEN_TABLES,
+        REQUIRED_CHECK_CONSTRAINTS,
+        REQUIRED_FOREIGN_KEYS,
+        REQUIRED_INDEXES,
+        REQUIRED_NOT_NULL_COLUMNS,
+        REQUIRED_UNIQUE_INDEXES,
+        TABLE_COLUMNS,
+        TIMESTAMP_COLUMNS,
+    )
+except ImportError:  # Direct execution: python database/validate_schema.py
+    from schema_contract import (
+        APP_TABLES,
+        FORBIDDEN_COLUMNS,
+        FORBIDDEN_INDEXES,
+        FORBIDDEN_TABLES,
+        REQUIRED_CHECK_CONSTRAINTS,
+        REQUIRED_FOREIGN_KEYS,
+        REQUIRED_INDEXES,
+        REQUIRED_NOT_NULL_COLUMNS,
+        REQUIRED_UNIQUE_INDEXES,
+        TABLE_COLUMNS,
+        TIMESTAMP_COLUMNS,
+    )
+
 
 DATABASE_DIR = Path(__file__).resolve().parent
 CANONICAL_SCHEMA = DATABASE_DIR / "schema_postgres.sql"
 RECONCILIATION_MIGRATION = (
     DATABASE_DIR / "migrations" / "20260713_reconcile_canonical_schema.sql"
 )
-
-REQUIRED_COLUMNS = {
-    "job_descriptions": {"created_by", "role_complexity_level"},
-    "candidates": {"best_match_job_id"},
-    "scheduled_assessments": {"job_id", "proctor_id"},
-    "proctoring_events": {"is_reviewed"},
-}
-
-REQUIRED_UNIQUE_INDEXES = {
-    "idx_assessments_scheduled_unique",
-    "idx_mcq_assessment_question_unique",
-    "idx_coding_assessment_problem_unique",
-    "idx_psychometric_assessment_question_unique",
-}
-
-REQUIRED_FOREIGN_KEYS = {
-    ("job_descriptions", "created_by", "users", "n"),
-    ("candidates", "best_match_job_id", "job_descriptions", "n"),
-    ("scheduled_assessments", "job_id", "job_descriptions", "n"),
-    ("scheduled_assessments", "proctor_id", "users", "n"),
-}
-
 
 class ValidationError(RuntimeError):
     """Raised when the schema contract is incomplete or inconsistent."""
@@ -72,35 +79,58 @@ def validate_static_contract() -> None:
     schema_sql = CANONICAL_SCHEMA.read_text(encoding="utf-8")
     migration_sql = RECONCILIATION_MIGRATION.read_text(encoding="utf-8")
 
-    for table_name, expected_columns in REQUIRED_COLUMNS.items():
+    if APP_TABLES & FORBIDDEN_TABLES:
+        raise ValidationError("schema contract marks a runtime table as forbidden")
+    contract_columns = {
+        (table_name, column_name)
+        for table_name, columns in TABLE_COLUMNS.items()
+        for column_name in columns
+    }
+    if contract_columns & FORBIDDEN_COLUMNS:
+        raise ValidationError("schema contract retains a forbidden legacy column")
+
+    created_tables = {
+        match.group(1).lower()
+        for match in re.finditer(
+            r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_]+)",
+            schema_sql,
+            re.IGNORECASE,
+        )
+    }
+    if created_tables != APP_TABLES:
+        raise ValidationError(
+            "canonical table set differs from the contract; "
+            f"missing={sorted(APP_TABLES - created_tables)}, "
+            f"extra={sorted(created_tables - APP_TABLES)}"
+        )
+
+    column_pattern = re.compile(
+        r"^\s*([a-z_][a-z0-9_]*)\s+"
+        r"(?:SERIAL|TEXT|INTEGER|REAL|BOOLEAN|JSONB|VARCHAR|TIMESTAMPTZ)\b",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    for table_name, expected_columns in TABLE_COLUMNS.items():
         definition = _table_definition(schema_sql, table_name)
-        missing = {
-            column
-            for column in expected_columns
-            if re.search(rf"^\s*{re.escape(column)}\s+", definition, re.MULTILINE)
-            is None
+        actual_columns = {
+            match.group(1).lower() for match in column_pattern.finditer(definition)
         }
-        if missing:
+        if actual_columns != expected_columns:
             raise ValidationError(
-                f"{table_name} is missing canonical columns: {sorted(missing)}"
+                f"{table_name} columns differ from the contract; "
+                f"missing={sorted(expected_columns - actual_columns)}, "
+                f"extra={sorted(actual_columns - expected_columns)}"
             )
 
-    job_definition = _table_definition(schema_sql, "job_descriptions")
-    candidate_definition = _table_definition(schema_sql, "candidates")
-    if re.search(r"^\s*created_by_id\s+", job_definition, re.MULTILINE):
-        raise ValidationError(
-            "created_by_id must not appear in the canonical job table"
-        )
-    if re.search(r"^\s*job_id\s+", candidate_definition, re.MULTILINE):
-        raise ValidationError(
-            "candidates.job_id must not appear in the canonical schema"
-        )
-    if re.search(
-        r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+admin_audit_log\b",
-        schema_sql,
-        re.IGNORECASE,
-    ):
-        raise ValidationError("admin_audit_log must not be a canonical table")
+    if re.search(r"^\s*\w+\s+TIMESTAMP\b", schema_sql, re.IGNORECASE | re.MULTILINE):
+        raise ValidationError("canonical timestamps must use TIMESTAMPTZ")
+
+    for index_name in REQUIRED_INDEXES:
+        if not re.search(
+            rf"CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+{re.escape(index_name)}\b",
+            schema_sql,
+            re.IGNORECASE,
+        ):
+            raise ValidationError(f"canonical schema is missing {index_name}")
 
     for index_name in REQUIRED_UNIQUE_INDEXES:
         if not re.search(
@@ -108,16 +138,40 @@ def validate_static_contract() -> None:
             schema_sql,
             re.IGNORECASE,
         ):
-            raise ValidationError(f"canonical schema is missing {index_name}")
+            raise ValidationError(f"canonical unique index is missing: {index_name}")
+
+    for index_name in FORBIDDEN_INDEXES:
+        if re.search(rf"\b{re.escape(index_name)}\b", schema_sql, re.IGNORECASE):
+            raise ValidationError(f"canonical schema retains redundant index {index_name}")
+
+    for constraint_name in REQUIRED_CHECK_CONSTRAINTS:
+        if not re.search(
+            rf"CONSTRAINT\s+{re.escape(constraint_name)}\s+CHECK\b",
+            schema_sql,
+            re.IGNORECASE,
+        ):
+            raise ValidationError(
+                f"canonical schema is missing check constraint {constraint_name}"
+            )
 
     for required_phrase in (
         "ADD COLUMN IF NOT EXISTS created_by",
         "ADD COLUMN IF NOT EXISTS best_match_job_id",
+        "RENAME COLUMN location TO work_mode",
+        "DROP COLUMN location",
         "ADD COLUMN IF NOT EXISTS job_id",
         "ADD COLUMN IF NOT EXISTS proctor_id",
-        "ADD COLUMN IF NOT EXISTS is_reviewed",
+        "SET scheduled_assessment_id",
+        "DROP COLUMN IF EXISTS assessment_id",
+        "DROP COLUMN IF EXISTS permissions",
+        "DROP COLUMN IF EXISTS parsed_skills_json",
+        "DROP TABLE IF EXISTS proctoring_events",
+        "DROP TABLE IF EXISTS questions",
+        "DROP TABLE IF EXISTS sector_email_configs",
         "legacy_source",
-        "admin_audit_log",
+        "DROP TABLE IF EXISTS admin_audit_log",
+        "ENABLE ROW LEVEL SECURITY",
+        "REVOKE ALL PRIVILEGES ON ALL TABLES",
     ):
         if required_phrase.lower() not in migration_sql.lower():
             raise ValidationError(
@@ -132,38 +186,122 @@ def _query_scalar(cursor, query: str, parameters: tuple = ()):
 
 
 def _validate_database_contract(cursor, schema_name: str) -> None:
-    actual_columns: dict[str, set[str]] = {}
-    for table_name in REQUIRED_COLUMNS:
-        cursor.execute(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = %s AND table_name = %s
-            """,
-            (schema_name, table_name),
+    cursor.execute(
+        """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = %s AND table_type = 'BASE TABLE'
+        """,
+        (schema_name,),
+    )
+    actual_tables = {row[0] for row in cursor.fetchall()}
+    if actual_tables != APP_TABLES:
+        raise ValidationError(
+            "database table set differs from the contract; "
+            f"missing={sorted(APP_TABLES - actual_tables)}, "
+            f"extra={sorted(actual_tables - APP_TABLES)}"
         )
-        actual_columns[table_name] = {row[0] for row in cursor.fetchall()}
 
-    for table_name, expected_columns in REQUIRED_COLUMNS.items():
-        missing = expected_columns - actual_columns[table_name]
-        if missing:
+    cursor.execute(
+        """
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = ANY(%s)
+        """,
+        (schema_name, sorted(APP_TABLES)),
+    )
+    actual_columns = {table_name: set() for table_name in APP_TABLES}
+    for table_name, column_name in cursor.fetchall():
+        actual_columns[table_name].add(column_name)
+
+    for table_name, expected_columns in TABLE_COLUMNS.items():
+        if actual_columns[table_name] != expected_columns:
             raise ValidationError(
-                f"database table {table_name} is missing: {sorted(missing)}"
+                f"database table {table_name} differs from the contract; "
+                f"missing={sorted(expected_columns - actual_columns[table_name])}, "
+                f"extra={sorted(actual_columns[table_name] - expected_columns)}"
             )
 
     cursor.execute(
         """
         SELECT indexname
         FROM pg_indexes
-        WHERE schemaname = %s AND indexname = ANY(%s)
+        WHERE schemaname = %s
         """,
-        (schema_name, list(REQUIRED_UNIQUE_INDEXES)),
+        (schema_name,),
     )
     existing_indexes = {row[0] for row in cursor.fetchall()}
-    missing_indexes = REQUIRED_UNIQUE_INDEXES - existing_indexes
+    missing_indexes = REQUIRED_INDEXES - existing_indexes
     if missing_indexes:
         raise ValidationError(
-            f"database is missing unique indexes: {sorted(missing_indexes)}"
+            f"database is missing indexes: {sorted(missing_indexes)}"
+        )
+    redundant_indexes = FORBIDDEN_INDEXES & existing_indexes
+    if redundant_indexes:
+        raise ValidationError(
+            f"database retains redundant indexes: {sorted(redundant_indexes)}"
+        )
+
+    cursor.execute(
+        """
+        SELECT index_record.relname
+        FROM pg_index AS index_metadata
+        JOIN pg_class AS index_record ON index_record.oid = index_metadata.indexrelid
+        JOIN pg_namespace AS namespace_record
+          ON namespace_record.oid = index_record.relnamespace
+        WHERE namespace_record.nspname = %s
+          AND index_metadata.indisunique
+        """,
+        (schema_name,),
+    )
+    actual_unique_indexes = {row[0] for row in cursor.fetchall()}
+    missing_unique = REQUIRED_UNIQUE_INDEXES - actual_unique_indexes
+    if missing_unique:
+        raise ValidationError(
+            f"database is missing unique indexes: {sorted(missing_unique)}"
+        )
+
+    cursor.execute(
+        """
+        SELECT constraint_record.conname, constraint_record.convalidated
+        FROM pg_constraint AS constraint_record
+        JOIN pg_class AS table_record
+          ON table_record.oid = constraint_record.conrelid
+        JOIN pg_namespace AS namespace_record
+          ON namespace_record.oid = table_record.relnamespace
+        WHERE namespace_record.nspname = %s
+          AND constraint_record.contype = 'c'
+        """,
+        (schema_name,),
+    )
+    checks = dict(cursor.fetchall())
+    missing_checks = REQUIRED_CHECK_CONSTRAINTS - checks.keys()
+    if missing_checks:
+        raise ValidationError(
+            f"database is missing check constraints: {sorted(missing_checks)}"
+        )
+    unvalidated_checks = {
+        name for name in REQUIRED_CHECK_CONSTRAINTS if not checks[name]
+    }
+    if unvalidated_checks:
+        raise ValidationError(
+            f"database has unvalidated checks: {sorted(unvalidated_checks)}"
+        )
+
+    cursor.execute(
+        """
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s AND is_nullable = 'NO'
+        """,
+        (schema_name,),
+    )
+    not_null_columns = set(cursor.fetchall())
+    missing_not_null = REQUIRED_NOT_NULL_COLUMNS - not_null_columns
+    if missing_not_null:
+        raise ValidationError(
+            "database columns unexpectedly allow NULL: "
+            + ", ".join(".".join(column) for column in sorted(missing_not_null))
         )
 
     cursor.execute(
@@ -193,6 +331,76 @@ def _validate_database_contract(cursor, schema_name: str) -> None:
     if missing_foreign_keys:
         raise ValidationError(
             f"database is missing foreign keys: {sorted(missing_foreign_keys)}"
+        )
+
+    cursor.execute(
+        """
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND data_type = 'timestamp with time zone'
+        """,
+        (schema_name,),
+    )
+    timezone_columns = set(cursor.fetchall())
+    missing_timezone_columns = TIMESTAMP_COLUMNS - timezone_columns
+    if missing_timezone_columns:
+        raise ValidationError(
+            "database timestamps are not timezone-aware: "
+            + ", ".join(".".join(column) for column in sorted(missing_timezone_columns))
+        )
+
+    cursor.execute(
+        """
+        SELECT table_record.relname
+        FROM pg_class AS table_record
+        JOIN pg_namespace AS namespace_record
+          ON namespace_record.oid = table_record.relnamespace
+        WHERE namespace_record.nspname = %s
+          AND table_record.relname = ANY(%s)
+          AND table_record.relkind IN ('r', 'p')
+          AND NOT table_record.relrowsecurity
+        """,
+        (schema_name, sorted(APP_TABLES)),
+    )
+    tables_without_rls = {row[0] for row in cursor.fetchall()}
+    if tables_without_rls:
+        raise ValidationError(
+            "database tables are missing RLS: " + ", ".join(sorted(tables_without_rls))
+        )
+
+    cursor.execute(
+        """
+        SELECT grantee, table_name, privilege_type
+        FROM information_schema.role_table_grants
+        WHERE table_schema = %s
+          AND grantee IN ('anon', 'authenticated')
+        """,
+        (schema_name,),
+    )
+    exposed_grants = cursor.fetchall()
+    if exposed_grants:
+        raise ValidationError(
+            "Supabase Data API roles retain table grants: "
+            + ", ".join(".".join(row) for row in exposed_grants[:5])
+        )
+
+    cursor.execute(
+        """
+        SELECT role_record.rolname
+        FROM pg_roles AS role_record
+        WHERE role_record.rolname IN ('anon', 'authenticated')
+          AND has_schema_privilege(
+              role_record.rolname, %s, 'USAGE'
+          )
+        """,
+        (schema_name,),
+    )
+    exposed_schema_roles = {row[0] for row in cursor.fetchall()}
+    if exposed_schema_roles:
+        raise ValidationError(
+            "Supabase Data API roles retain schema access: "
+            + ", ".join(sorted(exposed_schema_roles))
         )
 
 
@@ -228,11 +436,20 @@ def validate_against_postgres(database_url: str) -> None:
         cursor.execute(schema_sql)
         _validate_database_contract(cursor, schema_name)
 
-        # Add both known aliases and the action_type flavor of the old audit log.
+        # Add known aliases and the action_type flavor of the old audit log.
         cursor.execute(
             """
+            ALTER TABLE job_descriptions
+                RENAME COLUMN work_mode TO location;
+            ALTER TABLE job_descriptions
+                DROP CONSTRAINT job_descriptions_work_mode_check;
             ALTER TABLE job_descriptions ADD COLUMN created_by_id INTEGER;
             ALTER TABLE candidates ADD COLUMN job_id INTEGER;
+            ALTER TABLE scheduled_assessments
+                ADD COLUMN assessment_id INTEGER,
+                ADD COLUMN access_token TEXT;
+            ALTER TABLE scheduled_assessments
+                ALTER COLUMN access_token_hash DROP NOT NULL;
             ALTER TABLE scheduled_assessments
                 DROP CONSTRAINT scheduled_assessments_job_id_fkey;
             ALTER TABLE scheduled_assessments
@@ -256,13 +473,26 @@ def validate_against_postgres(database_url: str) -> None:
             );
             INSERT INTO users (email, password_hash, role, name)
             VALUES ('schema-check@example.invalid', 'not-a-real-password', 'admin', 'Schema Check');
-            INSERT INTO job_descriptions (title, created_by_id)
-            VALUES ('Legacy job', 1);
+            INSERT INTO job_descriptions (title, location, created_by_id)
+            VALUES ('Legacy job', 'wfh', 1);
             INSERT INTO candidates (
                 name, email, phone, resume_path, job_id
             ) VALUES (
                 'Legacy candidate', 'candidate@example.invalid', '0', '/dev/null', 1
             );
+            INSERT INTO scheduled_assessments (
+                candidate_id, interviewer_id, job_id, scheduled_time,
+                status, access_token
+            ) VALUES (
+                1, 1, 1, CURRENT_TIMESTAMP, 'scheduled', 'legacy-link-token'
+            );
+            INSERT INTO assessments (candidate_id, job_id)
+            VALUES (1, 1);
+            UPDATE scheduled_assessments
+            SET assessment_id = (
+                SELECT id FROM assessments ORDER BY id LIMIT 1
+            )
+            WHERE access_token = 'legacy-link-token';
             INSERT INTO admin_audit_log (
                 admin_id, action_type, entity_type, entity_id
             ) VALUES (1, 'legacy_create', 'job_posting', 1);
@@ -285,11 +515,37 @@ def validate_against_postgres(database_url: str) -> None:
         if (
             _query_scalar(
                 cursor,
+                "SELECT work_mode FROM job_descriptions WHERE title = 'Legacy job'",
+            )
+            != "Remote"
+        ):
+            raise ValidationError("location was not preserved and normalized as work_mode")
+        if (
+            _query_scalar(
+                cursor,
                 "SELECT best_match_job_id FROM candidates WHERE email = 'candidate@example.invalid'",
             )
             != 1
         ):
             raise ValidationError("candidates.job_id was not backfilled")
+        if (
+            _query_scalar(
+                cursor,
+                """
+                SELECT COUNT(*)
+                FROM assessments AS assessment
+                JOIN scheduled_assessments AS schedule
+                  ON schedule.id = assessment.scheduled_assessment_id
+                WHERE schedule.access_token_hash = encode(
+                    sha256(convert_to('legacy-link-token', 'UTF8')), 'hex'
+                )
+                """,
+            )
+            != 1
+        ):
+            raise ValidationError(
+                "scheduled_assessments.assessment_id was not backfilled"
+            )
         if (
             _query_scalar(
                 cursor,

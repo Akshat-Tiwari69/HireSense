@@ -82,7 +82,7 @@ def get_user_by_id(user_id):
         with db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """SELECT id, email, role, name, created_at, updated_at
+                """SELECT id, email, role, name, created_at, updated_at, sector_id
                    FROM users WHERE id = %s""",
                 (user_id,)
             )
@@ -95,7 +95,8 @@ def get_user_by_id(user_id):
                 'role': row[2],
                 'name': row[3],
                 'created_at': row[4],
-                'updated_at': row[5]
+                'updated_at': row[5],
+                'sector_id': row[6]
             }
         return None
 
