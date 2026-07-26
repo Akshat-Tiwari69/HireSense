@@ -36,7 +36,7 @@ Production overrides must include:
 
 ```dotenv
 APP_ENV=production
-DATABASE_URL=postgresql://hiresense_app:URL_ENCODED_PASSWORD@POOLER_HOST:5432/postgres?sslmode=verify-full
+DATABASE_URL=postgresql://hiresense_app:URL_ENCODED_PASSWORD@POOLER_HOST:5432/postgres?sslmode=verify-full&sslrootcert=/etc/ssl/certs/supabase-prod-ca-2021.crt
 FRONTEND_URL=https://hiresense.tiwaribabu.in
 CORS_ORIGINS=https://hiresense.tiwaribabu.in
 TRUST_PROXY_HOPS=1
@@ -52,8 +52,8 @@ CODE_RUNNER_URL=
 
 The runtime URL must authenticate as `hiresense_app`, not `postgres`, and must
 request `sslmode=verify-full`; production startup fails closed for every weaker
-mode. Install the provider CA for libpq when it is not already in the host trust
-store, and verify hostname validation on-host before cutover. The runtime
+mode. Install Supabase's `prod-ca-2021.crt` read-only at the configured
+`sslrootcert` path and verify hostname validation on-host before cutover. The runtime
 validates the connected PostgreSQL identity and refuses superuser, role-creation,
 database-creation, replication, `BYPASSRLS`, inherited-role, and application-table
 ownership privileges. The URL should use the IPv4-capable Supabase pooler; the

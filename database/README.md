@@ -85,7 +85,8 @@ python database/validate_schema.py --database-url postgresql://user:password@hos
 The Flask backend connects directly to PostgreSQL. In production,
 `DATABASE_URL` should use the non-administrative `hiresense_app` role;
 `DATABASE_ADMIN_URL` is reserved for schema work. Both URLs must set
-`sslmode=verify-full` so libpq verifies the certificate chain and hostname.
+`sslmode=verify-full` and point `sslrootcert` at Supabase's downloaded CA so
+libpq verifies the certificate chain and hostname.
 
 All 14 tables have RLS enabled. Supabase Data API roles `anon` and
 `authenticated` have no public-schema or table privileges. When

@@ -99,30 +99,53 @@ def test_production_runtime_credentials_require_hiresense_role(monkeypatch):
 
 
 class RoleProvisionCursor:
-    def __init__(self, role_exists):
-        self.role_exists = role_exists
+    def __init__(self, role_attributes):
+        self.role_attributes = role_attributes
         self.calls = []
 
     def execute(self, query, params=None):
         self.calls.append((str(query), params))
 
     def fetchone(self):
-        return (1,) if self.role_exists else None
+        return self.role_attributes
 
     def fetchall(self):
         return []
 
 
 def test_runtime_role_is_provisioned_without_administrative_attributes():
-    cursor = RoleProvisionCursor(role_exists=False)
+    cursor = RoleProvisionCursor(role_attributes=None)
 
     run_migration._provision_runtime_role(cursor, "unit-test-value")
 
     create_sql, params = cursor.calls[1]
     assert "CREATE ROLE hiresense_app" in create_sql
-    assert "NOSUPERUSER" in create_sql
-    assert "NOBYPASSRLS" in create_sql
     assert "VALID UNTIL 'infinity'" in create_sql
     assert "CONNECTION LIMIT -1" in create_sql
     assert params == ("unit-test-value",)
+    assert "NOSUPERUSER" not in create_sql
+    assert "NOREPLICATION" not in create_sql
+    assert "NOBYPASSRLS" not in create_sql
     assert any("RESET ALL" in query for query, _params in cursor.calls)
+
+
+def test_existing_runtime_role_does_not_reapply_superuser_only_attributes():
+    cursor = RoleProvisionCursor(role_attributes=(False, False, False))
+
+    run_migration._provision_runtime_role(cursor, "unit-test-value")
+
+    alter_sql, params = cursor.calls[1]
+    assert "ALTER ROLE hiresense_app" in alter_sql
+    assert "NOSUPERUSER" not in alter_sql
+    assert "NOREPLICATION" not in alter_sql
+    assert "NOBYPASSRLS" not in alter_sql
+    assert params == ("unit-test-value",)
+
+
+def test_privileged_runtime_role_is_rejected_before_alter():
+    cursor = RoleProvisionCursor(role_attributes=(True, False, False))
+
+    with pytest.raises(RuntimeError, match="privileged attributes"):
+        run_migration._provision_runtime_role(cursor, "unit-test-value")
+
+    assert len(cursor.calls) == 1

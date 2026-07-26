@@ -173,7 +173,8 @@ Use `DATABASE_URL` for the `hiresense_app` runtime connection. Reserve
 `DATABASE_ADMIN_URL` for schema installation and reconciliation. The RLS policy
 allows the trusted backend role to reach all rows; user-, role-, sector-, and
 assignment-level authorization therefore remains a Flask responsibility. In
-production, both URLs must set `sslmode=verify-full`.
+production, both URLs must set `sslmode=verify-full` and point `sslrootcert`
+at Supabase's downloaded CA certificate.
 
 ## Install, reconcile, and validate
 

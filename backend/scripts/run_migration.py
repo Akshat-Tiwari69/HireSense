@@ -139,14 +139,25 @@ def _runtime_database_password() -> str | None:
 
 
 def _provision_runtime_role(cursor, password: str) -> None:
-    cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = 'hiresense_app'")
-    role_exists = cursor.fetchone() is not None
-    command = "ALTER" if role_exists else "CREATE"
+    cursor.execute(
+        """
+        SELECT rolsuper, rolreplication, rolbypassrls
+          FROM pg_roles
+         WHERE rolname = 'hiresense_app'
+        """
+    )
+    privileged_attributes = cursor.fetchone()
+    if privileged_attributes and any(privileged_attributes):
+        raise RuntimeError(
+            "hiresense_app has privileged attributes that this administrator "
+            "cannot safely remove"
+        )
+
+    command = "ALTER" if privileged_attributes is not None else "CREATE"
     cursor.execute(
         f"""
         {command} ROLE hiresense_app WITH
-            LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
-            NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1
+            LOGIN NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT -1
             VALID UNTIL 'infinity' PASSWORD %s
         """,
         (password,),
