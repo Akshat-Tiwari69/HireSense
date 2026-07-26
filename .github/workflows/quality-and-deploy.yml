@@ -26,7 +26,7 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: pip install -r backend/requirements-dev.txt
-      - run: bash -n deploy/deploy-hiresense
+      - run: bash -n deploy/deploy-hiresense deploy/hiresense-deploy-ssh
       - run: python database/validate_schema.py
       - run: ruff check backend
       - run: pytest
@@ -70,4 +70,4 @@ jobs:
         run: >-
           ssh -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15
           -i ~/.ssh/id_ed25519 "$DEPLOY_USER@$DEPLOY_HOST"
-          "sudo /usr/local/sbin/deploy-hiresense '$GITHUB_SHA'"
+          "deploy $GITHUB_SHA"

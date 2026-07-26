@@ -17,9 +17,30 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 release_sha="${1:-}"
-if [[ "$#" -ne 1 || ! "$release_sha" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "Usage: deploy-hiresense <40-character-git-sha>" >&2
+allow_non_main=0
+prepare_only=0
+if [[ "$#" -lt 1 || "$#" -gt 3 ]]; then
+  echo "Usage: deploy-hiresense <40-character-git-sha> [--allow-non-main] [--prepare-only]" >&2
   exit 64
+fi
+if [[ ! "$release_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Usage: deploy-hiresense <40-character-git-sha> [--allow-non-main] [--prepare-only]" >&2
+  exit 64
+fi
+shift
+for option in "$@"; do
+  case "$option" in
+    --allow-non-main) allow_non_main=1 ;;
+    --prepare-only) prepare_only=1 ;;
+    *)
+      echo "Unknown deployment option: $option" >&2
+      exit 64
+      ;;
+  esac
+done
+if [[ "$allow_non_main" == "1" && "${SUDO_USER:-root}" == "hiresense-deploy" ]]; then
+  echo "The automated deploy identity may only deploy commits on main." >&2
+  exit 77
 fi
 
 exec 9>/run/lock/hiresense-deploy.lock
@@ -45,7 +66,7 @@ if ! runuser -u "$BUILD_USER" -- git --no-replace-objects --git-dir="$REPOSITORY
   exit 65
 fi
 
-if [[ "${ALLOW_NON_MAIN:-0}" != "1" ]] && ! runuser -u "$BUILD_USER" -- git --no-replace-objects --git-dir="$REPOSITORY" merge-base --is-ancestor "$release_sha" refs/heads/main; then
+if [[ "$allow_non_main" != "1" ]] && ! runuser -u "$BUILD_USER" -- git --no-replace-objects --git-dir="$REPOSITORY" merge-base --is-ancestor "$release_sha" refs/heads/main; then
   echo "Refusing to deploy a commit that is not on origin/main." >&2
   exit 65
 fi
@@ -85,6 +106,11 @@ else
   chmod -R u=rwX,g=rX,o= "$build_dir"
   build_in_progress=0
   trap - EXIT
+fi
+
+if [[ "$prepare_only" == "1" ]]; then
+  echo "HireSense release prepared at $release_sha"
+  exit 0
 fi
 
 previous_release="$(readlink -f "$CURRENT" 2>/dev/null || true)"
