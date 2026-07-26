@@ -9,7 +9,8 @@ import pytest
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
-os.environ.setdefault("ALLOW_INSECURE_DEV_SECRET", "true")
+os.environ["APP_ENV"] = "test"
+os.environ["ALLOW_INSECURE_DEV_SECRET"] = "true"
 
 
 @pytest.fixture(autouse=True)

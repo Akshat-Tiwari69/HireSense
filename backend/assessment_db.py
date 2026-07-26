@@ -2,6 +2,7 @@
 Assessment database helpers — assessments, responses, scoring, scheduling, and token access.
 """
 
+import hashlib
 import json
 import secrets
 
@@ -10,6 +11,16 @@ from user_db import DatabaseError
 
 
 ACTIVE_ASSESSMENT_STATUSES = ('started', 'in_progress')
+SCHEDULING_BLOCKED_CANDIDATE_STATUSES = {
+    'assessment_completed',
+    'assessment_scheduled',
+    'completed',
+    'hired',
+    'in_progress',
+    'rejected',
+    'scheduled',
+    'under_review',
+}
 ASSESSMENT_DURATION_SECONDS = 60 * 60
 TECHNICAL_SCORE_WEIGHT = 0.7
 PSYCHOMETRIC_SCORE_WEIGHT = 0.3
@@ -17,6 +28,13 @@ PSYCHOMETRIC_SCORE_WEIGHT = 0.3
 
 class AssessmentStateError(DatabaseError):
     """Raised when an assessment operation is invalid for its current state."""
+
+
+def hash_assessment_token(token):
+    """Return the irreversible lookup value stored for a candidate capability."""
+    if not isinstance(token, str) or not token:
+        raise ValueError("assessment access token is required")
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _normalise_score(value, field_name):
@@ -97,94 +115,6 @@ def _fetch_all(query, params=()):
 #                            ASSESSMENT CORE
 # ============================================================================
 
-def update_assessment_scores(
-    assessment_id,
-    technical_score,
-    psychometric_score,
-    decision,
-    rationale,
-    scheduled_assessment_id=None,
-    hiring_recommendation=None,
-):
-    try:
-        technical_score = _normalise_score(technical_score, 'technical_score')
-        psychometric_score = _normalise_score(psychometric_score, 'psychometric_score')
-        overall_score = (
-            technical_score * TECHNICAL_SCORE_WEIGHT
-            + psychometric_score * PSYCHOMETRIC_SCORE_WEIGHT
-        )
-
-        with db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE assessments
-                SET technical_score = CAST(%s AS NUMERIC),
-                    psychometric_score = CAST(%s AS NUMERIC),
-                    overall_score = CAST(%s AS NUMERIC),
-                    decision = %s,
-                    rationale = %s,
-                    hiring_recommendation = COALESCE(%s, hiring_recommendation),
-                    status = 'completed',
-                    completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
-                WHERE id = %s
-                  AND status IN ('started', 'in_progress', 'completed')
-                RETURNING scheduled_assessment_id
-                """,
-                (
-                    technical_score,
-                    psychometric_score,
-                    overall_score,
-                    decision,
-                    rationale,
-                    hiring_recommendation,
-                    assessment_id,
-                ),
-            )
-            row = cursor.fetchone()
-            if not row:
-                raise AssessmentStateError(
-                    f"Assessment {assessment_id} does not exist or cannot be completed"
-                )
-
-            linked_schedule_id = row[0]
-            if (
-                scheduled_assessment_id is not None
-                and linked_schedule_id is not None
-                and linked_schedule_id != scheduled_assessment_id
-            ):
-                raise AssessmentStateError(
-                    f"Assessment {assessment_id} is linked to schedule {linked_schedule_id}, "
-                    f"not {scheduled_assessment_id}"
-                )
-
-            schedule_id = linked_schedule_id or scheduled_assessment_id
-            if schedule_id is not None:
-                cursor.execute(
-                    """
-                    UPDATE scheduled_assessments
-                    SET status = 'completed', assessment_id = %s,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                      AND status IN ('scheduled', 'in_progress', 'completed')
-                      AND (assessment_id IS NULL OR assessment_id = %s)
-                    """,
-                    (assessment_id, schedule_id, assessment_id),
-                )
-                if cursor.rowcount == 0:
-                    raise AssessmentStateError(
-                        f"Schedule {schedule_id} cannot be linked to assessment {assessment_id}"
-                    )
-
-            conn.commit()
-            return overall_score
-
-    except Exception as e:
-        if isinstance(e, (AssessmentStateError, ValueError)):
-            raise
-        raise DatabaseError(f"Error updating assessment scores: {str(e)}") from e
-
-
 def record_final_decision(assessment_id, decision, rationale=None):
     """Atomically persist a human decision and the matching candidate status.
 
@@ -201,7 +131,7 @@ def record_final_decision(assessment_id, decision, rationale=None):
             cursor.execute(
                 """
                 SELECT a.candidate_id, a.technical_score, a.psychometric_score,
-                       a.rationale, a.status, a.decision,
+                       a.final_rationale, a.status, a.final_decision,
                        c.name, c.email, c.status
                 FROM assessments a
                 JOIN candidates c ON c.id = a.candidate_id
@@ -216,6 +146,10 @@ def record_final_decision(assessment_id, decision, rationale=None):
             if row[4] != "completed":
                 raise AssessmentStateError(
                     "The assessment must be completed before a final decision"
+                )
+            if row[5] in {"Hire", "No-Hire"} and row[5] != decision_label:
+                raise AssessmentStateError(
+                    "A final decision has already been recorded for this assessment"
                 )
 
             technical_score = _normalise_score(row[1] or 0, "technical_score")
@@ -239,8 +173,8 @@ def record_final_decision(assessment_id, decision, rationale=None):
                 """
                 UPDATE assessments
                 SET overall_score = CAST(%s AS NUMERIC),
-                    decision = %s,
-                    rationale = %s
+                    final_decision = %s,
+                    final_rationale = %s
                 WHERE id = %s AND status = 'completed'
                 """,
                 (overall_score, decision_label, final_rationale, assessment_id),
@@ -269,12 +203,12 @@ def record_final_decision(assessment_id, decision, rationale=None):
                 "candidate_id": row[0],
                 "candidate_name": row[6],
                 "candidate_email": row[7],
-                "decision": decision_label,
+                "final_decision": decision_label,
                 "status": candidate_status,
                 "technical_score": technical_score,
                 "psychometric_score": psychometric_score,
                 "overall_score": overall_score,
-                "rationale": final_rationale,
+                "final_rationale": final_rationale,
                 "should_notify": should_notify,
             }
     except Exception as e:
@@ -287,9 +221,10 @@ def get_assessment_by_id(assessment_id):
     try:
         row = _fetch_one("""
             SELECT id, candidate_id, job_id, technical_score, psychometric_score,
-                   overall_score, decision, rationale, proctoring_violations, status,
+                   overall_score, automated_recommendation, automated_rationale,
+                   final_decision, final_rationale, proctoring_violations, status,
                    started_at, completed_at, scheduled_assessment_id,
-                   hiring_recommendation
+                   recommended_next_step
             FROM assessments WHERE id = %s
         """, (assessment_id,))
 
@@ -303,29 +238,33 @@ def get_assessment_by_id(assessment_id):
             'technical_score': row[3],
             'psychometric_score': row[4],
             'overall_score': row[5],
-            'decision': row[6],
-            'rationale': row[7],
-            'proctoring_violations': row[8],
-            'status': row[9],
-            'started_at': row[10],
-            'completed_at': row[11],
-            'scheduled_assessment_id': row[12],
-            'hiring_recommendation': row[13],
+            'automated_recommendation': row[6],
+            'automated_rationale': row[7],
+            'final_decision': row[8],
+            'final_rationale': row[9],
+            'proctoring_violations': row[10],
+            'status': row[11],
+            'started_at': row[12],
+            'completed_at': row[13],
+            'scheduled_assessment_id': row[14],
+            'recommended_next_step': row[15],
         }
 
     except Exception as e:
         raise DatabaseError(f"Error retrieving assessment: {str(e)}") from e
 
 
-def get_assessment_by_candidate_id(candidate_id):
+def get_latest_completed_assessment_by_candidate_id(candidate_id):
     try:
         row = _fetch_one("""
             SELECT a.id, a.candidate_id, a.job_id, a.technical_score, a.psychometric_score,
-                   a.overall_score, a.decision, a.rationale, a.proctoring_violations, a.status,
+                   a.overall_score, a.automated_recommendation,
+                   a.automated_rationale, a.final_decision, a.final_rationale,
+                   a.proctoring_violations, a.status,
                    a.started_at, a.completed_at,
                    COALESCE(m.score, 0) as mcq_score,
                    COALESCE(c.score, 0) as coding_score,
-                   a.scheduled_assessment_id, a.hiring_recommendation
+                   a.scheduled_assessment_id, a.recommended_next_step
             FROM assessments a
             LEFT JOIN (
                 SELECT assessment_id,
@@ -341,7 +280,8 @@ def get_assessment_by_candidate_id(candidate_id):
                 FROM coding_submissions GROUP BY assessment_id
             ) c ON a.id = c.assessment_id
             WHERE a.candidate_id = %s
-            ORDER BY a.created_at DESC
+              AND a.status = 'completed'
+            ORDER BY a.completed_at DESC NULLS LAST, a.created_at DESC
             LIMIT 1
         """, (candidate_id,))
 
@@ -355,20 +295,24 @@ def get_assessment_by_candidate_id(candidate_id):
             'technical_score': row[3] if row[3] is not None else 0,
             'psychometric_score': row[4] if row[4] is not None else 0,
             'overall_score': row[5] if row[5] is not None else 0,
-            'decision': row[6],
-            'rationale': row[7],
-            'proctoring_violations': row[8],
-            'status': row[9],
-            'started_at': row[10],
-            'completed_at': row[11],
-            'mcq_score': row[12],
-            'coding_score': row[13],
-            'scheduled_assessment_id': row[14],
-            'hiring_recommendation': row[15],
+            'automated_recommendation': row[6],
+            'automated_rationale': row[7],
+            'final_decision': row[8],
+            'final_rationale': row[9],
+            'proctoring_violations': row[10],
+            'status': row[11],
+            'started_at': row[12],
+            'completed_at': row[13],
+            'mcq_score': row[14],
+            'coding_score': row[15],
+            'scheduled_assessment_id': row[16],
+            'recommended_next_step': row[17],
         }
 
     except Exception as e:
-        raise DatabaseError(f"Error retrieving assessment for candidate {candidate_id}: {str(e)}") from e
+        raise DatabaseError(
+            f"Error retrieving completed assessment for candidate {candidate_id}: {str(e)}"
+        ) from e
 
 
 # ============================================================================
@@ -592,6 +536,71 @@ def get_psychometric_scores(assessment_id):
         raise DatabaseError(f"Error calculating psychometric scores: {str(e)}") from e
 
 
+def _question_snapshot(raw_questions, assessment_id):
+    """Return the immutable assigned-question snapshot used for fair scoring."""
+    if isinstance(raw_questions, str):
+        try:
+            raw_questions = json.loads(raw_questions)
+        except json.JSONDecodeError as exc:
+            raise AssessmentStateError(
+                f"Assessment {assessment_id} has invalid questions data"
+            ) from exc
+    if not isinstance(raw_questions, dict):
+        raise AssessmentStateError(
+            f"Assessment {assessment_id} has no assigned questions"
+        )
+    return raw_questions
+
+
+def _assigned_psychometric_inventory(scenarios, assessment_id):
+    """Map assigned scenario IDs to traits and count every trait denominator."""
+    if not isinstance(scenarios, list):
+        raise AssessmentStateError(
+            f"Assessment {assessment_id} has invalid psychometric questions"
+        )
+    assigned_traits = {}
+    trait_counts = {}
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            raise AssessmentStateError(
+                f"Assessment {assessment_id} has invalid psychometric questions"
+            )
+        try:
+            question_id = int(scenario.get('id'))
+        except (TypeError, ValueError) as exc:
+            raise AssessmentStateError(
+                f"Assessment {assessment_id} has invalid psychometric question IDs"
+            ) from exc
+        trait = str(scenario.get('trait') or 'general').strip() or 'general'
+        if question_id in assigned_traits:
+            raise AssessmentStateError(
+                f"Assessment {assessment_id} has duplicate psychometric question IDs"
+            )
+        assigned_traits[question_id] = trait
+        trait_counts[trait] = trait_counts.get(trait, 0) + 1
+    return assigned_traits, trait_counts
+
+
+def _psychometric_breakdown_from_snapshot(scenarios, response_rows, assessment_id):
+    """Average each assigned trait, counting unanswered scenarios as zero."""
+    assigned_traits, trait_counts = _assigned_psychometric_inventory(
+        scenarios,
+        assessment_id,
+    )
+    trait_totals = {trait: 0.0 for trait in trait_counts}
+    for question_id, score in response_rows:
+        try:
+            trait = assigned_traits.get(int(question_id))
+        except (TypeError, ValueError):
+            trait = None
+        if trait is not None:
+            trait_totals[trait] += max(0.0, min(10.0, float(score)))
+    return {
+        trait: round(trait_totals[trait] / count, 2)
+        for trait, count in trait_counts.items()
+    }
+
+
 def finalize_assessment(assessment_id):
     """Score and complete an assessment as one serialized transaction.
 
@@ -606,8 +615,10 @@ def finalize_assessment(assessment_id):
                 """
                 SELECT a.candidate_id, a.scheduled_assessment_id, a.status,
                        a.technical_score, a.psychometric_score, a.overall_score,
-                       a.decision, a.rationale, a.hiring_recommendation,
+                       a.automated_recommendation, a.automated_rationale,
+                       a.recommended_next_step,
                        COALESCE(sa.is_technical_role, TRUE), a.job_id,
+                       a.questions_data,
                        GREATEST(
                            COALESCE(a.time_elapsed_seconds, 0),
                            CASE
@@ -636,11 +647,12 @@ def finalize_assessment(assessment_id):
                 persisted_technical,
                 persisted_psychometric,
                 persisted_overall,
-                persisted_decision,
-                persisted_rationale,
-                persisted_recommendation,
+                persisted_automated_recommendation,
+                persisted_automated_rationale,
+                persisted_next_step,
                 is_technical_role,
                 assessment_job_id,
+                raw_questions,
                 elapsed_seconds,
             ) = assessment
 
@@ -654,36 +666,21 @@ def finalize_assessment(assessment_id):
                     f"Assessment {assessment_id} cannot be completed from {assessment_status}"
                 )
 
-            # Repair legacy rows where only scheduled_assessments.assessment_id was set.
-            if scheduled_assessment_id is None:
-                cursor.execute(
-                    """
-                    SELECT id, is_technical_role, job_id
-                    FROM scheduled_assessments
-                    WHERE assessment_id = %s
-                       OR (candidate_id = %s AND status = 'in_progress')
-                    ORDER BY CASE WHEN assessment_id = %s THEN 0 ELSE 1 END, created_at DESC
-                    LIMIT 1
-                    FOR UPDATE
-                    """,
-                    (assessment_id, candidate_id, assessment_id),
+            questions = _question_snapshot(raw_questions, assessment_id)
+            mcq_questions = questions.get('mcq_questions') or []
+            if not isinstance(mcq_questions, list):
+                raise AssessmentStateError(
+                    f"Assessment {assessment_id} has invalid MCQ questions"
                 )
-                schedule = cursor.fetchone()
-                if schedule:
-                    scheduled_assessment_id = schedule[0]
-                    is_technical_role = (
-                        schedule[1] if schedule[1] is not None else is_technical_role
-                    )
-                    assessment_job_id = assessment_job_id or schedule[2]
-                    cursor.execute(
-                        """
-                        UPDATE assessments
-                        SET scheduled_assessment_id = %s,
-                            job_id = COALESCE(job_id, %s)
-                        WHERE id = %s
-                        """,
-                        (scheduled_assessment_id, assessment_job_id, assessment_id),
-                    )
+            assigned_mcq_total = len(mcq_questions)
+            coding_problem = questions.get('coding_problem') or {}
+            assigned_test_cases = coding_problem.get('test_cases') or []
+            if not isinstance(assigned_test_cases, list):
+                raise AssessmentStateError(
+                    f"Assessment {assessment_id} has invalid coding test cases"
+                )
+            assigned_code_total = len(assigned_test_cases) if is_technical_role else 0
+            psychometric_scenarios = questions.get('psychometric_scenarios') or []
 
             cursor.execute(
                 """
@@ -694,8 +691,12 @@ def finalize_assessment(assessment_id):
                 """,
                 (assessment_id,),
             )
-            mcq_total, mcq_correct = cursor.fetchone()
-            mcq_score = 0.0 if not mcq_total else (mcq_correct / mcq_total) * 100
+            _submitted_mcq_total, mcq_correct = cursor.fetchone()
+            mcq_score = (
+                0.0
+                if not assigned_mcq_total
+                else (min(mcq_correct, assigned_mcq_total) / assigned_mcq_total) * 100
+            )
 
             cursor.execute(
                 """
@@ -706,21 +707,26 @@ def finalize_assessment(assessment_id):
                 """,
                 (assessment_id,),
             )
-            code_passed, code_total = cursor.fetchone()
-            coding_score = 0.0 if not code_total else (code_passed / code_total) * 100
+            code_passed, _submitted_code_total = cursor.fetchone()
+            coding_score = (
+                0.0
+                if not assigned_code_total
+                else (min(code_passed, assigned_code_total) / assigned_code_total) * 100
+            )
 
             cursor.execute(
                 """
-                SELECT trait, AVG(score)
+                SELECT question_id, score
                 FROM psychometric_responses
                 WHERE assessment_id = %s
-                GROUP BY trait
                 """,
                 (assessment_id,),
             )
-            psychometric_breakdown = {
-                row[0]: round(float(row[1]), 2) for row in cursor.fetchall()
-            }
+            psychometric_breakdown = _psychometric_breakdown_from_snapshot(
+                psychometric_scenarios,
+                cursor.fetchall(),
+                assessment_id,
+            )
             average_trait_score = (
                 sum(psychometric_breakdown.values()) / len(psychometric_breakdown)
                 if psychometric_breakdown
@@ -734,23 +740,40 @@ def finalize_assessment(assessment_id):
                 technical_score = float(persisted_technical)
                 psychometric_score = float(persisted_psychometric)
                 overall_score = float(persisted_overall)
-                decision = persisted_decision
-                rationale = persisted_rationale
-                recommendation = persisted_recommendation
-                if not all((decision, rationale, recommendation)):
+                automated_recommendation = persisted_automated_recommendation
+                automated_rationale = persisted_automated_rationale
+                recommended_next_step = persisted_next_step
+                if not all((
+                    automated_recommendation,
+                    automated_rationale,
+                    recommended_next_step,
+                )):
                     defaults = _recommendation_for_score(overall_score)
-                    decision = decision or defaults[0]
-                    rationale = rationale or defaults[1]
-                    recommendation = recommendation or defaults[2]
+                    automated_recommendation = (
+                        automated_recommendation or defaults[0]
+                    )
+                    automated_rationale = automated_rationale or defaults[1]
+                    recommended_next_step = recommended_next_step or defaults[2]
                     cursor.execute(
                         """
                         UPDATE assessments
-                        SET decision = COALESCE(decision, %s),
-                            rationale = COALESCE(rationale, %s),
-                            hiring_recommendation = COALESCE(hiring_recommendation, %s)
+                        SET automated_recommendation = COALESCE(
+                                automated_recommendation, %s
+                            ),
+                            automated_rationale = COALESCE(
+                                automated_rationale, %s
+                            ),
+                            recommended_next_step = COALESCE(
+                                recommended_next_step, %s
+                            )
                         WHERE id = %s
                         """,
-                        (decision, rationale, recommendation, assessment_id),
+                        (
+                            automated_recommendation,
+                            automated_rationale,
+                            recommended_next_step,
+                            assessment_id,
+                        ),
                     )
             else:
                 technical_score = (
@@ -764,16 +787,19 @@ def finalize_assessment(assessment_id):
                     + psychometric_score * PSYCHOMETRIC_SCORE_WEIGHT
                 )
 
-                decision, rationale, recommendation = _recommendation_for_score(
-                    overall_score
-                )
+                (
+                    automated_recommendation,
+                    automated_rationale,
+                    recommended_next_step,
+                ) = _recommendation_for_score(overall_score)
 
                 cursor.execute(
                     """
                     UPDATE assessments
                     SET technical_score = %s, psychometric_score = %s,
-                        overall_score = %s, decision = %s, rationale = %s,
-                        hiring_recommendation = %s, status = 'completed',
+                        overall_score = %s, automated_recommendation = %s,
+                        automated_rationale = %s, recommended_next_step = %s,
+                        status = 'completed',
                         time_elapsed_seconds = GREATEST(
                             COALESCE(time_elapsed_seconds, 0), %s
                         ),
@@ -784,9 +810,9 @@ def finalize_assessment(assessment_id):
                         technical_score,
                         psychometric_score,
                         overall_score,
-                        decision,
-                        rationale,
-                        recommendation,
+                        automated_recommendation,
+                        automated_rationale,
+                        recommended_next_step,
                         finalized_elapsed_seconds,
                         assessment_id,
                     ),
@@ -796,13 +822,11 @@ def finalize_assessment(assessment_id):
                 cursor.execute(
                     """
                     UPDATE scheduled_assessments
-                    SET status = 'completed', assessment_id = %s,
-                        updated_at = CURRENT_TIMESTAMP
+                    SET status = 'completed', updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                       AND status IN ('scheduled', 'in_progress', 'completed')
-                      AND (assessment_id IS NULL OR assessment_id = %s)
                     """,
-                    (assessment_id, scheduled_assessment_id, assessment_id),
+                    (scheduled_assessment_id,),
                 )
                 if cursor.rowcount == 0:
                     raise AssessmentStateError(
@@ -813,7 +837,14 @@ def finalize_assessment(assessment_id):
             cursor.execute(
                 """
                 UPDATE candidates
-                SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+                SET status = CASE
+                        WHEN status IN ('hired', 'rejected') THEN status
+                        ELSE 'completed'
+                    END,
+                    updated_at = CASE
+                        WHEN status IN ('hired', 'rejected') THEN updated_at
+                        ELSE CURRENT_TIMESTAMP
+                    END
                 WHERE id = %s
                 """,
                 (candidate_id,),
@@ -837,9 +868,9 @@ def finalize_assessment(assessment_id):
                     'overall': round(overall_score, 2),
                 },
                 'psychometric_breakdown': psychometric_breakdown,
-                'decision': decision,
-                'rationale': rationale,
-                'ai_recommendation': recommendation,
+                'automated_recommendation': automated_recommendation,
+                'automated_rationale': automated_rationale,
+                'recommended_next_step': recommended_next_step,
                 'is_technical_role': bool(is_technical_role),
                 'time_elapsed_seconds': finalized_elapsed_seconds,
             }
@@ -860,6 +891,7 @@ def create_scheduled_assessment(
     is_technical_role=True,
     questions_data=None,
     job_id=None,
+    reviewer_sector_id=None,
     access_token=None,
 ):
     try:
@@ -867,9 +899,85 @@ def create_scheduled_assessment(
             cursor = conn.cursor()
             cursor.execute(
                 """
+                SELECT status, sector_id, best_match_job_id
+                FROM candidates
+                WHERE id = %s
+                FOR UPDATE
+                """,
+                (candidate_id,),
+            )
+            candidate = cursor.fetchone()
+            if not candidate:
+                raise AssessmentStateError(f"Candidate {candidate_id} does not exist")
+
+            candidate_status = str(candidate[0] or '').strip().lower()
+            candidate_sector_id = candidate[1]
+            candidate_best_job_id = candidate[2]
+            if candidate_status in SCHEDULING_BLOCKED_CANDIDATE_STATUSES:
+                raise AssessmentStateError(
+                    f"Candidate {candidate_id} cannot be scheduled from {candidate_status}"
+                )
+
+            if job_id is not None:
+                cursor.execute(
+                    """
+                    SELECT jd.id
+                    FROM job_descriptions jd
+                    WHERE jd.id = %s
+                      AND jd.status = 'active'
+                      AND (jd.closes_at IS NULL OR jd.closes_at > CURRENT_TIMESTAMP)
+                      AND (%s IS NULL OR jd.sector_id = %s)
+                      AND (
+                            jd.id = %s
+                            OR EXISTS (
+                                SELECT 1
+                                FROM candidate_job_matches cjm
+                                WHERE cjm.candidate_id = %s
+                                  AND cjm.job_id = jd.id
+                            )
+                          )
+                    FOR SHARE OF jd
+                    """,
+                    (
+                        job_id,
+                        reviewer_sector_id,
+                        reviewer_sector_id,
+                        candidate_best_job_id,
+                        candidate_id,
+                    ),
+                )
+                if not cursor.fetchone():
+                    raise AssessmentStateError(
+                        f"Job {job_id} is not open or authorized for candidate {candidate_id}"
+                    )
+                if (
+                    reviewer_sector_id is not None
+                    and candidate_sector_id != reviewer_sector_id
+                ):
+                    raise AssessmentStateError(
+                        f"Job {job_id} is not open or authorized for candidate {candidate_id}"
+                    )
+
+            cursor.execute(
+                """
+                SELECT id
+                FROM scheduled_assessments
+                WHERE candidate_id = %s
+                  AND status IN ('scheduled', 'in_progress')
+                LIMIT 1
+                """,
+                (candidate_id,),
+            )
+            if cursor.fetchone():
+                raise AssessmentStateError(
+                    f"Candidate {candidate_id} already has an active assessment"
+                )
+
+            cursor.execute(
+                """
                 INSERT INTO scheduled_assessments (
                     candidate_id, interviewer_id, job_id, scheduled_time, status,
-                    is_technical_role, questions_data, access_token
+                    is_technical_role, questions_data, access_token_hash
                 )
                 VALUES (%s, %s, %s, %s, 'scheduled', %s, %s, %s)
                 RETURNING id
@@ -881,7 +989,7 @@ def create_scheduled_assessment(
                     scheduled_time,
                     is_technical_role,
                     json.dumps(questions_data) if questions_data else None,
-                    access_token,
+                    hash_assessment_token(access_token),
                 ),
             )
             result = cursor.fetchone()
@@ -903,17 +1011,165 @@ def create_scheduled_assessment(
             return result[0]
 
     except Exception as e:
+        if (
+            getattr(getattr(e, 'diag', None), 'constraint_name', None)
+            == 'idx_scheduled_assessments_candidate_active_unique'
+        ):
+            raise AssessmentStateError(
+                f"Candidate {candidate_id} already has an active assessment"
+            ) from e
         if isinstance(e, DatabaseError):
             raise
         raise DatabaseError(f"Error creating scheduled assessment: {str(e)}") from e
 
 
+def cancel_schedule_after_invitation_failure(schedule_id, interviewer_id):
+    """Cancel an undelivered pre-start schedule and invalidate its token."""
+
+    try:
+        with db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT sa.candidate_id, sa.status, a.id
+                FROM scheduled_assessments sa
+                LEFT JOIN assessments a ON a.scheduled_assessment_id = sa.id
+                WHERE sa.id = %s AND sa.interviewer_id = %s
+                FOR UPDATE OF sa
+                """,
+                (schedule_id, interviewer_id),
+            )
+            row = cursor.fetchone()
+            if not row or row[1] != 'scheduled' or row[2] is not None:
+                return False
+
+            candidate_id = row[0]
+            replacement_token_hash = hash_assessment_token(
+                generate_assessment_token()
+            )
+            cursor.execute(
+                """
+                UPDATE scheduled_assessments
+                SET status = 'cancelled', access_token_hash = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND status = 'scheduled'
+                """,
+                (replacement_token_hash, schedule_id),
+            )
+            if cursor.rowcount != 1:
+                raise AssessmentStateError(
+                    f"Schedule {schedule_id} could not be cancelled"
+                )
+
+            cursor.execute(
+                """
+                UPDATE candidates
+                SET status = 'applied', updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND status = 'under_review'
+                """,
+                (candidate_id,),
+            )
+            if cursor.rowcount != 1:
+                raise AssessmentStateError(
+                    f"Candidate {candidate_id} could not be made reschedulable"
+                )
+
+            conn.commit()
+            return True
+    except DatabaseError:
+        raise
+    except Exception as error:
+        raise DatabaseError(
+            f"Error cancelling undelivered schedule: {str(error)}"
+        ) from error
+
+
+def reject_scheduled_candidate(candidate_id, interviewer_id):
+    """Cancel an assigned pre-start schedule and reject its candidate atomically."""
+
+    try:
+        with db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT c.name, c.email, c.status, sa.id, sa.status
+                FROM candidates c
+                JOIN scheduled_assessments sa ON sa.candidate_id = c.id
+                WHERE c.id = %s
+                  AND sa.interviewer_id = %s
+                ORDER BY (sa.status IN ('scheduled', 'in_progress')) DESC,
+                         sa.created_at DESC, sa.id DESC
+                LIMIT 1
+                FOR UPDATE OF c, sa
+                """,
+                (candidate_id, interviewer_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+            candidate_name, candidate_email, candidate_status, schedule_id, schedule_status = row
+            if candidate_status == 'rejected' and schedule_status == 'cancelled':
+                return {
+                    'candidate_id': candidate_id,
+                    'candidate_name': candidate_name,
+                    'candidate_email': candidate_email,
+                    'should_notify': False,
+                }
+            if schedule_status != 'scheduled' or candidate_status in {
+                'completed',
+                'hired',
+                'rejected',
+            }:
+                raise AssessmentStateError(
+                    'A candidate can only be rejected before their assessment starts'
+                )
+
+            cursor.execute(
+                """
+                UPDATE scheduled_assessments
+                SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND status = 'scheduled'
+                """,
+                (schedule_id,),
+            )
+            if cursor.rowcount != 1:
+                raise AssessmentStateError(
+                    'A candidate can only be rejected before their assessment starts'
+                )
+            cursor.execute(
+                """
+                UPDATE candidates
+                SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (candidate_id,),
+            )
+            if cursor.rowcount != 1:
+                raise AssessmentStateError('Candidate no longer exists')
+            conn.commit()
+            return {
+                'candidate_id': candidate_id,
+                'candidate_name': candidate_name,
+                'candidate_email': candidate_email,
+                'should_notify': True,
+            }
+    except (AssessmentStateError, DatabaseError):
+        raise
+    except Exception as error:
+        raise DatabaseError('Error rejecting scheduled candidate') from error
+
+
 def get_scheduled_assessment_by_id(scheduled_assessment_id):
     try:
         row = _fetch_one(
-            """SELECT id, candidate_id, interviewer_id, scheduled_time, status, assessment_id,
-                      is_technical_role, questions_data, created_at, updated_at, job_id
-               FROM scheduled_assessments WHERE id = %s""",
+            """SELECT sa.id, sa.candidate_id, sa.interviewer_id,
+                      sa.scheduled_time, sa.status, a.id,
+                      sa.is_technical_role, sa.questions_data,
+                      sa.created_at, sa.updated_at, sa.job_id
+               FROM scheduled_assessments sa
+               LEFT JOIN assessments a ON a.scheduled_assessment_id = sa.id
+               WHERE sa.id = %s""",
             (scheduled_assessment_id,)
         )
         if not row:
@@ -949,10 +1205,13 @@ def generate_assessment_token():
 
 
 def get_assessment_by_token(token):
+    if not isinstance(token, str) or not token:
+        return None
     try:
+        token_hash = hash_assessment_token(token)
         row = _fetch_one(
             """SELECT sa.id, sa.candidate_id, sa.interviewer_id, sa.scheduled_time,
-                      sa.status, COALESCE(sa.assessment_id, a.id), sa.started_at,
+                      sa.status, a.id, sa.started_at,
                       c.name as candidate_name, c.email as candidate_email,
                       sa.job_id,
                       CASE
@@ -970,13 +1229,9 @@ def get_assessment_by_token(token):
                FROM scheduled_assessments sa
                JOIN candidates c ON sa.candidate_id = c.id
                LEFT JOIN assessments a
-                 ON a.id = sa.assessment_id
-                 OR (
-                     sa.assessment_id IS NULL
-                     AND a.scheduled_assessment_id = sa.id
-                 )
-               WHERE sa.access_token = %s""",
-            (ASSESSMENT_DURATION_SECONDS, token)
+                 ON a.scheduled_assessment_id = sa.id
+               WHERE sa.access_token_hash = %s""",
+            (ASSESSMENT_DURATION_SECONDS, token_hash)
         )
 
         if row:
@@ -1008,23 +1263,26 @@ def start_assessment_by_token(token):
     transaction, so downstream analytics always retain the job selected at schedule
     time even if the candidate's best match changes later.
     """
+    if not isinstance(token, str) or not token:
+        return None
     try:
+        token_hash = hash_assessment_token(token)
         with db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, candidate_id, job_id, status, assessment_id
+                SELECT id, candidate_id, job_id, status
                 FROM scheduled_assessments
-                WHERE access_token = %s
+                WHERE access_token_hash = %s
                 FOR UPDATE
                 """,
-                (token,),
+                (token_hash,),
             )
             schedule = cursor.fetchone()
             if not schedule:
                 return None
 
-            schedule_id, candidate_id, job_id, schedule_status, linked_assessment_id = schedule
+            schedule_id, candidate_id, job_id, schedule_status = schedule
             if schedule_status not in ('scheduled', 'in_progress'):
                 return None
 
@@ -1083,21 +1341,15 @@ def start_assessment_by_token(token):
                 )
                 assessment_id = cursor.fetchone()[0]
 
-            if linked_assessment_id not in (None, assessment_id):
-                raise AssessmentStateError(
-                    f"Schedule {schedule_id} is already linked to assessment "
-                    f"{linked_assessment_id}"
-                )
-
             cursor.execute(
                 """
                 UPDATE scheduled_assessments
-                SET status = 'in_progress', assessment_id = %s,
+                SET status = 'in_progress',
                     started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                 """,
-                (assessment_id, schedule_id),
+                (schedule_id,),
             )
             conn.commit()
             return {
@@ -1125,6 +1377,7 @@ def verify_assessment_access_token(
     if not token:
         return False
     try:
+        token_hash = hash_assessment_token(token)
         result = _fetch_one(
             """SELECT sa.status, a.status,
                       GREATEST(
@@ -1135,13 +1388,13 @@ def verify_assessment_access_token(
                                   EPOCH FROM (CURRENT_TIMESTAMP - a.started_at)
                               )::INTEGER
                           END
-                      ) >= %s AS deadline_reached
+               ) >= %s AS deadline_reached
                FROM scheduled_assessments sa
-               JOIN assessments a ON a.id = sa.assessment_id
-               WHERE sa.access_token = %s AND sa.assessment_id = %s
+               JOIN assessments a ON a.scheduled_assessment_id = sa.id
+               WHERE sa.access_token_hash = %s AND a.id = %s
                   AND sa.status IN ('in_progress', 'completed')
                   AND a.status IN ('started', 'in_progress', 'completed')""",
-            (ASSESSMENT_DURATION_SECONDS, token, assessment_id)
+            (ASSESSMENT_DURATION_SECONDS, token_hash, assessment_id)
         )
         if not result:
             return False

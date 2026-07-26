@@ -18,6 +18,7 @@ from resume_parser import parse_resume
 from resume_analyzer import analyze_resume
 from candidate_db import get_candidate_by_email, insert_candidate_application
 from db_config import db_connection
+from user_db import DatabaseError, DuplicateEmailError
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +26,15 @@ resume_bp = Blueprint('resume', __name__)
 
 ALLOWED_EXTENSIONS = {'pdf', 'docx'}
 MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 MAX_DOCX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 MAX_DOCX_ENTRY_BYTES = 20 * 1024 * 1024
 MAX_DOCX_FILES = 2_000
+MAX_NAME_LENGTH = 200
+MAX_EMAIL_LENGTH = 254
+MAX_PHONE_LENGTH = 32
 EMAIL_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
+DUPLICATE_APPLICATION_MESSAGE = "An application already exists for this email address."
 
 
 class UploadValidationError(ValueError):
@@ -102,6 +108,10 @@ def _validate_docx_file(filepath):
 
 
 def _validate_resume_file(filepath, extension):
+    if os.path.getsize(filepath) > MAX_FILE_SIZE_BYTES:
+        raise UploadValidationError(
+            f"Resume file exceeds the {MAX_FILE_SIZE_MB} MB limit"
+        )
     if extension == 'pdf':
         _validate_pdf_file(filepath)
     elif extension == 'docx':
@@ -114,6 +124,17 @@ def _is_valid_email(email):
     if not email or not isinstance(email, str) or not email.strip():
         return False
     return bool(re.match(EMAIL_PATTERN, email))
+
+
+def _clean_text_field(value, label, maximum):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise UploadValidationError(f"{label} must be text")
+    value = value.strip()
+    if len(value) > maximum:
+        raise UploadValidationError(f"{label} must be {maximum} characters or fewer")
+    return value
 
 
 def _name_from_email(email):
@@ -132,6 +153,13 @@ def _delete_file(filepath):
             os.remove(filepath)
     except OSError:
         pass
+
+
+def _duplicate_application_response():
+    return jsonify({
+        "status": "error",
+        "message": DUPLICATE_APPLICATION_MESSAGE,
+    }), 409
 
 
 def _get_job_description_for_id(job_id):
@@ -195,6 +223,25 @@ def upload_resume():
     upload_folder = current_app.config['UPLOAD_FOLDER']
     filepath = os.path.join(upload_folder, unique_filename)
 
+    try:
+        manual_name = _clean_text_field(
+            request.form.get('name'), "Name", MAX_NAME_LENGTH
+        )
+        manual_email = _clean_text_field(
+            request.form.get('email'), "Email", MAX_EMAIL_LENGTH
+        ).lower()
+        manual_phone = _clean_text_field(
+            request.form.get('phone'), "Phone", MAX_PHONE_LENGTH
+        )
+    except UploadValidationError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    if manual_email and not _is_valid_email(manual_email):
+        return jsonify({
+            "status": "error",
+            "message": "Please provide a valid email address.",
+        }), 400
+
     selected_job_id = request.form.get('job_id')
     if not selected_job_id:
         return jsonify({"status": "error", "message": "Please select a job position to apply for."}), 400
@@ -207,7 +254,7 @@ def upload_resume():
     try:
         file.save(filepath)
     except OSError as e:
-        logger.error(f"[ERROR] OSError saving file: {e}")
+        logger.error("[UPLOAD] File save failed (%s)", type(e).__name__)
         return jsonify({"status": "error", "message": "Failed to save uploaded file."}), 500
 
     try:
@@ -216,6 +263,20 @@ def upload_resume():
         _delete_file(filepath)
         return jsonify({"status": "error", "message": str(exc)}), 400
 
+    if manual_email:
+        try:
+            existing_candidate = get_candidate_by_email(manual_email)
+        except DatabaseError as exc:
+            logger.error("[UPLOAD] Candidate lookup failed (%s)", type(exc).__name__)
+            _delete_file(filepath)
+            return jsonify({
+                "status": "error",
+                "message": "Application service is temporarily unavailable.",
+            }), 503
+        if existing_candidate:
+            _delete_file(filepath)
+            return _duplicate_application_response()
+
     logger.info(f"[MATCH] Scoring against: {selected_job_info['title']} (ID: {selected_job_id})")
 
     try:
@@ -223,7 +284,7 @@ def upload_resume():
 
         with open(filepath, 'rb') as f:
             if extension == 'pdf':
-                from PyPDF2 import PdfReader
+                from pypdf import PdfReader
                 pdf = PdfReader(f)
                 resume_text = " ".join([page.extract_text() or '' for page in pdf.pages])
             else:
@@ -246,7 +307,7 @@ def upload_resume():
                     job_description.get('skills', []), job_description.get('min_experience', 0)
                 )
         except Exception as e:
-            logger.warning(f"[WARNING] AI extraction failed: {e}")
+            logger.warning("[UPLOAD] AI extraction failed (%s)", type(e).__name__)
 
         ai_analysis = None
         try:
@@ -257,7 +318,7 @@ def upload_resume():
             if 'enhanced_match_score' in ai_analysis:
                 parsed_data['match_score'] = ai_analysis['enhanced_match_score']
         except Exception as e:
-            logger.warning(f"[WARNING] AI analysis failed: {e}")
+            logger.warning("[UPLOAD] AI analysis failed (%s)", type(e).__name__)
             ai_analysis = {
                 "pros": ["Resume uploaded successfully"],
                 "cons": ["AI analysis unavailable - manual review recommended"],
@@ -266,22 +327,26 @@ def upload_resume():
             }
 
     except Exception as e:
-        logger.exception(f"[ERROR] Error parsing resume: {e}")
+        logger.warning("[UPLOAD] Resume parsing failed (%s)", type(e).__name__)
         _delete_file(filepath)
         return jsonify({
             "status": "error",
             "message": "The resume could not be parsed as a valid PDF or DOCX file.",
         }), 400
 
-    manual_name = request.form.get('name', '').strip()
-    manual_email = request.form.get('email', '').strip()
-    manual_phone = request.form.get('phone', '').strip()
-
-    name = manual_name or parsed_data.get('name')
-    email = manual_email or parsed_data.get('email')
-    if isinstance(email, str):
-        email = email.strip().lower()
-    phone = manual_phone or parsed_data.get('phone') or ""
+    try:
+        name = _clean_text_field(
+            manual_name or parsed_data.get('name'), "Name", MAX_NAME_LENGTH
+        )
+        email = _clean_text_field(
+            manual_email or parsed_data.get('email'), "Email", MAX_EMAIL_LENGTH
+        ).lower()
+        phone = _clean_text_field(
+            manual_phone or parsed_data.get('phone'), "Phone", MAX_PHONE_LENGTH
+        )
+    except UploadValidationError as exc:
+        _delete_file(filepath)
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     if not email or not _is_valid_email(email):
         _delete_file(filepath)
@@ -291,17 +356,19 @@ def upload_resume():
     if not name:
         name = _name_from_email(email) or "Candidate"
 
-    with contextlib.suppress(Exception):
-        if existing := get_candidate_by_email(email):
+    if not manual_email:
+        try:
+            existing_candidate = get_candidate_by_email(email)
+        except DatabaseError as exc:
+            logger.error("[UPLOAD] Candidate lookup failed (%s)", type(exc).__name__)
             _delete_file(filepath)
             return jsonify({
                 "status": "error",
-                "message": f"You have already registered with this email address ({email}).",
-                "existing_candidate": {
-                    "name": existing['name'], "status": existing['status'],
-                    "registered_at": str(existing['created_at']) if existing['created_at'] else None
-                }
-            }), 409
+                "message": "Application service is temporarily unavailable.",
+            }), 503
+        if existing_candidate:
+            _delete_file(filepath)
+            return _duplicate_application_response()
 
     candidate_id = None
     try:
@@ -313,8 +380,11 @@ def upload_resume():
             parsed_data=parsed_data, job_id=int(selected_job_id), ai_reasoning=ai_reasoning,
             pros=pros_text, cons=cons_text, status="applied"
         )
+    except DuplicateEmailError:
+        _delete_file(filepath)
+        return _duplicate_application_response()
     except Exception as e:
-        logger.exception(f"[ERROR] Error saving candidate: {e}")
+        logger.error("[UPLOAD] Candidate save failed (%s)", type(e).__name__)
         _delete_file(filepath)
         return jsonify({"status": "error", "message": "Failed to save application. Please try again."}), 500
 
@@ -322,33 +392,16 @@ def upload_resume():
         _delete_file(filepath)
         return jsonify({"status": "error", "message": "Failed to save application. Please try again."}), 500
 
-    relative_path = os.path.join(os.path.basename(upload_folder), unique_filename)
     response_data = {
         "candidate_id": candidate_id,
-        "file_path": relative_path,
-        "original_filename": original_filename,
-        "candidate": {"name": name, "email": email, "phone": phone},
-        "parsed_data": parsed_data
+        "application_status": "applied",
     }
-    if ai_analysis:
-        response_data["ai_analysis"] = {
-            "pros": ai_analysis.get('pros', []), "cons": ai_analysis.get('cons', []),
-            "overall_assessment": ai_analysis.get('overall_assessment', ''),
-            "recommendation": ai_analysis.get('recommendation', 'Pending Review'),
-            "confidence_score": ai_analysis.get('confidence_score', 0),
-            "key_highlights": ai_analysis.get('key_highlights', []),
-            "areas_for_improvement": ai_analysis.get('areas_for_improvement', [])
-        }
-        if 'enhanced_match_score' in ai_analysis:
-            response_data["ai_analysis"]["enhanced_match_score"] = ai_analysis['enhanced_match_score']
     if selected_job_info:
         response_data["selected_job"] = {
-            "id": selected_job_info['id'], "title": selected_job_info['title'],
-            "department": selected_job_info.get('department'),
-            "required_skills": job_description.get('skills', []),
-            "min_experience": job_description.get('min_experience', 0)
+            "id": selected_job_info['id'],
+            "title": selected_job_info['title'],
         }
 
-    logger.info(f"[SUCCESS] Resume uploaded — Candidate ID: {candidate_id}, Name: {name}, Score: {parsed_data.get('match_score', 0)}")
-    return jsonify({"status": "success", "message": "Resume uploaded and analyzed successfully",
+    logger.info("[UPLOAD] Candidate application stored: id=%s", candidate_id)
+    return jsonify({"status": "success", "message": "Application submitted successfully",
                     "data": response_data}), 200

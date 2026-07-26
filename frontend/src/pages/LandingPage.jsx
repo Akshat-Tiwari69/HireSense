@@ -1,462 +1,257 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
-  ArrowRight, CheckCircle, Shield,
-  Users, TrendingUp, Clock, Award, BarChart3, Star, LogIn,
-  Menu, X as XIcon, Sparkles, Briefcase
+  ArrowRight,
+  BarChart3,
+  Check,
+  ClipboardCheck,
+  FileSearch,
+  LockKeyhole,
+  ScanSearch,
+  ShieldCheck,
+  Sparkles,
+  UsersRound,
 } from 'lucide-react';
-import { Button } from '../components/ui/button';
-import { Card } from "../components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
+import { Link } from 'react-router-dom';
+
 import Logo from '../components/Logo';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
 
-const LandingPage = () => {
-  const navigate = useNavigate();
-  const [showPrivacy, setShowPrivacy] = useState(false);
-  const [showTerms, setShowTerms] = useState(false);
-  const [showContact, setShowContact] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+const workflow = [
+  {
+    number: '01',
+    icon: FileSearch,
+    title: 'Bring applicants into focus',
+    description: 'Collect resumes against a live role and turn unstructured experience into a reviewable candidate profile.',
+  },
+  {
+    number: '02',
+    icon: ScanSearch,
+    title: 'Review evidence, not noise',
+    description: 'See fit signals, gaps, resume evidence, and the next required action in one consistent workspace.',
+  },
+  {
+    number: '03',
+    icon: ClipboardCheck,
+    title: 'Assess with a clear trail',
+    description: 'Schedule role-aware assessments, preserve responses, and keep automated guidance separate from human decisions.',
+  },
+];
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-md sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
-          <Logo size="default" />
-          <div className="hidden sm:flex gap-4">
-            <Button
-              variant="ghost"
-              onClick={() => navigate('/jobs')}
-              className="text-slate-700 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-200 font-medium px-4 py-2 rounded-lg flex items-center gap-2"
-            >
-              <Briefcase className="w-4 h-4" />
-              <span>Open Positions</span>
+const principles = [
+  {
+    icon: UsersRound,
+    title: 'One hiring workflow',
+    description: 'Admin, interviewer, proctor, and candidate experiences operate on the same lifecycle and vocabulary.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Human review stays visible',
+    description: 'Automated recommendations remain decision support. Final outcomes are explicit, attributable human actions.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Signal with context',
+    description: 'Scores sit beside stage, evidence, ownership, and timing—never as an unexplained number in isolation.',
+  },
+];
+
+const LandingPage = () => (
+  <div className="min-h-screen bg-background text-foreground">
+    <section className="relative isolate overflow-hidden bg-[#0b1220] text-white">
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(148,163,184,.09)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,.09)_1px,transparent_1px)] [background-size:40px_40px]"
+      />
+      <div aria-hidden="true" className="absolute left-1/2 top-0 h-[520px] w-[760px] -translate-x-1/2 rounded-full bg-primary/20 blur-[140px]" />
+
+      <header className="relative z-10 border-b border-white/10">
+        <div className="page-wrap flex h-[72px] items-center justify-between">
+          <Link to="/" aria-label="HireSense home"><Logo className="text-white" /></Link>
+          <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex" aria-label="Primary navigation">
+            <a href="#workflow" className="transition-colors hover:text-white">Workflow</a>
+            <a href="#principles" className="transition-colors hover:text-white">Platform</a>
+            <Link to="/jobs" className="transition-colors hover:text-white">Open roles</Link>
+          </nav>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" className="hidden text-slate-200 hover:bg-white/10 hover:text-white sm:inline-flex">
+              <Link to="/login">Staff sign in</Link>
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => navigate('/login')}
-              className="border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-700 transition-all duration-200 font-semibold px-4 sm:px-6 py-2 rounded-lg flex items-center gap-2 hover:shadow-lg"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>Sign In</span>
+            <Button asChild className="bg-white text-slate-950 hover:bg-slate-100">
+              <Link to="/jobs">View roles <ArrowRight /></Link>
             </Button>
           </div>
-          <button 
-            className="sm:hidden p-2 hover:bg-indigo-50 rounded-lg transition-colors"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-            aria-expanded={mobileMenuOpen}
-            aria-controls="mobile-navigation"
-          >
-            {mobileMenuOpen ? (
-              <XIcon className="w-6 h-6 text-slate-900" />
-            ) : (
-              <Menu className="w-6 h-6 text-slate-900" />
-            )}
-          </button>
         </div>
-        
-        {/* Mobile Menu */}
-        {mobileMenuOpen && (
-          <div id="mobile-navigation" className="sm:hidden border-t bg-white animate-in fade-in slide-in-from-top-2 duration-300">
-            <div className="px-4 py-4 flex flex-col gap-3">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  navigate('/jobs');
-                  setMobileMenuOpen(false);
-                }}
-                className="text-slate-700 hover:text-indigo-600 hover:bg-indigo-50 w-full rounded-lg transition-all duration-200 flex items-center gap-2 justify-center"
-              >
-                <Briefcase className="w-4 h-4" />
-                Open Positions
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  navigate('/login');
-                  setMobileMenuOpen(false);
-                }}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white w-full rounded-lg transition-all duration-200"
-              >
-                Sign In
-              </Button>
-            </div>
-          </div>
-        )}
       </header>
 
-      {/* Hero Section - Mobile Optimized */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 sm:pt-20 pb-16 sm:pb-24 relative overflow-hidden">
-        {/* Animated background elements */}
-        <div className="absolute top-10 right-10 w-72 h-72 bg-indigo-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob hidden lg:block"></div>
-        <div className="absolute -bottom-8 left-20 w-72 h-72 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000 hidden lg:block"></div>
-        
-        <div className="text-center max-w-4xl mx-auto relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-indigo-100 to-blue-100 rounded-full text-indigo-700 text-xs sm:text-sm font-medium mb-6 sm:mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700 border border-indigo-200">
-            <Sparkles className="w-3 h-3 sm:w-4 sm:h-4" />
-            AI-Powered Hiring Platform
+      <div className="page-wrap relative z-10 grid items-center gap-14 py-20 lg:grid-cols-[1.02fr_.98fr] lg:py-28">
+        <div className="page-enter max-w-3xl">
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-slate-200">
+            <Sparkles className="h-3.5 w-3.5 text-blue-300" />
+            Structured hiring, without the system noise
           </div>
-
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-slate-900 mb-4 sm:mb-6 leading-tight animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
-            Hire faster. Hire smarter.
-            <span className="block bg-gradient-to-r from-indigo-600 to-blue-600 text-transparent bg-clip-text mt-2">Powered by AI.</span>
+          <h1 className="display-face text-balance text-5xl leading-[1.02] sm:text-6xl lg:text-[4.75rem]">
+            A calmer way to make consequential hires.
           </h1>
-
-          <p className="text-base sm:text-lg lg:text-xl text-slate-600 mb-8 sm:mb-12 leading-relaxed px-4 sm:px-0 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 max-w-2xl mx-auto">
-            Automated resume screening, AI-driven assessments, and data-backed hiring decisions — all in one platform.
+          <p className="mt-7 max-w-2xl text-balance text-lg leading-8 text-slate-300 sm:text-xl">
+            HireSense brings applications, assessments, evidence, and final decisions into one secure hiring workspace—so teams can move quickly without losing judgment.
           </p>
-
-          {/* Mobile-First CTAs */}
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center animate-in fade-in slide-in-from-bottom-4 duration-700 delay-300 px-4 sm:px-0">
-            <Button
-              size="lg"
-              onClick={() => navigate('/login')}
-              className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white px-6 sm:px-8 py-5 sm:py-6 text-base sm:text-lg rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 w-full sm:w-auto font-semibold"
-            >
-              I'm an Interviewer
-              <ArrowRight className="ml-2 w-4 h-4 sm:w-5 sm:h-5" />
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+            <Button asChild size="lg" className="bg-primary text-white">
+              <Link to="/jobs">Explore open roles <ArrowRight /></Link>
             </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              onClick={() => navigate('/apply')}
-              className="border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 px-6 sm:px-8 py-5 sm:py-6 text-base sm:text-lg rounded-lg transition-all duration-300 hover:scale-105 w-full sm:w-auto font-semibold hover:border-indigo-700 hover:shadow-md"
-            >
-              I'm a Candidate
-              <ArrowRight className="ml-2 w-4 h-4 sm:w-5 sm:h-5" />
+            <Button asChild size="lg" variant="outline" className="border-white/20 bg-white/[0.04] text-white hover:border-white/30 hover:bg-white/10 hover:text-white">
+              <Link to="/apply">Submit a resume</Link>
             </Button>
           </div>
-          <div className="flex justify-center mt-4 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-400 px-4 sm:px-0">
-            <Button
-              size="lg"
-              variant="ghost"
-              onClick={() => navigate('/jobs')}
-              className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-6 py-3 text-sm sm:text-base rounded-lg transition-all duration-300 font-medium flex items-center gap-2"
-            >
-              <Briefcase className="w-4 h-4" />
-              Browse Open Positions
-              <ArrowRight className="w-4 h-4" />
-            </Button>
+          <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-400">
+            {['Role-aware access', 'Auditable decisions', 'Candidate-first assessment'].map((item) => (
+              <span key={item} className="inline-flex items-center gap-2"><Check className="h-4 w-4 text-emerald-400" />{item}</span>
+            ))}
           </div>
         </div>
-      </section>
 
-      {/* Trust Indicators - Simplified for Mobile */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-20">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
-          <Card className="p-4 sm:p-6 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 hover:-translate-y-1 border-l-4 border-indigo-600 group">
-            <div className="flex items-start gap-3 sm:gap-4">
-              <div className="p-2 sm:p-3 bg-indigo-100 rounded-lg flex-shrink-0 group-hover:bg-indigo-200 transition-colors duration-300">
-                <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600" />
-              </div>
+        <div className="page-enter relative mx-auto w-full max-w-[620px] [animation-delay:100ms]">
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/30 backdrop-blur">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
               <div>
-                <h3 className="font-semibold text-slate-900 mb-1 sm:mb-2 text-sm sm:text-base">AI-Powered Scoring</h3>
-                <p className="text-slate-600 text-xs sm:text-sm">Advanced algorithms analyze candidates objectively</p>
+                <p className="text-sm font-semibold">Engineering pipeline</p>
+                <p className="mt-0.5 text-xs text-slate-400">Evidence review · 12 candidates</p>
+              </div>
+              <Badge className="border-emerald-400/20 bg-emerald-400/10 text-emerald-300">Live</Badge>
+            </div>
+            <div className="grid gap-3 p-4 sm:grid-cols-[1.1fr_.9fr]">
+              <div className="space-y-2">
+                {[
+                  ['Maya Rao', 'Assessment complete', '88'],
+                  ['Daniel Chen', 'Review resume', '82'],
+                  ['Noah Williams', 'Scheduled today', '76'],
+                ].map(([name, stage, score], index) => (
+                  <div key={name} className={`rounded-xl border p-3.5 ${index === 0 ? 'border-blue-400/40 bg-blue-400/10' : 'border-white/10 bg-white/[0.035]'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs font-semibold">{name.split(' ').map((part) => part[0]).join('')}</span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{name}</p>
+                          <p className="mt-0.5 truncate text-xs text-slate-400">{stage}</p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold text-blue-300">{score}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                <p className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Review brief</p>
+                <p className="mt-3 text-base font-semibold">Maya Rao</p>
+                <div className="mt-5 space-y-4">
+                  {[
+                    ['Role match', '88%'],
+                    ['Assessment', '84%'],
+                    ['Integrity review', 'Clear'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex items-center justify-between border-b border-white/10 pb-3 text-sm last:border-0">
+                      <span className="text-slate-400">{label}</span><span className="font-medium">{value}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-5 rounded-lg bg-white/[0.06] p-3 text-xs leading-5 text-slate-300">
+                  Strong systems experience. Review architecture depth before final decision.
+                </div>
               </div>
             </div>
-          </Card>
-
-          <Card className="p-4 sm:p-6 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 hover:-translate-y-1 border-l-4 border-emerald-600 group">
-            <div className="flex items-start gap-3 sm:gap-4">
-              <div className="p-2 sm:p-3 bg-emerald-100 rounded-lg flex-shrink-0 group-hover:bg-emerald-200 transition-colors duration-300">
-                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-900 mb-1 sm:mb-2 text-sm sm:text-base">Bias-Aware Hiring</h3>
-                <p className="text-slate-600 text-xs sm:text-sm">Reduce unconscious bias with data-driven evaluation</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4 sm:p-6 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 hover:-translate-y-1 border-l-4 border-blue-600 group">
-            <div className="flex items-start gap-3 sm:gap-4">
-              <div className="p-2 sm:p-3 bg-blue-100 rounded-lg flex-shrink-0 group-hover:bg-blue-200 transition-colors duration-300">
-                <Shield className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-900 mb-1 sm:mb-2 text-sm sm:text-base">Secure by Design</h3>
-                <p className="text-slate-600 text-xs sm:text-sm">Role-based access, bounded uploads, and protected candidate data</p>
-              </div>
-            </div>
-          </Card>
+          </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      {/* Stats Section - Responsive for All Devices */}
-      <section className="bg-gradient-to-r from-indigo-600 via-indigo-600 to-blue-600 py-12 sm:py-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
-            <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">End-to-End</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Hiring Workflow</div>
-            </div>
-            <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Server-Side</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Assessment Scoring</div>
-            </div>
-            <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Role-Based</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Access Control</div>
-            </div>
-            <div className="text-center transform transition-transform duration-300 hover:scale-105">
-              <div className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Traceable</div>
-              <div className="text-indigo-100 text-xs sm:text-sm lg:text-base font-medium">Audit Records</div>
-            </div>
+    <main>
+      <section id="workflow" className="border-b bg-card py-20 sm:py-24">
+        <div className="page-wrap">
+          <div className="max-w-2xl">
+            <p className="eyebrow">A deliberate workflow</p>
+            <h2 className="display-face mt-3 text-balance text-4xl sm:text-5xl">Keep the evidence connected from application to outcome.</h2>
+            <p className="mt-5 text-lg leading-8 text-muted-foreground">Every stage answers the same question: what does the team need to review or do next?</p>
+          </div>
+          <div className="mt-12 grid gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-3">
+            {workflow.map(({ number, icon: Icon, title, description }) => (
+              <article key={number} className="bg-card p-7 sm:p-8">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold tracking-[.14em] text-muted-foreground">{number}</span>
+                  <Icon className="h-5 w-5 text-primary" />
+                </div>
+                <h3 className="mt-10 text-xl font-semibold tracking-tight">{title}</h3>
+                <p className="mt-3 leading-7 text-muted-foreground">{description}</p>
+              </article>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* How It Works */}
-      <section className="bg-white py-12 sm:py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="text-center mb-10 sm:mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3 sm:mb-4">How It Works</h2>
-            <p className="text-base sm:text-xl text-slate-600">Three simple steps to smarter hiring</p>
+      <section id="principles" className="py-20 sm:py-24">
+        <div className="page-wrap grid gap-12 lg:grid-cols-[.78fr_1.22fr] lg:items-start">
+          <div className="lg:sticky lg:top-10">
+            <p className="eyebrow">Built for hiring work</p>
+            <h2 className="display-face mt-3 text-balance text-4xl sm:text-5xl">Professional software should make judgment clearer.</h2>
+            <p className="mt-5 max-w-xl text-lg leading-8 text-muted-foreground">The interface stays quiet until a status, risk, or decision needs attention. No decorative dashboards. No mystery automation.</p>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-12">
-            <div className="text-center">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6">
-                <span className="text-xl sm:text-2xl font-bold text-indigo-600">1</span>
-              </div>
-              <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2 sm:mb-3">Upload Resume / Apply</h3>
-              <p className="text-slate-600 text-sm sm:text-base">Candidates submit their resumes through our streamlined application process</p>
-            </div>
-
-            <div className="text-center">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6">
-                <span className="text-xl sm:text-2xl font-bold text-indigo-600">2</span>
-              </div>
-              <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2 sm:mb-3">AI Assessment & Evaluation</h3>
-              <p className="text-slate-600 text-sm sm:text-base">Our AI analyzes resumes, conducts assessments, and generates insights</p>
-            </div>
-
-            <div className="text-center">
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6">
-                <span className="text-xl sm:text-2xl font-bold text-indigo-600">3</span>
-              </div>
-              <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2 sm:mb-3">Hire with Confidence</h3>
-            </div>
+          <div className="space-y-4">
+            {principles.map(({ icon: Icon, title, description }) => (
+              <article key={title} className="surface-card grid gap-5 rounded-xl p-6 sm:grid-cols-[auto_1fr] sm:p-7">
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent text-primary"><Icon className="h-5 w-5" /></div>
+                <div>
+                  <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
+                  <p className="mt-2 leading-7 text-muted-foreground">{description}</p>
+                </div>
+              </article>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Features Grid - Desktop Enhanced */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-20">
-        <div className="text-center mb-10 sm:mb-16">
-          <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3 sm:mb-4">Why Choose HireSense?</h2>
-          <p className="text-base sm:text-xl text-slate-600">Enterprise-grade features for modern hiring</p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-          <Card className="p-6 sm:p-8 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border-t-4 border-indigo-600">
-            <div className="mb-4">
-              <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center group-hover:bg-indigo-200 group-hover:scale-110 transition-all duration-300">
-                <Clock className="w-6 h-6 text-indigo-600" />
-              </div>
-            </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Streamlined Review</h3>
-            <p className="text-slate-600 text-sm sm:text-base">Automate resume screening and initial assessments</p>
-          </Card>
-
-          <Card className="p-6 sm:p-8 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border-t-4 border-emerald-600">
-            <div className="mb-4">
-              <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center group-hover:bg-emerald-200 group-hover:scale-110 transition-all duration-300">
-                <TrendingUp className="w-6 h-6 text-emerald-600" />
-              </div>
-            </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Better Quality</h3>
-            <p className="text-slate-600 text-sm sm:text-base">Data-driven insights lead to superior hiring decisions</p>
-          </Card>
-
-          <Card className="p-6 sm:p-8 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border-t-4 border-blue-600">
-            <div className="mb-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 group-hover:scale-110 transition-all duration-300">
-                <Award className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Fair & Unbiased</h3>
-            <p className="text-slate-600 text-sm sm:text-base">AI-powered evaluation reduces human bias</p>
-          </Card>
-
-          <Card className="p-6 sm:p-8 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border-t-4 border-purple-600">
-            <div className="mb-4">
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 group-hover:scale-110 transition-all duration-300">
-                <CheckCircle className="w-6 h-6 text-purple-600" />
-              </div>
-            </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Comprehensive Tests</h3>
-            <p className="text-slate-600 text-sm sm:text-base">MCQs, coding challenges, and psychometric assessments</p>
-          </Card>
-
-          <Card className="p-6 sm:p-8 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border-t-4 border-amber-600">
-            <div className="mb-4">
-              <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center group-hover:bg-amber-200 group-hover:scale-110 transition-all duration-300">
-                <Star className="w-6 h-6 text-amber-600" />
-              </div>
-            </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Real-time Analytics</h3>
-            <p className="text-slate-600 text-sm sm:text-base">Track hiring metrics and candidate performance instantly</p>
-          </Card>
-
-          <Card className="p-6 sm:p-8 bg-white border-none shadow-md hover:shadow-xl transition-all duration-300 group hover:-translate-y-1 border-t-4 border-rose-600">
-            <div className="mb-4">
-              <div className="w-12 h-12 bg-rose-100 rounded-lg flex items-center justify-center group-hover:bg-rose-200 group-hover:scale-110 transition-all duration-300">
-                <Shield className="w-6 h-6 text-rose-600" />
-              </div>
-            </div>
-            <h3 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">Layered Security</h3>
-            <p className="text-slate-600 text-sm sm:text-base">JWT-based access controls, audit logging, and strict input validation</p>
-          </Card>
-        </div>
-      </section>
-
-      {/* CTA Section - Mobile Optimized */}
-      <section className="bg-gradient-to-r from-indigo-600 via-indigo-600 to-blue-600 py-12 sm:py-20">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-4 sm:mb-6">Ready to Transform Your Hiring?</h2>
-          <p className="text-lg sm:text-xl text-indigo-100 mb-8 sm:mb-10 max-w-2xl mx-auto">Use one structured workflow for screening, assessment, proctoring, and hiring decisions</p>
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-4 sm:px-0">
-            <Button
-              size="lg"
-              onClick={() => navigate('/login')}
-              className="bg-white text-slate-900 hover:bg-indigo-50 font-bold px-8 sm:px-10 py-6 sm:py-7 text-lg sm:text-xl rounded-xl shadow-2xl hover:shadow-3xl transition-all duration-300 hover:scale-105 w-full sm:w-auto"
-            >
-              Get Started Now
-              <ArrowRight className="ml-2 w-5 h-5 sm:w-6 sm:h-6" />
+      <section className="border-y bg-card py-20 sm:py-24">
+        <div className="page-wrap grid gap-10 lg:grid-cols-2 lg:items-center">
+          <div className="rounded-2xl bg-[#0b1220] p-7 text-white sm:p-10">
+            <LockKeyhole className="h-6 w-6 text-blue-300" />
+            <p className="mt-12 text-xs font-semibold uppercase tracking-[.16em] text-blue-300">Candidate trust</p>
+            <blockquote className="display-face mt-4 text-3xl leading-tight sm:text-4xl">“Explain what is collected. Protect it by default. Let people focus on the work.”</blockquote>
+          </div>
+          <div className="max-w-xl lg:pl-8">
+            <h2 className="text-2xl font-semibold tracking-tight">Assessment integrity without hostile design</h2>
+            <p className="mt-4 leading-7 text-muted-foreground">Candidates see what monitoring is active before they begin. Browser and camera evidence is treated as a review signal, not an automatic verdict, and is available only to assigned staff.</p>
+            <Button asChild variant="outline" className="mt-7">
+              <Link to="/privacy">Read the candidate privacy notice <ArrowRight /></Link>
             </Button>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="bg-slate-900 py-8 sm:py-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <Logo size="default" className="text-white" />
-            <div className="flex flex-wrap justify-center gap-4 sm:gap-8 text-sm sm:text-base">
-              <button
-                onClick={() => setShowPrivacy(true)}
-                className="text-slate-300 hover:text-white transition-colors cursor-pointer"
-              >
-                Privacy Policy
-              </button>
-              <button
-                onClick={() => setShowTerms(true)}
-                className="text-slate-300 hover:text-white transition-colors cursor-pointer"
-              >
-                Terms of Service
-              </button>
-              <button
-                onClick={() => setShowContact(true)}
-                className="text-slate-300 hover:text-white transition-colors cursor-pointer"
-              >
-                Contact
-              </button>
+      <section className="py-20 sm:py-24">
+        <div className="page-wrap">
+          <div className="overflow-hidden rounded-2xl bg-primary px-6 py-12 text-primary-foreground sm:px-12 sm:py-14 lg:flex lg:items-center lg:justify-between">
+            <div className="max-w-2xl">
+              <p className="text-sm font-semibold text-blue-100">Your next role may already be here.</p>
+              <h2 className="display-face mt-3 text-4xl sm:text-5xl">Start with the work that fits you.</h2>
             </div>
-          </div>
-          <div className="mt-6 sm:mt-8 text-center text-sm sm:text-base text-slate-400">
-            © 2025 HireSense. All rights reserved.
+            <Button asChild size="lg" className="mt-8 bg-white text-slate-950 hover:bg-blue-50 lg:mt-0">
+              <Link to="/jobs">Browse open roles <ArrowRight /></Link>
+            </Button>
           </div>
         </div>
-      </footer>
+      </section>
+    </main>
 
-      {/* Privacy Policy Dialog */}
-      <Dialog open={showPrivacy} onOpenChange={setShowPrivacy}>
-        <DialogContent className="bg-white max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-slate-900 text-2xl">Privacy Policy</DialogTitle>
-            <DialogDescription className="text-slate-600 text-base">
-              Our privacy policy is currently being finalized
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-6">
-            <p className="text-slate-700 text-base leading-relaxed">
-              The HireSense Privacy Policy is currently under development. We are committed to protecting your data and will publish our comprehensive privacy policy soon.
-            </p>
-            <p className="text-slate-700 text-base leading-relaxed mt-4">
-              For any privacy-related questions, please contact our team using the Contact option in the footer.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Terms of Service Dialog */}
-      <Dialog open={showTerms} onOpenChange={setShowTerms}>
-        <DialogContent className="bg-white max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-slate-900 text-2xl">Terms of Service</DialogTitle>
-            <DialogDescription className="text-slate-600 text-base">
-              Our terms of service are currently being finalized
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-6">
-            <p className="text-slate-700 text-base leading-relaxed">
-              The HireSense Terms of Service are currently under development. We are working to provide clear and comprehensive terms for all our users.
-            </p>
-            <p className="text-slate-700 text-base leading-relaxed mt-4">
-              For any questions about our service terms, please contact our team using the Contact option in the footer.
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Contact Dialog */}
-      <Dialog open={showContact} onOpenChange={setShowContact}>
-        <DialogContent className="bg-white max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-slate-900 text-2xl">Contact Us</DialogTitle>
-            <DialogDescription className="text-slate-600 text-base">
-              Meet the team behind HireSense
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-6 space-y-6">
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-slate-900">Development Team</h3>
-
-              <div className="flex items-center gap-3 p-4 bg-indigo-50 rounded-lg border border-indigo-100">
-                <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">
-                  AT
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">Akshat Tiwari</p>
-                  <p className="text-sm text-slate-600">Backend Developer</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-100">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold">
-                  SP
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">Shaivi Prasad</p>
-                  <p className="text-sm text-slate-600">Frontend Developer</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 p-4 bg-emerald-50 rounded-lg border border-emerald-100">
-                <div className="w-10 h-10 bg-emerald-600 rounded-full flex items-center justify-center text-white font-bold">
-                  PR
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">Prashant Rao</p>
-                  <p className="text-sm text-slate-600">Database Administrator</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-200">
-              <p className="text-sm text-slate-600 text-center">
-                For support or inquiries, reach out to any team member above.
-              </p>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-};
+    <footer className="border-t bg-card">
+      <div className="page-wrap flex flex-col gap-6 py-8 sm:flex-row sm:items-center sm:justify-between">
+        <Logo />
+        <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground" aria-label="Footer navigation">
+          <Link to="/jobs" className="hover:text-foreground">Open roles</Link>
+          <Link to="/privacy" className="hover:text-foreground">Privacy</Link>
+          <Link to="/terms" className="hover:text-foreground">Terms</Link>
+          <Link to="/login" className="hover:text-foreground">Staff sign in</Link>
+        </nav>
+      </div>
+    </footer>
+  </div>
+);
 
 export default LandingPage;

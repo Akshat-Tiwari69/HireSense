@@ -1,48 +1,25 @@
-import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Home } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+
+import Logo from '../components/Logo';
 import { Button } from '../components/ui/button';
-import { Card } from '../components/ui/card';
-import { FileQuestion, Home, ArrowLeft } from 'lucide-react';
 
 const NotFoundPage = () => {
-    const navigate = useNavigate();
-
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-md shadow-2xl border-none text-center">
-                <div className="p-12">
-                    <div className="flex justify-center mb-6">
-                        <div className="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center">
-                            <FileQuestion className="w-14 h-14 text-indigo-600" />
-                        </div>
-                    </div>
-
-                    <h1 className="text-6xl font-bold text-indigo-600 mb-4">404</h1>
-                    <h2 className="text-2xl font-bold text-slate-900 mb-3">Page Not Found</h2>
-                    <p className="text-slate-600 mb-8">
-                        Sorry, the page you're looking for doesn't exist or has been moved.
-                    </p>
-
-                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                        <Button
-                            onClick={() => navigate(-1)}
-                            variant="outline"
-                            className="border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50"
-                        >
-                            <ArrowLeft className="w-4 h-4 mr-2" />
-                            Go Back
-                        </Button>
-                        <Button
-                            onClick={() => navigate('/')}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg"
-                        >
-                            <Home className="w-4 h-4 mr-2" />
-                            Go Home
-                        </Button>
-                    </div>
-                </div>
-            </Card>
+  const navigate = useNavigate();
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
+      <div className="page-enter w-full max-w-xl text-center">
+        <Link to="/" className="inline-flex"><Logo /></Link>
+        <p className="eyebrow mt-12">Error 404</p>
+        <h1 className="display-face mt-3 text-5xl sm:text-6xl">This page is no longer in the pipeline.</h1>
+        <p className="mx-auto mt-5 max-w-md leading-7 text-muted-foreground">The address may be outdated, or the page may have moved to a different part of HireSense.</p>
+        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+          <Button variant="outline" onClick={() => navigate(-1)}><ArrowLeft />Go back</Button>
+          <Button asChild><Link to="/"><Home />HireSense home</Link></Button>
         </div>
-    );
+      </div>
+    </main>
+  );
 };
 
 export default NotFoundPage;

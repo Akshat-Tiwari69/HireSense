@@ -3,7 +3,6 @@ Interviewee answer routes — submitting responses and completing assessments.
 """
 
 import logging
-import re
 import json as _json
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
@@ -21,6 +20,10 @@ from assessment_db import (
     verify_assessment_access_token,
     get_assessment_by_token,
 )
+from code_runner_config import code_runner_enabled, code_runner_endpoint
+from questions_bank import get_starter_function_name, normalize_starter_code
+
+
 def _check_assessment_token(
     assessment_id: int,
     *,
@@ -43,7 +46,13 @@ logger = logging.getLogger(__name__)
 interviewee_answers_bp = Blueprint('interviewee_answers', __name__)
 
 
+class CodeEvaluationUnavailable(RuntimeError):
+    """Raised when a coding answer cannot be scored reliably."""
+
+
 def _positive_integer(value, field_name):
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer")
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
@@ -54,6 +63,8 @@ def _positive_integer(value, field_name):
 
 
 def _non_negative_integer(value, field_name):
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer")
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
@@ -72,6 +83,15 @@ def _find_question(question_id, questions):
         if stored_id == question_id:
             return question
     return None
+
+
+def _psychometric_option_score(selected_option, optimal_choice):
+    """Score categorical options without inventing meaning from their order."""
+    try:
+        optimal_index = int(optimal_choice)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Psychometric scoring data is invalid") from exc
+    return 10 if selected_option == optimal_index else 0
 
 
 @interviewee_answers_bp.route('/assessment/<int:assessment_id>/submit-answer', methods=['POST'])
@@ -123,6 +143,11 @@ def submit_answer(assessment_id):
             return jsonify({'status': 'success', 'message': 'MCQ answer saved'}), 200
 
         elif answer_type == 'coding':
+            if not code_runner_enabled():
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Coding assessments are temporarily unavailable.',
+                }), 503
             submitted_code = data.get('code', '')
             language = str(data.get('language', 'python')).strip().lower()
             if language not in _LANG_RUNTIME:
@@ -143,20 +168,34 @@ def submit_answer(assessment_id):
             if problem_id != expected_problem_id:
                 return jsonify({'status': 'error', 'message': 'Unknown coding problem'}), 400
             test_cases = coding_problem.get('test_cases', []) if coding_problem else []
-            starter_map = coding_problem.get('starter_code', {}) if coding_problem else {}
+            starter_map = normalize_starter_code(coding_problem.get('starter_code'))
+            if language not in starter_map:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Language is not available for this coding problem',
+                }), 400
+            if not isinstance(test_cases, list) or not test_cases:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Coding test cases are unavailable; please contact support',
+                }), 409
 
-            total_cases = len(test_cases)  # all cases, visible + hidden
-
-            if test_cases and submitted_code:
-                try:
-                    tests_passed, total_tests = _evaluate_server_side(
-                        submitted_code, language, test_cases, starter_map
-                    )
-                except Exception as eval_err:
-                    logger.warning(f"[CODE EVAL] Server evaluation failed: {eval_err}; scoring 0")
-                    tests_passed, total_tests = 0, total_cases
-            else:
-                tests_passed, total_tests = 0, total_cases
+            try:
+                tests_passed, total_tests = _evaluate_server_side(
+                    submitted_code, language, test_cases, starter_map
+                )
+            except Exception as eval_err:
+                logger.warning(
+                    "[CODE EVAL] Submission was not scored (%s)",
+                    type(eval_err).__name__,
+                )
+                return jsonify({
+                    'status': 'error',
+                    'message': (
+                        'Coding evaluation is temporarily unavailable. '
+                        'Your solution was not saved; please retry.'
+                    ),
+                }), 503
 
             save_coding_submission(
                 assessment_id=assessment_id,
@@ -193,9 +232,7 @@ def submit_answer(assessment_id):
                     'status': 'error',
                     'message': 'Psychometric scoring data is unavailable'
                 }), 409
-            distance = abs(selected_option - int(optimal))
-            score_map = {0: 10, 1: 6, 2: 3, 3: 1}
-            score = score_map.get(min(distance, 3), 1)
+            score = _psychometric_option_score(selected_option, optimal)
 
             save_psychometric_response(
                 assessment_id=assessment_id,
@@ -235,9 +272,14 @@ def complete_assessment(assessment_id):
             result['scores']['overall'],
         )
 
-        return jsonify({'status': 'success', 'message': 'Assessment completed successfully', 'data': {
-            **result,
-        }}), 200
+        return jsonify({
+            'status': 'success',
+            'message': 'Assessment completed successfully',
+            'data': {
+                'assessment_id': result['assessment_id'],
+                'status': 'completed',
+            },
+        }), 200
 
     except AssessmentStateError as exc:
         return jsonify({'status': 'error', 'message': str(exc)}), 409
@@ -249,8 +291,11 @@ def complete_assessment(assessment_id):
 @interviewee_answers_bp.route('/run-code', methods=['POST'])
 def run_code():
     """
-    Proxy code execution through the backend to Piston API.
-    Requires a valid X-Assessment-Token so only active candidates can execute code.
+    Run one visible example from the candidate's assigned coding problem.
+
+    The server supplies the test input and wrapper. This prevents the endpoint
+    from becoming an unrelated general-purpose execution proxy and ensures a
+    hidden test can never be selected by index.
     """
     token = request.headers.get('X-Assessment-Token', '')
     if not token:
@@ -266,13 +311,17 @@ def run_code():
                 f'{ASSESSMENT_DURATION_SECONDS // 60} minutes'
             ),
         }), 409
+    if not code_runner_enabled():
+        return jsonify({
+            'status': 'error',
+            'message': 'Coding assessments are temporarily unavailable.',
+        }), 503
 
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({'status': 'error', 'message': 'A JSON object is required'}), 400
     language = data.get('language')
     code = data.get('code', '')
-    stdin = data.get('stdin', '')
 
     if not isinstance(language, str) or language not in _LANG_RUNTIME:
         return jsonify({'status': 'error', 'message': 'Unsupported language'}), 400
@@ -280,8 +329,51 @@ def run_code():
         return jsonify({'status': 'error', 'message': 'language and code are required'}), 400
     if len(code) > 100_000:
         return jsonify({'status': 'error', 'message': 'Code exceeds the 100 KB limit'}), 400
-    if not isinstance(stdin, str) or len(stdin) > 10_000:
-        return jsonify({'status': 'error', 'message': 'stdin exceeds the allowed limit'}), 400
+
+    try:
+        problem_id = _positive_integer(data.get('problem_id'), 'problem_id')
+        test_case_index = _non_negative_integer(
+            data.get('test_case_index'), 'test_case_index'
+        )
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 400
+
+    assessment_id = assessment_record.get('assessment_id')
+    stored_questions = get_assessment_questions(assessment_id) if assessment_id else None
+    coding_problem = stored_questions.get('coding_problem') if stored_questions else None
+    if not coding_problem:
+        return jsonify({'status': 'error', 'message': 'No coding problem is assigned'}), 400
+    try:
+        assigned_problem_id = _positive_integer(
+            coding_problem.get('id'), 'assigned coding problem id'
+        )
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'Assigned coding problem is invalid'}), 409
+    if problem_id != assigned_problem_id:
+        return jsonify({'status': 'error', 'message': 'Unknown coding problem'}), 400
+
+    visible_cases = [
+        test_case for test_case in coding_problem.get('test_cases', [])
+        if isinstance(test_case, dict) and not test_case.get('is_hidden', False)
+    ]
+    if test_case_index >= len(visible_cases):
+        return jsonify({'status': 'error', 'message': 'Unknown visible test case'}), 400
+    test_case = visible_cases[test_case_index]
+    starter_map = normalize_starter_code(coding_problem.get('starter_code'))
+    func_name = get_starter_function_name(starter_map.get(language, ''), language)
+    if not func_name:
+        return jsonify({
+            'status': 'error',
+            'message': 'This problem cannot be previewed in the selected language',
+        }), 400
+    wrapped_code = _build_wrapper(
+        code,
+        language,
+        str(test_case.get('input', '')),
+        func_name,
+    )
+    if not wrapped_code or len(wrapped_code) > 120_000:
+        return jsonify({'status': 'error', 'message': 'Unable to prepare code preview'}), 400
 
     runtime, version = _LANG_RUNTIME[language]
     filename = f'main.{_LANG_FILE_EXTENSIONS[language]}'
@@ -290,8 +382,13 @@ def run_code():
         payload = _json.dumps({
             'language': runtime,
             'version': version,
-            'files': [{'name': filename, 'content': code}],
-            'stdin': stdin,
+            'files': [{'name': filename, 'content': wrapped_code}],
+            'compile_timeout': 10_000,
+            'run_timeout': 3_000,
+            'compile_cpu_time': 10_000,
+            'run_cpu_time': 3_000,
+            'compile_memory_limit': 256 * 1024 * 1024,
+            'run_memory_limit': 256 * 1024 * 1024,
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -308,8 +405,28 @@ def run_code():
         if not isinstance(result, dict):
             raise ValueError('Code execution service returned an invalid response')
 
-        logger.info(f"[CODE EXEC] lang={language} exit={result.get('run', {}).get('code')}")
-        return jsonify({'status': 'success', 'data': result}), 200
+        run = result.get('run')
+        if not isinstance(run, dict):
+            raise ValueError('Code execution service omitted its run result')
+        stdout = str(run.get('stdout') or '').strip()
+        stderr = str(run.get('stderr') or '').strip()
+        exit_code = run.get('code')
+        expected = str(test_case.get('expected', '')).strip()
+        passed = (
+            exit_code == 0
+            and _normalise_output(stdout) == _normalise_output(expected)
+        )
+        logger.info("[CODE EXEC] assessment=%s lang=%s exit=%s", assessment_id, language, exit_code)
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'stdout': stdout,
+                'stderr': stderr,
+                'exit_code': exit_code,
+                'expected': expected,
+                'passed': passed,
+            },
+        }), 200
     except Exception:
         logger.warning("[CODE EXEC] Piston request failed", exc_info=True)
         return jsonify({'status': 'error', 'message': 'Code execution service unavailable'}), 503
@@ -319,46 +436,17 @@ def run_code():
 #                     SERVER-SIDE CODE EVALUATION
 # ============================================================================
 
-_PISTON_URL = 'https://emkc.org/api/v2/piston/execute'
+_PISTON_URL = code_runner_endpoint()
 
 _LANG_RUNTIME = {
-    'python':     ('python',     '3.10.0'),
-    'javascript': ('javascript', '18.15.0'),
-    'java':       ('java',       '15.0.2'),
-    'cpp':        ('c++',        '10.2.0'),
-    'c':          ('c',          '10.2.0'),
+    'python': ('python', '*'),
+    'javascript': ('javascript', '*'),
 }
 
 _LANG_FILE_EXTENSIONS = {
     'python': 'py',
     'javascript': 'js',
-    'java': 'java',
-    'cpp': 'cpp',
-    'c': 'c',
 }
-
-
-def _extract_func_name(starter_code: str, language: str):
-    """Return the first function name defined in the starter code snippet."""
-    if not starter_code:
-        return None
-    if language == 'python':
-        m = re.search(r'^def\s+(\w+)\s*\(', starter_code, re.MULTILINE)
-    elif language == 'javascript':
-        m = re.search(r'function\s+(\w+)\s*\(', starter_code)
-    elif language in ('cpp', 'c'):
-        m = re.search(
-            r'\b(?:int|void|float|double|bool|char|long|string|auto)\s+(\w+)\s*\(',
-            starter_code, re.MULTILINE
-        )
-    elif language == 'java':
-        m = re.search(
-            r'(?:public|private|protected)\s+(?:static\s+)?(?:[\w<>\[\]]+)\s+(\w+)\s*\(',
-            starter_code, re.MULTILINE
-        )
-    else:
-        return None
-    return m.group(1) if m else None
 
 
 def _build_wrapper(code: str, language: str, tc_input: str, func_name: str):
@@ -367,25 +455,6 @@ def _build_wrapper(code: str, language: str, tc_input: str, func_name: str):
         return f"{code}\n\n# __test__\nprint({func_name}({tc_input}))"
     if language == 'javascript':
         return f"{code}\n\n// __test__\nconsole.log(JSON.stringify({func_name}({tc_input})));"
-    if language in ('cpp', 'c'):
-        preamble = '#include <iostream>\n#include <string>\nusing namespace std;\n'
-        return (
-            f"{preamble}{code}\n"
-            f"int main(){{\n"
-            f"    auto _r = {func_name}({tc_input});\n"
-            f"    std::cout << _r << std::endl;\n"
-            f"    return 0;\n}}"
-        )
-    if language == 'java':
-        # Assumes the candidate's class is named Solution (standard for this platform)
-        return (
-            f"{code}\n"
-            f"class Main{{\n"
-            f"    public static void main(String[] args){{\n"
-            f"        Solution _sol = new Solution();\n"
-            f"        System.out.println(_sol.{func_name}({tc_input}));\n"
-            f"    }}\n}}"
-        )
     return None
 
 
@@ -394,27 +463,45 @@ def _normalise_output(s: str) -> str:
 
 
 def _run_one_piston(wrapped_code: str, language: str) -> str | None:
-    """Execute wrapped_code via Piston; return stripped stdout or None on error."""
+    """Execute code via Piston, distinguishing outages from candidate failures."""
     if not isinstance(wrapped_code, str) or len(wrapped_code) > 120_000:
         return None
     runtime, version = _LANG_RUNTIME.get(language, (language, '*'))
     payload = _json.dumps({
         'language': runtime, 'version': version,
         'files': [{'name': 'main', 'content': wrapped_code}],
+        'compile_timeout': 10_000,
+        'run_timeout': 3_000,
+        'compile_cpu_time': 10_000,
+        'run_cpu_time': 3_000,
+        'compile_memory_limit': 256 * 1024 * 1024,
+        'run_memory_limit': 256 * 1024 * 1024,
     }).encode()
     req = urllib.request.Request(
         _PISTON_URL, data=payload,
         headers={'Content-Type': 'application/json'}, method='POST'
     )
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        response_body = resp.read(1_000_001)
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            response_body = resp.read(1_000_001)
+        result = _json.loads(response_body.decode())
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        raise CodeEvaluationUnavailable(
+            'Coding evaluation service is unavailable'
+        ) from exc
     if len(response_body) > 1_000_000:
         return None
-    result = _json.loads(response_body.decode())
     if not isinstance(result, dict):
+        raise CodeEvaluationUnavailable('Coding evaluation service is unavailable')
+    run = result.get('run')
+    if not isinstance(run, dict) or not isinstance(run.get('code'), int):
+        raise CodeEvaluationUnavailable('Coding evaluation service is unavailable')
+    if run['code'] != 0:
         return None
-    run = result.get('run', {})
-    return run.get('stdout', '').strip() if run.get('code') == 0 else None
+    stdout = run.get('stdout')
+    if not isinstance(stdout, str):
+        raise CodeEvaluationUnavailable('Coding evaluation service is unavailable')
+    return stdout.strip()
 
 
 def _evaluate_server_side(code: str, language: str, test_cases: list, starter_map: dict):
@@ -423,45 +510,48 @@ def _evaluate_server_side(code: str, language: str, test_cases: list, starter_ma
     Hidden cases are stripped from API responses to the frontend but must be
     included in scoring so candidates cannot hard-code visible examples.
     Returns (tests_passed, total_cases).
-    Falls back to (0, total_cases) if the language/problem isn't supported.
+    Raises when evaluation infrastructure cannot produce a trustworthy score.
     """
     all_cases = test_cases[:10] if isinstance(test_cases, list) else []
     if not all_cases:
         return 0, 0
 
-    func_name = _extract_func_name(starter_map.get(language, ''), language)
+    normalized_starters = normalize_starter_code(starter_map)
+    func_name = get_starter_function_name(normalized_starters.get(language, ''), language)
     if not func_name:
-        logger.info(f"[CODE EVAL] Cannot extract function name for {language!r}; skipping server-side eval")
-        return 0, 0
+        raise CodeEvaluationUnavailable(
+            f'Coding evaluation configuration is unavailable for {language!r}'
+        )
 
     def _eval_one(tc):
         wrapper = _build_wrapper(code, language, tc.get('input', ''), func_name)
         if not wrapper:
             return False
-        try:
-            stdout = _run_one_piston(wrapper, language)
-            if stdout is None:
-                return False
-            expected = str(tc.get('expected', '')).strip()
-            return _normalise_output(stdout) == _normalise_output(expected) or stdout == expected
-        except Exception as e:
-            logger.debug(f"[CODE EVAL] test case error: {e}")
+        stdout = _run_one_piston(wrapper, language)
+        if stdout is None:
             return False
+        expected = str(tc.get('expected', '')).strip()
+        return _normalise_output(stdout) == _normalise_output(expected) or stdout == expected
 
     passed = 0
+    futures = {}
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {pool.submit(_eval_one, tc): tc for tc in all_cases}
         try:
             for fut in as_completed(futures, timeout=30):
-                try:
-                    if fut.result():
-                        passed += 1
-                except Exception:
-                    pass
-        except FuturesTimeoutError:
+                if fut.result():
+                    passed += 1
+        except FuturesTimeoutError as exc:
             logger.warning("[CODE EVAL] Timed out before every test case completed")
             for future in futures:
                 future.cancel()
+            raise CodeEvaluationUnavailable(
+                'Coding evaluation service timed out'
+            ) from exc
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
 
     logger.info(f"[CODE EVAL] Server-side result: {passed}/{len(all_cases)}")
     return passed, len(all_cases)

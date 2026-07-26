@@ -238,15 +238,6 @@ notification to the candidate.
 | `rationale` | string | No | Reasoning for the decision |
 | `next_steps` | string | No | Next steps communicated to candidate |
 
-### Dashboard statistics
-
-```
-GET /api/interviewer/dashboard/stats
-```
-
-Returns aggregate counts: `total_candidates`, `pending`, `under_review`,
-`hired`, `rejected`, `average_match_score`.
-
 ---
 
 ## Candidate (interviewee) endpoints
@@ -257,10 +248,8 @@ Returns aggregate counts: `total_candidates`, `pending`, `under_review`,
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/interviewee/my-assessment/:candidate_id` | Check assessment status and time window |
-| `GET` | `/api/interviewee/assessment/verify/:token` | Verify assessment link token |
-| `POST` | `/api/interviewee/assessment/start/:candidate_id` | Start assessment (validates ±30-minute window) |
-| `POST` | `/api/interviewee/assessment/start-by-token/:token` | Start assessment via secure token link |
+| `GET` | `/api/interviewee/assessment/verify` | Verify the `X-Assessment-Token` header |
+| `POST` | `/api/interviewee/assessment/start` | Start or resume using the `X-Assessment-Token` header |
 
 ### Answer submission
 
@@ -328,12 +317,14 @@ Finalize the assessment and calculate scores.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/proctor/assessments/scheduled` | List scheduled assessments |
-| `GET` | `/api/proctor/assessments/active` | List in-progress assessments with violation counts |
-| `GET` | `/api/proctor/assessments/completed` | List completed assessments with scores (limit 50) |
+| `GET` | `/api/proctor/scheduled-assessments` | List scheduled assessments available to the current proctor |
+| `GET` | `/api/proctor/active-assessments` | List assigned or unassigned in-progress assessments with violation counts |
+| `GET` | `/api/proctor/completed-assessments` | List the current proctor's completed assessments with scores |
 | `GET` | `/api/proctor/assessments/:assessment_id/violations` | Get all violations for an assessment |
-| `GET` | `/api/proctor/stats` | Dashboard statistics |
-| `POST` | `/api/proctor/violations` | Record a violation from the browser (no JWT required) |
+| `GET` | `/api/proctor/dashboard-stats` | Dashboard statistics scoped to the current proctor |
+| `GET` | `/api/proctor/violations/:violation_id/screenshot` | Retrieve authorized violation evidence |
+| `GET` | `/api/proctor/violations/flagged` | List flagged violations |
+| `POST` | `/api/proctor/assign-assessment` | Claim an available assessment |
 
 ---
 
@@ -371,12 +362,18 @@ Finalize the assessment and calculate scores.
 | `min_experience` | number | No |
 | `max_experience` | number | No |
 | `department` | string | No |
-| `location` | string | No |
+| `work_mode` | string | No; `Remote`, `On-Site`, or `Hybrid` (defaults to `On-Site`) |
 | `sector_id` | string | No |
+| `status` | string | No; `active`, `paused`, `closed`, or `draft` |
 | `employment_type` | string | No |
 | `experience_level` | string | No |
 | `salary_range` | string | No |
-| `closes_at` | string | No |
+| `closes_at` | ISO datetime string | No; active roles must close in the future |
+| `role_complexity_level` | string | No; defaults to `intermediate` |
+
+`location` was a misleading legacy name and is rejected by write endpoints.
+Clients must send `work_mode`; common work-mode spelling variants are normalized
+to one of the three canonical values.
 
 ### Candidate-job matching
 
@@ -385,6 +382,7 @@ Finalize the assessment and calculate scores.
 | `POST` | `/api/jobs/match-candidate` | `recruiter`+ | Trigger AI matching for a candidate (`candidate_id`) |
 | `GET` | `/api/jobs/matches/:candidate_id` | Any | Get all job matches for a candidate |
 | `GET` | `/api/jobs/postings/:job_id/candidates` | `recruiter`+ | Get matched candidates for a job |
+| `PATCH` | `/api/jobs/matches/:candidate_id/:job_id` | `recruiter`+ | Confirm or reject a match with `{ "status": "confirmed" | "rejected" }` |
 
 ### Audit log
 
@@ -403,7 +401,7 @@ Requires `super_admin`. Returns audit trail entries with `user_email`,
 |--------|------|-------------|
 | `GET` | `/` | API info and health status |
 | `GET` | `/api/health` | Health check |
-| `POST` | `/api/resume/upload` | Upload and analyze a resume (form data: `file`, `job_id`) |
+| `POST` | `/api/resume/upload` | Submit an application (`file`, `job_id`, `name`, `email`, optional `phone`); returns only the application ID, status, and selected job confirmation |
 | `GET` | `/api/dashboard/candidates` | List all candidates |
 | `POST` | `/api/dashboard/candidates/:candidate_id/shortlist` | Update shortlist status |
 | `GET` | `/uploads/:filename` | Serve uploaded files |

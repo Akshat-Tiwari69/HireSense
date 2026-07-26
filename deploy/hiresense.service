@@ -1,0 +1,38 @@
+[Unit]
+Description=HireSense backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hiresense
+Group=hiresense
+WorkingDirectory=/opt/hiresense/current/backend
+EnvironmentFile=/etc/hiresense/hiresense.env
+UnsetEnvironment=DATABASE_ADMIN_URL
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/env CODE_RUNNER_ENABLED=false /opt/hiresense/current/.venv/bin/gunicorn --worker-class eventlet --workers 1 --worker-connections 512 --bind 127.0.0.1:5000 --timeout 90 --graceful-timeout 30 app:app_with_socketio
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+UMask=0077
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hiresense/uploads
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

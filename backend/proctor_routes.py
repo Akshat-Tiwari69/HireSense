@@ -175,15 +175,19 @@ COMPLETED_ASSESSMENTS_SQL = """
         WHERE pv.assessment_id = a.id
     ) violations ON TRUE
     WHERE a.status = 'completed'
+      AND sa.proctor_id = %s
       AND (%s OR a.completed_at >= NOW() - (%s || ' days')::INTERVAL)
     ORDER BY a.completed_at DESC
     LIMIT %s
 """
 
 
-def _completed_assessments(limit, days=None):
+def _completed_assessments(limit, user_id, days=None):
     with _db_cursor() as cursor:
-        cursor.execute(COMPLETED_ASSESSMENTS_SQL, (days is None, days or 0, limit))
+        cursor.execute(
+            COMPLETED_ASSESSMENTS_SQL,
+            (user_id, days is None, days or 0, limit),
+        )
         return _rows(cursor)
 
 
@@ -193,17 +197,36 @@ def _completed_assessments(limit, days=None):
 def get_dashboard_stats():
     """Return a consistent dashboard snapshot from canonical sources."""
 
+    user_id = get_current_user_id()
     with _db_cursor() as cursor:
         cursor.execute("""
             SELECT
-                (SELECT COUNT(*) FROM assessments WHERE status = 'in_progress') AS active_assessments,
-                (SELECT COUNT(*) FROM scheduled_assessments
-                 WHERE DATE(scheduled_time) = CURRENT_DATE AND status = 'scheduled') AS scheduled_today,
-                (SELECT COUNT(*) FROM assessments
-                 WHERE DATE(completed_at) = CURRENT_DATE AND status = 'completed') AS completed_today,
-                (SELECT COUNT(*) FROM proctoring_violations
-                 WHERE DATE(timestamp) = CURRENT_DATE) AS violations_today
-        """)
+                (SELECT COUNT(*)
+                 FROM assessments a
+                 JOIN scheduled_assessments sa ON sa.id = a.scheduled_assessment_id
+                 WHERE a.status = 'in_progress'
+                   AND (sa.proctor_id = %s OR sa.proctor_id IS NULL)) AS active_assessments,
+                (SELECT COUNT(*)
+                 FROM scheduled_assessments sa
+                 WHERE sa.scheduled_time >= CURRENT_DATE
+                   AND sa.scheduled_time < CURRENT_DATE + INTERVAL '1 day'
+                   AND sa.status = 'scheduled'
+                   AND (sa.proctor_id = %s OR sa.proctor_id IS NULL)) AS scheduled_today,
+                (SELECT COUNT(*)
+                 FROM assessments a
+                 JOIN scheduled_assessments sa ON sa.id = a.scheduled_assessment_id
+                 WHERE a.completed_at >= CURRENT_DATE
+                   AND a.completed_at < CURRENT_DATE + INTERVAL '1 day'
+                   AND a.status = 'completed'
+                   AND sa.proctor_id = %s) AS completed_today,
+                (SELECT COUNT(*)
+                 FROM proctoring_violations pv
+                 JOIN assessments a ON a.id = pv.assessment_id
+                 JOIN scheduled_assessments sa ON sa.id = a.scheduled_assessment_id
+                 WHERE pv.timestamp >= CURRENT_DATE
+                   AND pv.timestamp < CURRENT_DATE + INTERVAL '1 day'
+                   AND sa.proctor_id = %s) AS violations_today
+        """, (user_id, user_id, user_id, user_id))
         return jsonify(dict(cursor.fetchone()))
 
 
@@ -211,6 +234,7 @@ def get_dashboard_stats():
 @proctor_required
 @database_endpoint
 def get_active_assessments():
+    user_id = get_current_user_id()
     with _db_cursor() as cursor:
         cursor.execute("""
             SELECT
@@ -238,8 +262,9 @@ def get_active_assessments():
                 WHERE pv.assessment_id = a.id
             ) v ON TRUE
             WHERE a.status = 'in_progress'
+              AND (sa.proctor_id = %s OR sa.proctor_id IS NULL)
             ORDER BY a.started_at ASC
-        """)
+        """, (user_id,))
         return jsonify(_rows(cursor))
 
 
@@ -248,6 +273,7 @@ def get_active_assessments():
 @database_endpoint
 def get_scheduled_assessments():
     days_ahead = _integer_query("days", 7, 1, 90)
+    user_id = get_current_user_id()
     with _db_cursor() as cursor:
         cursor.execute("""
             SELECT
@@ -265,8 +291,9 @@ def get_scheduled_assessments():
             WHERE sa.status = 'scheduled'
               AND sa.scheduled_time <= NOW() + (%s || ' days')::INTERVAL
               AND sa.scheduled_time > NOW()
+              AND (sa.proctor_id = %s OR sa.proctor_id IS NULL)
             ORDER BY sa.scheduled_time ASC
-        """, (days_ahead,))
+        """, (days_ahead, user_id))
         return jsonify(_rows(cursor))
 
 
@@ -276,7 +303,7 @@ def get_scheduled_assessments():
 def get_completed_assessments():
     limit = _integer_query("limit", 50, 1, 200)
     days = _integer_query("days", 7, 1, 365)
-    return jsonify(_completed_assessments(limit, days))
+    return jsonify(_completed_assessments(limit, get_current_user_id(), days))
 
 
 @proctor_bp.route("/assessments/<int:assessment_id>/violations", methods=["GET"])
@@ -295,7 +322,7 @@ def get_assessment_violations(assessment_id):
             raise RequestError("Assessment not found or not assigned to this proctor", 404)
         cursor.execute("""
             SELECT id, assessment_id, violation_type, description, severity,
-                   screenshot_url, timestamp
+                   screenshot_path AS screenshot_url, timestamp
             FROM proctoring_violations
             WHERE assessment_id = %s
             ORDER BY timestamp DESC, id DESC
@@ -312,7 +339,7 @@ def get_violation_screenshot(violation_id):
     with _db_cursor() as cursor:
         cursor.execute(
             """
-            SELECT pv.screenshot_url
+            SELECT pv.screenshot_path
             FROM proctoring_violations pv
             JOIN assessments a ON a.id = pv.assessment_id
             JOIN scheduled_assessments sa ON sa.id = a.scheduled_assessment_id
@@ -322,13 +349,13 @@ def get_violation_screenshot(violation_id):
         )
         row = cursor.fetchone()
 
-    if not row or not row["screenshot_url"]:
+    if not row or not row["screenshot_path"]:
         raise RequestError("Screenshot not found", 404)
-    storage_url = row["screenshot_url"]
-    if not isinstance(storage_url, str) or not storage_url.startswith("/uploads/"):
+    storage_path = row["screenshot_path"]
+    if not isinstance(storage_path, str) or not storage_path.startswith("/uploads/"):
         raise RequestError("Screenshot not found", 404)
 
-    relative_path = Path(storage_url.removeprefix("/uploads/"))
+    relative_path = Path(storage_path.removeprefix("/uploads/"))
     file_path = (get_upload_root() / relative_path).resolve()
     if not is_within_upload_root(file_path) or not file_path.is_file():
         raise RequestError("Screenshot not found", 404)
@@ -351,7 +378,7 @@ def get_flagged_violations():
                 pv.violation_type,
                 pv.severity,
                 pv.description,
-                pv.screenshot_url,
+                pv.screenshot_path AS screenshot_url,
                 pv.timestamp,
                 COUNT(*) OVER (PARTITION BY pv.assessment_id) AS total_violations_in_assessment
             FROM proctoring_violations pv
@@ -381,6 +408,7 @@ def get_flagged_violations():
 @proctor_required
 @database_endpoint
 def detect_anomalies():
+    user_id = get_current_user_id()
     with _db_cursor() as cursor:
         cursor.execute("""
             SELECT
@@ -399,15 +427,16 @@ def detect_anomalies():
                 END AS suspicion_level
             FROM assessments a
             JOIN candidates c ON a.candidate_id = c.id
-            LEFT JOIN scheduled_assessments sa ON a.scheduled_assessment_id = sa.id
+            JOIN scheduled_assessments sa ON a.scheduled_assessment_id = sa.id
             LEFT JOIN job_descriptions jd ON jd.id = COALESCE(a.job_id, sa.job_id)
             LEFT JOIN proctoring_violations pv ON a.id = pv.assessment_id
             WHERE a.status = 'completed'
               AND a.completed_at >= NOW() - INTERVAL '7 days'
+              AND sa.proctor_id = %s
             GROUP BY a.id, c.name, c.email, jd.title, a.overall_score
             HAVING COUNT(pv.id) > 1
             ORDER BY COUNT(pv.id) DESC
-        """)
+        """, (user_id,))
         suspicious = _rows(cursor)
     return jsonify({
         "suspicious_assessments": suspicious,
@@ -438,12 +467,6 @@ def get_quality_metrics():
                 FROM proctoring_violations pv
                 JOIN scoped s ON s.id = pv.assessment_id
                 GROUP BY pv.assessment_id
-            ), reviewed_counts AS (
-                SELECT pe.assessment_id,
-                       COUNT(*) FILTER (WHERE pe.is_reviewed) AS reviewed
-                FROM proctoring_events pe
-                JOIN scoped s ON s.id = pe.assessment_id
-                GROUP BY pe.assessment_id
             )
             SELECT
                 COUNT(s.id) AS total_proctored,
@@ -451,11 +474,9 @@ def get_quality_metrics():
                 COUNT(*) FILTER (WHERE COALESCE(v.total, 0) > 0) AS flagged_assessments,
                 COALESCE(AVG(COALESCE(v.total, 0)), 0) AS avg_violations_per_assessment,
                 COALESCE(SUM(v.total), 0) AS total_violations,
-                COALESCE(SUM(v.critical), 0) AS critical_violations,
-                COALESCE(SUM(r.reviewed), 0) AS reviewed_violations
+                COALESCE(SUM(v.critical), 0) AS critical_violations
             FROM scoped s
             LEFT JOIN violation_counts v ON v.assessment_id = s.id
-            LEFT JOIN reviewed_counts r ON r.assessment_id = s.id
         """, (user_id,))
         return jsonify(dict(cursor.fetchone()))
 
@@ -464,13 +485,15 @@ def get_quality_metrics():
 @proctor_required
 @database_endpoint
 def get_job_performance_metrics():
+    user_id = get_current_user_id()
     with _db_cursor() as cursor:
         cursor.execute("""
             WITH recent AS (
                 SELECT a.id, COALESCE(a.job_id, sa.job_id) AS job_id, a.overall_score
                 FROM assessments a
-                LEFT JOIN scheduled_assessments sa ON a.scheduled_assessment_id = sa.id
+                JOIN scheduled_assessments sa ON a.scheduled_assessment_id = sa.id
                 WHERE a.completed_at >= NOW() - INTERVAL '30 days'
+                  AND sa.proctor_id = %s
             ), violation_counts AS (
                 SELECT assessment_id, COUNT(*) AS total
                 FROM proctoring_violations
@@ -489,7 +512,7 @@ def get_job_performance_metrics():
             LEFT JOIN violation_counts v ON v.assessment_id = r.id
             GROUP BY jd.id, jd.title, jd.role_complexity_level
             ORDER BY avg_violations DESC
-        """)
+        """, (user_id,))
         return jsonify(_rows(cursor))
 
 
@@ -501,15 +524,17 @@ def assign_assessment():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         raise RequestError("A JSON object is required")
-    assessment_id = data.get("assessment_id")
-    if isinstance(assessment_id, bool):
-        raise RequestError("assessment_id must be a positive integer")
+    scheduled_assessment_id = data.get("scheduled_assessment_id")
+    if isinstance(scheduled_assessment_id, bool):
+        raise RequestError("scheduled_assessment_id must be a positive integer")
     try:
-        assessment_id = int(assessment_id)
+        scheduled_assessment_id = int(scheduled_assessment_id)
     except (TypeError, ValueError) as exc:
-        raise RequestError("assessment_id must be a positive integer") from exc
-    if assessment_id <= 0:
-        raise RequestError("assessment_id must be a positive integer")
+        raise RequestError(
+            "scheduled_assessment_id must be a positive integer"
+        ) from exc
+    if scheduled_assessment_id <= 0:
+        raise RequestError("scheduled_assessment_id must be a positive integer")
 
     with _db_cursor(write=True) as cursor:
         cursor.execute("""
@@ -517,7 +542,7 @@ def assign_assessment():
             FROM scheduled_assessments
             WHERE id = %s
             FOR UPDATE
-        """, (assessment_id,))
+        """, (scheduled_assessment_id,))
         scheduled = cursor.fetchone()
         if scheduled is None:
             raise RequestError("Scheduled assessment not found", 404)
@@ -531,7 +556,7 @@ def assign_assessment():
             SET proctor_id = %s, updated_at = CURRENT_TIMESTAMP
             WHERE id = %s
             RETURNING id, proctor_id
-        """, (user_id, assessment_id))
+        """, (user_id, scheduled_assessment_id))
         assigned = dict(cursor.fetchone())
     return jsonify({"status": "success", "message": "Assessment assigned", "data": assigned})
 
@@ -541,22 +566,29 @@ def assign_assessment():
 @database_endpoint
 def get_violation_statistics():
     period_days = _integer_query("days", 30, 1, 365)
+    user_id = get_current_user_id()
     with _db_cursor() as cursor:
         cursor.execute("""
+            WITH scoped AS (
+                SELECT pv.assessment_id, pv.violation_type, pv.severity
+                FROM proctoring_violations pv
+                JOIN assessments a ON a.id = pv.assessment_id
+                JOIN scheduled_assessments sa ON sa.id = a.scheduled_assessment_id
+                WHERE sa.proctor_id = %s
+                  AND pv.timestamp >= NOW() - (%s || ' days')::INTERVAL
+            )
             SELECT
                 violation_type,
                 severity,
                 COUNT(*) AS count,
                 COUNT(DISTINCT assessment_id) AS affected_assessments,
                 ROUND(COUNT(*) * 100.0 / NULLIF(
-                    (SELECT COUNT(*) FROM proctoring_violations
-                     WHERE timestamp >= NOW() - (%s || ' days')::INTERVAL), 0
+                    (SELECT COUNT(*) FROM scoped), 0
                 ), 2) AS percentage
-            FROM proctoring_violations
-            WHERE timestamp >= NOW() - (%s || ' days')::INTERVAL
+            FROM scoped
             GROUP BY violation_type, severity
             ORDER BY count DESC
-        """, (period_days, period_days))
+        """, (user_id, period_days))
         statistics = _rows(cursor)
     return jsonify({"period_days": period_days, "statistics": statistics})
 
@@ -572,7 +604,9 @@ def get_shift_summary():
                 SELECT a.id, a.status, a.overall_score
                 FROM scheduled_assessments sa
                 LEFT JOIN assessments a ON sa.id = a.scheduled_assessment_id
-                WHERE sa.proctor_id = %s AND DATE(sa.scheduled_time) = CURRENT_DATE
+                WHERE sa.proctor_id = %s
+                  AND sa.scheduled_time >= CURRENT_DATE
+                  AND sa.scheduled_time < CURRENT_DATE + INTERVAL '1 day'
             ), violation_counts AS (
                 SELECT pv.assessment_id, COUNT(*) AS total
                 FROM proctoring_violations pv
@@ -590,57 +624,3 @@ def get_shift_summary():
             LEFT JOIN violation_counts v ON v.assessment_id = ta.id
         """, (user_id,))
         return jsonify(dict(cursor.fetchone()))
-
-
-# Compatibility endpoints used by the existing proctor UI.
-@proctor_bp.route("/stats", methods=["GET"])
-@proctor_required
-@database_endpoint
-def get_stats():
-    response = get_dashboard_stats.__wrapped__.__wrapped__()
-    dashboard = response.get_json()
-    return jsonify({
-        "status": "success",
-        "data": {
-            "scheduled_count": dashboard["scheduled_today"],
-            "active_count": dashboard["active_assessments"],
-            "completed_today": dashboard["completed_today"],
-            "violations_today": dashboard["violations_today"],
-        },
-    })
-
-
-@proctor_bp.route("/assessments/scheduled", methods=["GET"])
-@proctor_required
-@database_endpoint
-def get_all_scheduled_assessments():
-    with _db_cursor() as cursor:
-        cursor.execute("""
-            SELECT
-                sa.id, c.name AS candidate_name, c.email AS candidate_email,
-                jd.title AS job_title, sa.scheduled_time, sa.status,
-                u.name AS interviewer_name, sa.proctor_id
-            FROM scheduled_assessments sa
-            JOIN candidates c ON sa.candidate_id = c.id
-            LEFT JOIN job_descriptions jd ON sa.job_id = jd.id
-            LEFT JOIN users u ON sa.interviewer_id = u.id
-            WHERE sa.status = 'scheduled'
-            ORDER BY sa.scheduled_time ASC
-        """)
-        return jsonify({"status": "success", "data": _rows(cursor)})
-
-
-@proctor_bp.route("/assessments/active", methods=["GET"])
-@proctor_required
-@database_endpoint
-def get_all_active_assessments():
-    response = get_active_assessments.__wrapped__.__wrapped__()
-    return jsonify({"status": "success", "data": response.get_json()})
-
-
-@proctor_bp.route("/assessments/completed", methods=["GET"])
-@proctor_required
-@database_endpoint
-def get_all_completed_assessments():
-    limit = _integer_query("limit", 50, 1, 200)
-    return jsonify({"status": "success", "data": _completed_assessments(limit)})

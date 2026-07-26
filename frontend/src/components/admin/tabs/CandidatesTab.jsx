@@ -1,11 +1,17 @@
 import { Button } from '../../ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
 import { Input } from '../../ui/input';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
-import { Badge } from '../../ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 import { TabsContent } from '../../ui/tabs';
-import { UserPlus, Search, Edit, RotateCcw, Briefcase, Trash2, Loader2 } from 'lucide-react';
+import StatusBadge from '../../workspace/StatusBadge';
+import { Briefcase, Edit, Loader2, RotateCcw, Search, Trash2, UserPlus } from 'lucide-react';
+
+const scoreClassName = (score) => {
+  if (score >= 75) return 'text-emerald-700';
+  if (score >= 50) return 'text-amber-700';
+  return 'text-slate-600';
+};
 
 const CandidatesTab = ({
   filteredCandidates,
@@ -23,123 +29,131 @@ const CandidatesTab = ({
   handleDeleteCandidate,
 }) => (
   <TabsContent value="candidates">
-    <Card className="bg-white border-none shadow-md hover:shadow-lg transition-all duration-300">
-      <CardHeader className="flex flex-row items-center justify-between border-b border-slate-200 pb-4">
-        <div>
-          <CardTitle className="text-slate-900">Candidate Management</CardTitle>
-          <CardDescription className="text-slate-600">View, edit, or manage candidate applications</CardDescription>
-        </div>
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle>Candidate directory</CardTitle>
+        <CardDescription>Review applicant records, update progress, and run role matching.</CardDescription>
       </CardHeader>
-      <CardContent className="pt-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-          <div className="col-span-2 flex items-center gap-2 bg-slate-50 rounded-lg p-3">
-            <Search className="w-4 h-4 text-slate-500" />
+
+      <CardContent className="pt-5">
+        <div className="mb-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="relative">
+            <label htmlFor="candidate-search" className="sr-only">Search candidates</label>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search candidates..."
+              id="candidate-search"
+              type="search"
+              placeholder="Search by name or email"
               value={candidateSearch}
-              onChange={(e) => setCandidateSearch(e.target.value)}
-              className="bg-transparent border-0 focus:ring-0 text-slate-900 placeholder:text-slate-500"
+              onChange={(event) => setCandidateSearch(event.target.value)}
+              className="pl-9"
             />
           </div>
-          <Select value={candidateStatusFilter} onValueChange={setCandidateStatusFilter}>
-            <SelectTrigger className="bg-slate-50 border-slate-200">
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              {candidateStatuses.map(status => (
-                <SelectItem key={status} value={status}>{status}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div>
+            <label htmlFor="candidate-status-filter" className="sr-only">Filter by candidate status</label>
+            <Select value={candidateStatusFilter} onValueChange={setCandidateStatusFilter}>
+              <SelectTrigger id="candidate-status-filter">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                {candidateStatuses.map((status) => (
+                  <SelectItem key={status} value={status} className="capitalize">{status.replace(/_/g, ' ')}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {filteredCandidates.length === 0 ? (
-          <div className="text-center py-12">
-            <UserPlus className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500">No candidates found</p>
+          <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
+            <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <UserPlus className="h-5 w-5" />
+            </span>
+            <p className="font-medium text-foreground">No candidates found</p>
+            <p className="mt-1 text-sm text-muted-foreground">Adjust the search or status filter to see more records.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-slate-200 bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="text-slate-700 font-semibold">Name</TableHead>
-                  <TableHead className="text-slate-700 font-semibold">Email</TableHead>
-                  <TableHead className="text-slate-700 font-semibold">Score</TableHead>
-                  <TableHead className="text-slate-700 font-semibold">Status</TableHead>
-                  <TableHead className="text-slate-700 font-semibold">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCandidates.map((candidate) => (
-                  <TableRow key={candidate.id} className="border-slate-100 hover:bg-slate-50 transition-colors">
-                    <TableCell className="text-slate-900 font-medium">{candidate.name}</TableCell>
-                    <TableCell className="text-slate-600">{candidate.email}</TableCell>
+          <Table className="min-w-[820px]" aria-label="Candidates">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Match score</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredCandidates.map((candidate) => {
+                const matchScore = candidate.match_score || 0;
+                const candidateName = candidate.name || 'Unnamed candidate';
+
+                return (
+                  <TableRow key={candidate.id}>
+                    <TableCell className="font-medium text-foreground">{candidateName}</TableCell>
+                    <TableCell className="text-muted-foreground">{candidate.email}</TableCell>
                     <TableCell>
-                      <span className={`font-semibold ${
-                        (candidate.match_score || 0) >= 75 ? 'text-green-600' :
-                        (candidate.match_score || 0) >= 50 ? 'text-amber-600' :
-                        'text-slate-600'
-                      }`}>
-                        {candidate.match_score || 0}%
+                      <span className={`font-semibold tabular-nums ${scoreClassName(matchScore)}`}>
+                        {matchScore}%
                       </span>
                     </TableCell>
+                    <TableCell><StatusBadge status={candidate.status || 'applied'} /></TableCell>
                     <TableCell>
-                      <Badge className={`${
-                        candidate.status === 'Applied' ? 'bg-blue-600' :
-                          candidate.status === 'Scheduled' ? 'bg-purple-600' :
-                            candidate.status === 'Completed' ? 'bg-green-600' :
-                              candidate.status === 'Rejected' ? 'bg-red-600' : 'bg-slate-600'
-                      } text-white shadow-sm`}>
-                        {(candidate.status || 'Applied').charAt(0).toUpperCase() + (candidate.status || 'Applied').slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
+                      <div className="flex justify-end gap-1.5">
                         <Button
-                          size="sm"
+                          type="button"
+                          size="icon"
                           variant="outline"
                           onClick={() => openEditCandidate(candidate)}
-                          className="border-slate-300 text-slate-700 hover:bg-slate-50"
+                          aria-label={`Edit ${candidateName}`}
+                          title="Edit candidate"
                         >
-                          <Edit className="w-4 h-4" />
+                          <Edit />
                         </Button>
                         <Button
-                          size="sm"
-                          variant="outline"
+                          type="button"
+                          size="icon"
+                          variant="ghost"
                           onClick={() => handleResetCandidateStatus(candidate.id)}
                           disabled={resettingStatus === candidate.id}
-                          className="border-amber-600 text-amber-600 hover:bg-amber-50"
+                          className="text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                          aria-label={`Reset ${candidateName} to applied`}
+                          title="Reset status to Applied"
                         >
-                          <RotateCcw className="w-4 h-4" />
+                          {resettingStatus === candidate.id ? <Loader2 className="animate-spin" /> : <RotateCcw />}
                         </Button>
                         <Button
-                          size="sm"
-                          variant="outline"
+                          type="button"
+                          size="icon"
+                          variant="ghost"
                           onClick={() => handleMatchCandidate(candidate.id)}
                           disabled={matchingCandidate === candidate.id}
-                          className="border-indigo-600 text-indigo-600 hover:bg-indigo-50"
-                          title="AI Match to Jobs"
+                          className="text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                          aria-label={`Match ${candidateName} to open roles`}
+                          title="Match to open roles"
                         >
-                          {matchingCandidate === candidate.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Briefcase className="w-4 h-4" />}
+                          {matchingCandidate === candidate.id ? <Loader2 className="animate-spin" /> : <Briefcase />}
                         </Button>
                         <Button
-                          size="sm"
-                          variant="destructive"
+                          type="button"
+                          size="icon"
+                          variant="ghost"
                           onClick={() => handleDeleteCandidate(candidate.id)}
                           disabled={deletingCandidate === candidate.id}
-                          className="opacity-90 hover:opacity-100"
+                          className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                          aria-label={`Delete ${candidateName}`}
+                          title="Delete candidate"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {deletingCandidate === candidate.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </CardContent>
     </Card>

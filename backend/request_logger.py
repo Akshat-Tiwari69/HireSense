@@ -8,7 +8,7 @@ import time
 import contextlib
 import re
 from flask import request, g
-from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended import get_jwt_identity
 
 logger = logging.getLogger('request_logger')
 
@@ -63,19 +63,17 @@ def init_request_logging(app):
 
     @app.before_request
     def before_request():
-        g.start_time = time.time()
-        # Capture identity once, before the route runs, so after_request doesn't
-        # need to re-parse the JWT (avoids double overhead and suppressed exceptions).
-        g.request_user_id = None
-        with contextlib.suppress(Exception):
-            verify_jwt_in_request(optional=True)
-            g.request_user_id = get_jwt_identity()
+        g.start_time = time.perf_counter()
 
     @app.after_request
     def after_request(response):
         if hasattr(g, 'start_time'):
-            duration = time.time() - g.start_time
-            user_id = getattr(g, 'request_user_id', None)
+            duration = time.perf_counter() - g.start_time
+            user_id = None
+            # Protected routes have already populated the JWT context. Reading it
+            # here is cheap; public routes simply remain anonymous.
+            with contextlib.suppress(Exception):
+                user_id = get_jwt_identity()
             safe_path = redact_sensitive_path(request.path)
             logger.info(
                 f"{request.method} {safe_path} | "

@@ -5,23 +5,108 @@ import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { LogOut, Search, Filter, Calendar, CheckCircle, Users, Settings, X, Plus, Loader, TrendingUp, Activity } from 'lucide-react';
+import {
+  Activity,
+  Calendar,
+  CheckCircle,
+  Filter,
+  Loader,
+  Search,
+  TrendingUp,
+  UserRoundSearch,
+  Users,
+  X,
+} from 'lucide-react';
 import { useToast } from '../hooks/use-toast';
-import Logo from '../components/Logo';
 import { api } from '../services/api';
 import ProctorMonitor from '../components/ProctorMonitor';
 import ScheduleModal from '../components/interviewer/ScheduleModal';
 import CandidateDetailsModal from '../components/interviewer/CandidateDetailsModal';
+import { useAuth } from '../contexts/AuthContext';
+import WorkspaceShell from '../components/workspace/WorkspaceShell';
+import MetricCard from '../components/workspace/MetricCard';
+import StatusBadge from '../components/workspace/StatusBadge';
+import { resolveCandidateStatus } from '../lib/assessment';
+
+const getScoreBadgeColor = (score) => {
+  if (score >= 85) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (score >= 70) return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-red-200 bg-red-50 text-red-700';
+};
+
+const ScoreBadge = ({ score }) => (
+  <Badge
+    variant="outline"
+    className={`${getScoreBadgeColor(score)} px-2.5 py-1 font-semibold tabular-nums`}
+    aria-label={`${score} percent AI match`}
+  >
+    {score}%
+  </Badge>
+);
+
+const CandidateActions = ({
+  candidate,
+  rejecting,
+  onView,
+  onMonitor,
+  onSchedule,
+  onReject,
+}) => (
+  <div className="flex flex-wrap items-center justify-end gap-2">
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => onView(candidate)}
+      aria-label={`View ${candidate.name}`}
+    >
+      View
+    </Button>
+
+    {candidate.status === 'In Progress' ? (
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => onMonitor(candidate.assessmentId)}
+        disabled={!candidate.assessmentId}
+        title={candidate.assessmentId ? undefined : 'Monitoring is not available yet'}
+        aria-label={`Monitor ${candidate.name}'s assessment`}
+      >
+        Monitor
+      </Button>
+    ) : null}
+
+    {candidate.status === 'Applied' ? (
+      <>
+        <Button
+          size="sm"
+          onClick={() => onSchedule(candidate)}
+          aria-label={`Schedule ${candidate.name}'s assessment`}
+        >
+          Schedule
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => onReject(candidate.id)}
+          disabled={rejecting}
+          className="min-w-[68px]"
+          aria-label={`Reject ${candidate.name}`}
+        >
+          {rejecting ? <Loader className="animate-spin" aria-hidden="true" /> : 'Reject'}
+        </Button>
+      </>
+    ) : null}
+  </div>
+);
 
 const InterviewerDashboardPage = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { signOut, user } = useAuth();
 
   const [realtimeCandidates, setRealtimeCandidates] = useState([]);
 
-  const [filteredCandidates, setFilteredCandidates] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [scoreFilter, setScoreFilter] = useState('all');
@@ -29,31 +114,29 @@ const InterviewerDashboardPage = () => {
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
-  const [isTechnicalRole, setIsTechnicalRole] = useState(true);
-  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
-  const [desiredSkills, setDesiredSkills] = useState([]);
-  const [newSkill, setNewSkill] = useState('');
-
-  // New state for detailed view and decisions
   const [viewDetailsModalOpen, setViewDetailsModalOpen] = useState(false);
   const [assessmentDetails, setAssessmentDetails] = useState(null);
+  const [assessmentLoading, setAssessmentLoading] = useState(false);
   const [decisionLoading, setDecisionLoading] = useState(false);
 
-  // Live monitoring state
   const [monitoringAssessmentId, setMonitoringAssessmentId] = useState(null);
 
-  // Loading states
   const [isLoading, setIsLoading] = useState(true);
   const [rejectingCandidateId, setRejectingCandidateId] = useState(null);
   const [schedulingLoading, setSchedulingLoading] = useState(false);
 
-  // Memoized stats calculations - Vercel React Best Practices
-  const stats = useMemo(() => ({
+  const stats = useMemo(() => realtimeCandidates.reduce((totals, candidate) => {
+    if (candidate.aiMatchScore >= 85) totals.highMatch += 1;
+    if (candidate.status === 'Scheduled') totals.scheduled += 1;
+    if (candidate.status === 'Completed') totals.completed += 1;
+    if (candidate.status === 'Hired') totals.hired += 1;
+    return totals;
+  }, {
     total: realtimeCandidates.length,
-    highMatch: realtimeCandidates.filter(c => c.aiMatchScore >= 85).length,
-    scheduled: realtimeCandidates.filter(c => c.status === 'Scheduled').length,
-    completed: realtimeCandidates.filter(c => c.status === 'Completed').length,
-    hired: realtimeCandidates.filter(c => c.status === 'Hired').length,
+    highMatch: 0,
+    scheduled: 0,
+    completed: 0,
+    hired: 0,
   }), [realtimeCandidates]);
 
   const fetchCandidates = useCallback(async () => {
@@ -62,62 +145,39 @@ const InterviewerDashboardPage = () => {
       const res = await api.get('/api/interviewer/candidates');
       const list = res?.data?.data || [];
 
-      // Normalize status to display format
-      const normalizeStatus = (status) => {
-        const statusMap = {
-          'applied': 'Applied',
-          'pending': 'Pending',
-          'scheduled': 'Scheduled',
-          'in_progress': 'In Progress',
-          'completed': 'Completed',
-          'under_review': 'Under Review',
-          'rejected': 'Rejected',
-          'hired': 'Hired'
-        };
-        return statusMap[status?.toLowerCase()] || status || 'Pending';
-      };
-
       const mapped = list.map((c) => {
-        const normalizedStatus = normalizeStatus(c.status || c.shortlist_status);
+        const normalizedStatus = resolveCandidateStatus(
+          c.status,
+          c.assessment_status,
+        );
 
         return {
           id: c.id,
           name: c.name,
           email: c.email,
           status: normalizedStatus,
+          aiRecommendation: c.shortlist_status || null,
           aiMatchScore: Math.round(Number(c.match_score) || 0),
           assessmentDecision: c.assessment_decision,
           assessmentScheduled: c.assessment_date || null,
+          assessmentId: c.assessment_id || null,
           pros: Array.isArray(c.pros) ? c.pros : (c.pros ? c.pros.split('\n') : []),
           cons: Array.isArray(c.cons) ? c.cons : (c.cons ? c.cons.split('\n') : []),
         };
       });
 
-      // Update realtime data
       setRealtimeCandidates(mapped);
-      setFilteredCandidates(mapped);
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to load candidates';
       toast({ variant: 'destructive', title: 'Load failed', description: message });
     } finally {
       setIsLoading(false);
     }
-  }, [setRealtimeCandidates, toast]);
+  }, [toast]);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    const saved = localStorage.getItem('desiredSkills');
-    if (saved) {
-      setDesiredSkills(JSON.parse(saved));
-    }
-
     fetchCandidates();
-  }, [navigate, fetchCandidates]);
+  }, [fetchCandidates]);
 
   const handleDownloadResume = useCallback(async (candidateId) => {
     try {
@@ -125,7 +185,6 @@ const InterviewerDashboardPage = () => {
         responseType: 'blob'
       });
 
-      // Create download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -141,64 +200,41 @@ const InterviewerDashboardPage = () => {
     }
   }, [toast]);
 
-  // Filter logic - memoized for performance (Vercel React Best Practices)
-  useEffect(() => {
-    let filtered = realtimeCandidates;
+  const filteredCandidates = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
 
-    // Search filter
-    if (searchTerm) {
-      const lowerTerm = searchTerm.toLowerCase();
-      filtered = filtered.filter(c =>
-        c.name.toLowerCase().includes(lowerTerm) ||
-        c.email.toLowerCase().includes(lowerTerm)
-      );
-    }
+    return realtimeCandidates.filter((candidate) => {
+      const matchesSearch = !normalizedSearch
+        || candidate.name?.toLowerCase().includes(normalizedSearch)
+        || candidate.email?.toLowerCase().includes(normalizedSearch);
+      const matchesStatus = statusFilter === 'all'
+        || candidate.status.toLowerCase() === statusFilter.toLowerCase();
+      const matchesScore = scoreFilter === 'all'
+        || (scoreFilter === 'high' && candidate.aiMatchScore >= 85)
+        || (scoreFilter === 'medium' && candidate.aiMatchScore >= 70 && candidate.aiMatchScore < 85)
+        || (scoreFilter === 'low' && candidate.aiMatchScore < 70);
 
-    // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(c => c.status.toLowerCase() === statusFilter.toLowerCase());
-    }
+      return matchesSearch && matchesStatus && matchesScore;
+    });
+  }, [realtimeCandidates, scoreFilter, searchTerm, statusFilter]);
 
-    // Score filter
-    if (scoreFilter !== 'all') {
-      if (scoreFilter === 'high') {
-        filtered = filtered.filter(c => c.aiMatchScore >= 85);
-      } else if (scoreFilter === 'medium') {
-        filtered = filtered.filter(c => c.aiMatchScore >= 70 && c.aiMatchScore < 85);
-      } else if (scoreFilter === 'low') {
-        filtered = filtered.filter(c => c.aiMatchScore < 70);
-      }
-    }
+  const hasActiveFilters = Boolean(searchTerm.trim()) || statusFilter !== 'all' || scoreFilter !== 'all';
 
-    setFilteredCandidates(filtered);
-  }, [searchTerm, statusFilter, scoreFilter, realtimeCandidates]);
+  const clearFilters = useCallback(() => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setScoreFilter('all');
+  }, []);
+
+  const handleOpenSchedule = useCallback((candidate) => {
+    setSelectedCandidate(candidate);
+    setScheduleModalOpen(true);
+  }, []);
 
   const handleLogout = useCallback(() => {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('userEmail');
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('user_id');
+    signOut();
     navigate('/login');
-  }, [navigate]);
-
-  const handleAddSkill = useCallback(() => {
-    if (newSkill.trim() && !desiredSkills.includes(newSkill.trim())) {
-      const updated = [...desiredSkills, newSkill.trim()];
-      setDesiredSkills(updated);
-      localStorage.setItem('desiredSkills', JSON.stringify(updated));
-      setNewSkill('');
-      toast({
-        title: 'Skill added',
-        description: `${newSkill} added to desired skills`,
-      });
-    }
-  }, [newSkill, desiredSkills, toast]);
-
-  const handleRemoveSkill = useCallback((skill) => {
-    const updated = desiredSkills.filter(s => s !== skill);
-    setDesiredSkills(updated);
-    localStorage.setItem('desiredSkills', JSON.stringify(updated));
-  }, [desiredSkills]);
+  }, [navigate, signOut]);
 
   const handleReject = useCallback(async (candidateId) => {
     setRejectingCandidateId(candidateId);
@@ -234,11 +270,11 @@ const InterviewerDashboardPage = () => {
     try {
       await api.post(`/api/interviewer/candidates/${selectedCandidate.id}/schedule`, {
         scheduled_time: scheduledDateTime,
-        is_technical_role: isTechnicalRole,
+        is_technical_role: false,
       });
       setRealtimeCandidates(prev => prev.map(c =>
         c.id === selectedCandidate.id
-          ? { ...c, status: 'Scheduled', assessmentScheduled: scheduledDateTime, isTechnicalRole }
+          ? { ...c, status: 'Scheduled', assessmentScheduled: scheduledDateTime, isTechnicalRole: false }
           : c
       ));
       toast({
@@ -253,35 +289,39 @@ const InterviewerDashboardPage = () => {
       setScheduleModalOpen(false);
       setScheduleDate('');
       setScheduleTime('');
-      setIsTechnicalRole(true);
       setSelectedCandidate(null);
     }
-  }, [isTechnicalRole, scheduleDate, scheduleTime, selectedCandidate, setRealtimeCandidates, toast]);
+  }, [scheduleDate, scheduleTime, selectedCandidate, setRealtimeCandidates, toast]);
 
   const handleOpenDetails = useCallback(async (candidate) => {
+    const shouldLoadAssessment = ['Completed', 'Hired', 'Rejected'].includes(candidate.status);
     setSelectedCandidate(candidate);
     setAssessmentDetails(null);
+    setAssessmentLoading(shouldLoadAssessment);
     setViewDetailsModalOpen(true);
 
-    // If completed or hired/rejected, fetch assessment details
-    if (['Completed', 'Hired', 'Rejected'].includes(candidate.status)) {
+    if (shouldLoadAssessment) {
       try {
         const res = await api.get(`/api/interviewer/assessments/${candidate.id}`);
         setAssessmentDetails(res.data.data);
       } catch (err) {
-        console.error("Failed to fetch assessment details", err);
+        const message = err?.response?.data?.message || 'Assessment results are unavailable';
+        toast({ variant: 'destructive', title: 'Unable to load assessment', description: message });
+      } finally {
+        setAssessmentLoading(false);
       }
     }
-  }, []);
+  }, [toast]);
 
-  const handleFinalDecision = useCallback(async (decision) => {
+  const handleFinalDecision = useCallback(async (decision, rationale, nextSteps) => {
     if (!assessmentDetails?.id) return;
 
     setDecisionLoading(true);
     try {
       await api.post(`/api/interviewer/assessments/${assessmentDetails.id}/final-decision`, {
-        decision: decision,
-        rationale: decision === 'hire' ? 'Candidate meets all requirements.' : 'Candidate does not meet requirements.'
+        decision,
+        rationale,
+        next_steps: nextSteps,
       });
 
       toast({
@@ -289,7 +329,7 @@ const InterviewerDashboardPage = () => {
         description: `Candidate ${decision === 'hire' ? 'hired' : 'rejected'} successfully.`
       });
       setViewDetailsModalOpen(false);
-      fetchCandidates(); // Refresh list
+      fetchCandidates();
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to record decision';
       toast({ variant: 'destructive', title: 'Error', description: message });
@@ -298,345 +338,186 @@ const InterviewerDashboardPage = () => {
     }
   }, [assessmentDetails, toast, fetchCandidates]);
 
-  // Color utilities - theme-factory pattern
-  const getScoreBadgeColor = useCallback((score) => {
-    if (score >= 85) return 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-sm';
-    if (score >= 70) return 'bg-amber-100 text-amber-800 border-amber-300 shadow-sm';
-    return 'bg-red-100 text-red-800 border-red-300 shadow-sm';
-  }, []);
-
-  const getStatusBadge = useCallback((status) => {
-    const styles = {
-      'Applied': 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm',
-      'Pending': 'bg-slate-100 text-slate-800 border-slate-300 shadow-sm',
-      'Scheduled': 'bg-purple-100 text-purple-800 border-purple-300 shadow-sm',
-      'In Progress': 'bg-yellow-100 text-yellow-800 border-yellow-300 shadow-sm',
-      'Completed': 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-sm',
-      'Under Review': 'bg-indigo-100 text-indigo-800 border-indigo-300 shadow-sm',
-      'Rejected': 'bg-red-100 text-red-800 border-red-300 shadow-sm',
-      'Hired': 'bg-green-100 text-green-800 border-green-300 shadow-sm'
-    };
-    return styles[status] || 'bg-slate-100 text-slate-800 border-slate-300 shadow-sm';
-  }, []);
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur-xl sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Logo size="default" />
-            <Badge className="bg-indigo-600 text-white font-semibold">INTERVIEWER</Badge>
-          </div>
-          <div className="flex gap-2 items-center">
-            <Dialog open={skillsModalOpen} onOpenChange={setSkillsModalOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="text-slate-700 hover:text-indigo-600 hover:border-indigo-300 transition-colors text-sm sm:text-base"
-                >
-                  <Settings className="mr-2 w-4 h-4" />
-                  <span className="hidden sm:inline">Skills</span>
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Configure Desired Skills</DialogTitle>
-                  <DialogDescription>
-                    Set the skills you want to prioritize when evaluating candidates
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="e.g., Python, React, AWS..."
-                      value={newSkill}
-                      onChange={(e) => setNewSkill(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleAddSkill()}
-                    />
-                    <Button onClick={handleAddSkill} className="bg-indigo-600 hover:bg-indigo-700">
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
+    <WorkspaceShell
+      role={user?.role || 'interviewer'}
+      title="Candidate pipeline"
+      description="Review assigned applicants, schedule assessments, inspect evidence, and record the final hiring outcome."
+      user={user}
+      onRefresh={fetchCandidates}
+      refreshing={isLoading}
+      onSignOut={handleLogout}
+    >
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard label="Candidates" value={stats.total} icon={Users} />
+        <MetricCard label="High match" value={stats.highMatch} icon={TrendingUp} tone="success" />
+        <MetricCard label="Scheduled" value={stats.scheduled} icon={Calendar} />
+        <MetricCard label="Completed" value={stats.completed} icon={Activity} tone="neutral" />
+        <MetricCard label="Hired" value={stats.hired} icon={CheckCircle} tone="success" />
+      </div>
 
-                  {desiredSkills.length > 0 && (
-                    <div>
-                      <p className="text-sm font-semibold mb-2 text-slate-700">Current skills:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {desiredSkills.map((skill) => (
-                          <Badge key={skill} className="bg-indigo-100 text-indigo-800 border border-indigo-300 flex items-center gap-1 py-1 px-3">
-                            {skill}
-                            <button
-                              onClick={() => handleRemoveSkill(skill)}
-                              className="ml-1 hover:text-red-600"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {desiredSkills.length === 0 && (
-                    <p className="text-sm text-slate-500 text-center py-4">No skills added yet. Add your first skill above.</p>
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
-            <Button
-              variant="ghost"
-              onClick={handleLogout}
-              className="text-slate-700 hover:text-red-600 hover:bg-red-50 transition-colors text-sm sm:text-base"
-            >
-              <LogOut className="mr-2 w-4 h-4" />
-              <span className="hidden sm:inline">Logout</span>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Stats Cards - Enhanced UI/UX */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-8">
-          <Card className="border-none shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-slate-600 mb-1 font-medium">Total</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-slate-900">{stats.total}</p>
-                </div>
-                <div className="p-3 bg-blue-100 rounded-lg group-hover:bg-blue-200 transition-colors">
-                  <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
-                </div>
+      <section aria-labelledby="candidate-queue-heading">
+        <Card className="overflow-hidden">
+          <CardHeader className="gap-5 border-b p-5 sm:p-6">
+            <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+              <div>
+                <CardTitle>
+                  <h2 id="candidate-queue-heading" className="text-lg">Candidate queue</h2>
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Search and act on candidates assigned to you.
+                </p>
               </div>
-            </CardContent>
-          </Card>
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                <span className="font-semibold tabular-nums text-foreground">{filteredCandidates.length}</span>
+                {' '}of {realtimeCandidates.length} shown
+              </p>
+            </div>
 
-          <Card className="border-none shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-slate-600 mb-1 font-medium">High Match</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.highMatch}</p>
-                </div>
-                <div className="p-3 bg-emerald-100 rounded-lg group-hover:bg-emerald-200 transition-colors">
-                  <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-none shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-slate-600 mb-1 font-medium">Scheduled</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600">{stats.scheduled}</p>
-                </div>
-                <div className="p-3 bg-purple-100 rounded-lg group-hover:bg-purple-200 transition-colors">
-                  <Calendar className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-none shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-slate-600 mb-1 font-medium">Completed</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.completed}</p>
-                </div>
-                <div className="p-3 bg-blue-100 rounded-lg group-hover:bg-blue-200 transition-colors">
-                  <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-none shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-1 group bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs sm:text-sm text-slate-600 mb-1 font-medium">Hired</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-green-600">{stats.hired}</p>
-                </div>
-                <div className="p-3 bg-green-100 rounded-lg group-hover:bg-green-200 transition-colors">
-                  <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filters - Enhanced UI/UX */}
-        <Card className="mb-6 border-none shadow-md hover:shadow-lg transition-shadow">
-          <CardContent className="pt-6">
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_190px_180px_auto]">
+              <div className="relative">
+                <label htmlFor="candidate-search" className="sr-only">Search candidates</label>
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
                 <Input
-                  placeholder="Search by name or email..."
+                  id="candidate-search"
+                  type="search"
+                  placeholder="Search name or email"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 border-slate-200 focus:border-indigo-400 focus:ring-indigo-200 transition-all"
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  className="pl-9"
                 />
               </div>
+
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full md:w-48 border-slate-200 hover:border-indigo-300 transition-colors">
-                  <Filter className="w-4 h-4 mr-2" />
-                  <SelectValue placeholder="Status" />
+                <SelectTrigger aria-label="Filter by candidate status">
+                  <Filter className="mr-2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                  <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="all">All statuses</SelectItem>
                   <SelectItem value="Applied">Applied</SelectItem>
                   <SelectItem value="Scheduled">Scheduled</SelectItem>
-                  <SelectItem value="In Progress">In Progress</SelectItem>
+                  <SelectItem value="In Progress">In progress</SelectItem>
                   <SelectItem value="Completed">Completed</SelectItem>
-                  <SelectItem value="Under Review">Under Review</SelectItem>
+                  <SelectItem value="Under Review">Under review</SelectItem>
                   <SelectItem value="Rejected">Rejected</SelectItem>
                   <SelectItem value="Hired">Hired</SelectItem>
                 </SelectContent>
               </Select>
+
               <Select value={scoreFilter} onValueChange={setScoreFilter}>
-                <SelectTrigger className="w-full md:w-48 border-slate-200 hover:border-indigo-300 transition-colors">
-                  <SelectValue placeholder="Score Range" />
+                <SelectTrigger aria-label="Filter by AI match score">
+                  <SelectValue placeholder="All match scores" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Scores</SelectItem>
-                  <SelectItem value="high">High (85+)</SelectItem>
-                  <SelectItem value="medium">Medium (70-84)</SelectItem>
-                  <SelectItem value="low">Low (&lt;70)</SelectItem>
+                  <SelectItem value="all">All match scores</SelectItem>
+                  <SelectItem value="high">High · 85%+</SelectItem>
+                  <SelectItem value="medium">Medium · 70–84%</SelectItem>
+                  <SelectItem value="low">Low · below 70%</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-          </CardContent>
-        </Card>
 
-        {/* Candidates Table - Enhanced UI/UX */}
-        <Card className="border-none shadow-md hover:shadow-lg transition-shadow">
-          <CardHeader className="border-b border-slate-100">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-2xl font-bold">Candidates</CardTitle>
-              <div className="text-sm text-slate-600">
-                {isLoading ? (
-                  <div className="flex items-center gap-2">
-                    <Loader className="w-4 h-4 animate-spin" />
-                    Loading...
-                  </div>
-                ) : (
-                  `${filteredCandidates.length} of ${realtimeCandidates.length}`
-                )}
-              </div>
+              {hasActiveFilters ? (
+                <Button variant="ghost" onClick={clearFilters} className="justify-start lg:px-3">
+                  <X aria-hidden="true" />
+                  Clear
+                </Button>
+              ) : <span className="hidden lg:block" aria-hidden="true" />}
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="rounded-lg border border-slate-100 overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50 hover:bg-slate-50 border-slate-100">
-                    <TableHead className="font-semibold text-slate-700">Name</TableHead>
-                    <TableHead className="font-semibold text-slate-700">Email</TableHead>
-                    <TableHead className="font-semibold text-slate-700">AI Score</TableHead>
-                    <TableHead className="font-semibold text-slate-700">Status</TableHead>
-                    <TableHead className="font-semibold text-slate-700 text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12">
-                        <div className="flex justify-center items-center gap-2">
-                          <Loader className="w-5 h-5 animate-spin text-indigo-600" />
-                          <span className="text-slate-600">Loading candidates...</span>
+
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="flex min-h-52 items-center justify-center gap-3 text-sm text-muted-foreground" role="status">
+                <Loader className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
+                Loading candidates
+              </div>
+            ) : filteredCandidates.length === 0 ? (
+              <div className="flex min-h-64 flex-col items-center justify-center px-6 py-12 text-center">
+                <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <UserRoundSearch className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <p className="mt-4 font-semibold text-foreground">No candidates found</p>
+                <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                  {hasActiveFilters
+                    ? 'Try a different search or clear the active filters.'
+                    : 'Candidates assigned to you will appear here.'}
+                </p>
+                {hasActiveFilters ? (
+                  <Button variant="outline" size="sm" onClick={clearFilters} className="mt-4">
+                    Clear filters
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <ul className="divide-y md:hidden" aria-label="Candidates">
+                  {filteredCandidates.map((candidate) => (
+                    <li key={candidate.id} className="p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-foreground">{candidate.name}</p>
+                          <p className="mt-1 break-all text-sm text-muted-foreground">{candidate.email}</p>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : filteredCandidates.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12 text-slate-500">
-                        No candidates found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredCandidates.map((candidate) => (
-                      <TableRow key={candidate.id} className="hover:bg-indigo-50 transition-colors border-slate-100">
-                        <TableCell className="font-medium text-slate-900">{candidate.name}</TableCell>
-                        <TableCell className="text-slate-600">{candidate.email}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={`${candidate.status === 'Completed' ? 'bg-indigo-600 text-white' : getScoreBadgeColor(candidate.aiMatchScore)} font-bold shadow-sm px-3 py-1`}
-                          >
-                            {candidate.aiMatchScore}%
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={`${getStatusBadge(candidate.status)} font-medium w-fit`}>
-                            {candidate.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex gap-2 justify-end">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300 transition-colors"
-                              onClick={() => handleOpenDetails(candidate)}
-                            >
-                              View
-                            </Button>
+                        <ScoreBadge score={candidate.aiMatchScore} />
+                      </div>
+                      <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div><StatusBadge status={candidate.status} /></div>
+                        <CandidateActions
+                          candidate={candidate}
+                          rejecting={rejectingCandidateId === candidate.id}
+                          onView={handleOpenDetails}
+                          onMonitor={setMonitoringAssessmentId}
+                          onSchedule={handleOpenSchedule}
+                          onReject={handleReject}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
 
-                            {candidate.status === 'In Progress' && (
-                              <Button
-                                size="sm"
-                                className="bg-purple-600 hover:bg-purple-700 text-white transition-colors"
-                                onClick={() => setMonitoringAssessmentId(candidate.id)}
-                              >
-                                Monitor
-                              </Button>
-                            )}
-
-                            {candidate.status === 'Applied' && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedCandidate(candidate);
-                                    setScheduleModalOpen(true);
-                                  }}
-                                  className="bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
-                                >
-                                  Schedule
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => handleReject(candidate.id)}
-                                  disabled={rejectingCandidateId === candidate.id}
-                                  className="transition-colors min-w-[70px]"
-                                >
-                                  {rejectingCandidateId === candidate.id ? (
-                                    <Loader className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    'Reject'
-                                  )}
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
+                <div className="hidden md:block">
+                  <Table className="min-w-[760px]">
+                    <TableHeader>
+                      <TableRow className="bg-muted/55 hover:bg-muted/55">
+                        <TableHead>Candidate</TableHead>
+                        <TableHead>AI match</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredCandidates.map((candidate) => (
+                        <TableRow key={candidate.id}>
+                          <TableCell className="min-w-[220px]">
+                            <p className="font-semibold text-foreground">{candidate.name}</p>
+                            <p className="mt-0.5 text-sm text-muted-foreground">{candidate.email}</p>
+                          </TableCell>
+                          <TableCell><ScoreBadge score={candidate.aiMatchScore} /></TableCell>
+                          <TableCell><StatusBadge status={candidate.status} /></TableCell>
+                          <TableCell className="min-w-[250px] text-right">
+                            <CandidateActions
+                              candidate={candidate}
+                              rejecting={rejectingCandidateId === candidate.id}
+                              onView={handleOpenDetails}
+                              onMonitor={setMonitoringAssessmentId}
+                              onSchedule={handleOpenSchedule}
+                              onReject={handleReject}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
-      </div>
-
+      </section>
       <ScheduleModal
         open={scheduleModalOpen}
         onOpenChange={setScheduleModalOpen}
@@ -645,8 +526,6 @@ const InterviewerDashboardPage = () => {
         setScheduleDate={setScheduleDate}
         scheduleTime={scheduleTime}
         setScheduleTime={setScheduleTime}
-        isTechnicalRole={isTechnicalRole}
-        setIsTechnicalRole={setIsTechnicalRole}
         schedulingLoading={schedulingLoading}
         onSchedule={handleSchedule}
       />
@@ -657,6 +536,7 @@ const InterviewerDashboardPage = () => {
         onOpenChange={setViewDetailsModalOpen}
         selectedCandidate={selectedCandidate}
         assessmentDetails={assessmentDetails}
+        assessmentLoading={assessmentLoading}
         decisionLoading={decisionLoading}
         onDownloadResume={handleDownloadResume}
         onFinalDecision={handleFinalDecision}
@@ -669,7 +549,7 @@ const InterviewerDashboardPage = () => {
           onClose={() => setMonitoringAssessmentId(null)}
         />
       )}
-    </div>
+    </WorkspaceShell>
   );
 };
 

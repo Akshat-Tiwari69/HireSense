@@ -1,458 +1,226 @@
 # Database schema
 
-This document describes the PostgreSQL database schema used by HireSense,
-including all tables, relationships, indexes, and migrations.
+HireSense uses PostgreSQL (including Supabase-hosted PostgreSQL) through the
+Flask backend. The canonical contract contains exactly 14 application tables.
+[`database/schema_contract.py`](../database/schema_contract.py) is the
+machine-readable source of truth; this document explains its data model.
 
-> **Naming note:** The database table is called `job_descriptions` for historical reasons.
-> The API routes, UI, and documentation all refer to these records as **job postings**.
-> `job_descriptions` is the canonical database name; treat it and "job postings"
-> as the same concept.
+`job_descriptions` is the historical database name for the job postings shown
+by the API and UI.
 
-## Entity-relationship diagram
+## Relationships
 
 ```mermaid
 erDiagram
-    USERS ||--o{ SCHEDULED_ASSESSMENTS : schedules
-    USERS }o--o| SECTORS : belongs_to
+    SECTORS ||--o{ USERS : scopes
+    SECTORS ||--o{ CANDIDATES : scopes
+    SECTORS ||--o{ JOB_DESCRIPTIONS : categorizes
+    USERS ||--o{ JOB_DESCRIPTIONS : creates
+    CANDIDATES ||--o{ SCHEDULED_ASSESSMENTS : receives
+    USERS ||--o{ SCHEDULED_ASSESSMENTS : interviews
+    USERS ||--o{ SCHEDULED_ASSESSMENTS : proctors
+    JOB_DESCRIPTIONS ||--o{ SCHEDULED_ASSESSMENTS : targets
+    SCHEDULED_ASSESSMENTS ||--o| ASSESSMENTS : starts
     CANDIDATES ||--o{ ASSESSMENTS : takes
-    CANDIDATES ||--o{ SCHEDULED_ASSESSMENTS : assigned
-    CANDIDATES ||--o{ CANDIDATE_JOB_MATCHES : matched_to
+    JOB_DESCRIPTIONS ||--o{ ASSESSMENTS : evaluates_for
     ASSESSMENTS ||--o{ MCQ_RESPONSES : contains
     ASSESSMENTS ||--o{ CODING_SUBMISSIONS : contains
     ASSESSMENTS ||--o{ PSYCHOMETRIC_RESPONSES : contains
-    ASSESSMENTS ||--o{ PROCTORING_EVENTS : generates
-    ASSESSMENTS ||--o{ PROCTORING_VIOLATIONS : generates
-    JOB_DESCRIPTIONS ||--o{ CANDIDATE_JOB_MATCHES : matched_to
-    JOB_DESCRIPTIONS }o--o| SECTORS : categorized_by
-    SECTORS ||--o{ SECTOR_EMAIL_CONFIGS : configured_with
-    USERS ||--o{ AUDIT_LOG : performed
-
-    USERS {
-        serial id PK
-        text email UK
-        text password_hash
-        text role
-        text name
-        integer sector_id FK
-        jsonb permissions
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    CANDIDATES {
-        serial id PK
-        text email UK
-        text name
-        text phone
-        text resume_path
-        text parsed_skills
-        jsonb parsed_skills_json
-        integer years_experience
-        text education
-        integer match_score
-        text shortlist_status
-        text status
-        integer best_match_job_id FK
-        integer sector_id FK
-        timestamp created_at
-    }
-
-    SECTORS {
-        serial id PK
-        text name UK
-        text description
-        text email_alias UK
-        timestamp created_at
-    }
-
-    JOB_DESCRIPTIONS {
-        serial id PK
-        text title
-        text description
-        text required_skills
-        text preferred_skills
-        integer min_experience
-        integer max_experience
-        text department
-        text location
-        integer sector_id FK
-        text status
-        text employment_type
-        text experience_level
-        text salary_range
-        timestamp closes_at
-        integer created_by FK
-        timestamp created_at
-    }
-
-    SCHEDULED_ASSESSMENTS {
-        serial id PK
-        integer candidate_id FK
-        integer interviewer_id FK
-        timestamp scheduled_time
-        text status
-        integer assessment_id FK
-        timestamp created_at
-    }
-
-    ASSESSMENTS {
-        serial id PK
-        integer candidate_id FK
-        integer job_id FK
-        real technical_score
-        real psychometric_score
-        real overall_score
-        text decision
-        integer proctoring_violations
-        text status
-        integer scheduled_assessment_id FK
-        jsonb questions_data
-        integer time_elapsed_seconds
-        timestamp started_at
-        timestamp completed_at
-    }
-
-    MCQ_RESPONSES {
-        serial id PK
-        integer assessment_id FK
-        integer question_id
-        text selected_answer
-        boolean is_correct
-        integer time_spent
-    }
-
-    CODING_SUBMISSIONS {
-        serial id PK
-        integer assessment_id FK
-        integer problem_id
-        text language
-        text code
-        integer test_cases_passed
-        integer total_test_cases
-        real execution_time
-        text error_message
-    }
-
-    PSYCHOMETRIC_RESPONSES {
-        serial id PK
-        integer assessment_id FK
-        integer question_id
-        text trait
-        integer score
-        text scenario_response
-    }
-
-    PROCTORING_EVENTS {
-        serial id PK
-        integer assessment_id FK
-        text event_type
-        text severity
-        text details
-        timestamp timestamp
-    }
-
-    PROCTORING_VIOLATIONS {
-        serial id PK
-        integer assessment_id FK
-        text violation_type
-        text description
-        text screenshot_url
-        text severity
-        timestamp timestamp
-    }
-
-    EMAIL_LOGS {
-        serial id PK
-        text recipient_email
-        text recipient_name
-        text email_type
-        text subject
-        text status
-        text error_message
-        timestamp sent_at
-    }
-
-    CANDIDATE_JOB_MATCHES {
-        serial id PK
-        integer candidate_id FK
-        integer job_id FK
-        integer match_score
-        integer skill_match_score
-        integer experience_match_score
-        text ai_reasoning
-        text status
-        timestamp matched_at
-    }
-
-    AUDIT_LOG {
-        serial id PK
-        integer user_id FK
-        text user_email
-        text action
-        text entity_type
-        integer entity_id
-        jsonb details
-        text ip_address
-        timestamp created_at
-    }
-
-    SECTOR_EMAIL_CONFIGS {
-        serial id PK
-        integer sector_id FK
-        text email_address
-        text smtp_host
-        boolean is_active
-    }
+    ASSESSMENTS ||--o{ PROCTORING_VIOLATIONS : records
+    CANDIDATES ||--o{ CANDIDATE_JOB_MATCHES : receives
+    JOB_DESCRIPTIONS ||--o{ CANDIDATE_JOB_MATCHES : receives
+    USERS ||--o{ CANDIDATE_JOB_MATCHES : reviews
+    USERS ||--o{ AUDIT_LOG : performs
+    USERS ||--o{ CUSTOM_QUESTION_BANK : uploads
 ```
 
-## Tables reference
+The assessment link is deliberately one-way:
+`assessments.scheduled_assessment_id` references `scheduled_assessments.id` and
+is unique when present. `scheduled_assessments` has no `assessment_id` column.
+The link may be null for a legacy or manually created assessment.
 
-### `users`
+Deleting a candidate cascades to that candidate's schedules, assessments, and
+job matches; deleting an assessment cascades to its answers, submissions, and
+violations. Deleting a scheduled interviewer is restricted. Optional ownership,
+sector, job, proctor, reviewer, uploader, and audit-user links become null when
+their referenced row is removed.
 
-System users with dashboard access. The `role` field determines
-permissions within the RBAC hierarchy.
+## Canonical tables and fields
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | serial | Primary key |
-| `email` | text | Unique login email |
-| `password_hash` | text | bcrypt hash |
-| `role` | text | `super_admin`, `sector_admin`, `recruiter`, `interviewer`, `proctor` |
-| `name` | text | Display name |
-| `sector_id` | integer | FK to `sectors` (nullable) |
-| `permissions` | jsonb | Additional permission flags |
+Every timestamp below is `TIMESTAMPTZ`. Primary keys are integer `SERIAL`
+values.
 
-### `candidates`
+| Table | Purpose | Canonical fields |
+| --- | --- | --- |
+| `sectors` | Organizational access scopes | `id`, `name`, `description`, `email_alias`, `created_at`, `updated_at` |
+| `users` | Staff authentication and RBAC | `id`, `email`, `password_hash`, `role`, `name`, `sector_id`, `created_at`, `updated_at` |
+| `candidates` | Applicant profile, resume analysis, and current match summary | `id`, `name`, `email`, `phone`, `resume_path`, `parsed_skills`, `years_experience`, `education`, `match_score`, `shortlist_status`, `pros`, `cons`, `status`, `created_at`, `updated_at`, `best_match_job_id`, `sector_id` |
+| `job_descriptions` | Job postings and matching requirements | `id`, `title`, `description`, `required_skills`, `min_experience`, `department`, `work_mode`, `created_at`, `updated_at`, `sector_id`, `status`, `preferred_skills`, `salary_range`, `employment_type`, `experience_level`, `closes_at`, `created_by`, `max_experience`, `role_complexity_level` |
+| `scheduled_assessments` | Invitation, assignment, question cache, and scheduling lifecycle | `id`, `candidate_id`, `interviewer_id`, `scheduled_time`, `status`, `created_at`, `updated_at`, `access_token_hash`, `started_at`, `is_technical_role`, `questions_data`, `job_id`, `proctor_id` |
+| `assessments` | Candidate session, timer, scoring, and decision record | `id`, `candidate_id`, `job_id`, `technical_score`, `psychometric_score`, `overall_score`, `automated_recommendation`, `automated_rationale`, `recommended_next_step`, `final_decision`, `final_rationale`, `proctoring_violations`, `status`, `scheduled_assessment_id`, `started_at`, `completed_at`, `created_at`, `questions_data`, `time_elapsed_seconds` |
+| `mcq_responses` | Latest answer per assessment question | `id`, `assessment_id`, `question_id`, `selected_answer`, `is_correct`, `time_spent`, `created_at` |
+| `coding_submissions` | Latest code per assessment problem | `id`, `assessment_id`, `problem_id`, `language`, `code`, `test_cases_passed`, `total_test_cases`, `submitted_at` |
+| `psychometric_responses` | Latest response and score per scenario | `id`, `assessment_id`, `question_id`, `trait`, `score`, `scenario_response`, `created_at` |
+| `proctoring_violations` | Canonical monitoring event and optional evidence path | `id`, `assessment_id`, `violation_type`, `description`, `screenshot_path`, `timestamp`, `severity` |
+| `email_logs` | Delivery audit for system email | `id`, `recipient_email`, `recipient_name`, `email_type`, `subject`, `status`, `error_message`, `sent_at` |
+| `candidate_job_matches` | Per-job matching score, explanation, and review state | `id`, `candidate_id`, `job_id`, `match_score`, `skill_match_score`, `experience_match_score`, `ai_reasoning`, `status`, `matched_at`, `reviewed_by`, `reviewed_at` |
+| `audit_log` | Immutable-style staff action trail | `id`, `user_id`, `user_email`, `action`, `entity_type`, `entity_id`, `details`, `ip_address`, `created_at` |
+| `custom_question_bank` | Uploaded source file, extracted text, and parsed questions | `id`, `original_filename`, `file_path`, `questions_text`, `parsed_questions`, `uploaded_by`, `description`, `tags`, `is_active`, `created_at`, `updated_at` |
 
-Applicants who have submitted resumes through the platform.
+`parsed_skills`, `required_skills`, and `preferred_skills` are text fields whose
+current application readers accept serialized JSON arrays and normalized text.
+`pros` and `cons` are newline-separated text. JSON documents live in
+`questions_data`, `parsed_questions`, `audit_log.details`, and no other
+canonical field.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | serial | Primary key |
-| `email` | text | Unique candidate email |
-| `name` | text | Full name |
-| `phone` | text | Contact number |
-| `resume_path` | text | Path to uploaded resume file |
-| `parsed_skills` | text | JSON array of extracted skills |
-| `parsed_skills_json` | jsonb | Structured skills data |
-| `years_experience` | integer | Extracted years of experience |
-| `education` | text | Education level |
-| `match_score` | integer | AI-computed match score (0-100) |
-| `shortlist_status` | text | `High Match`, `Potential`, `Reject` |
-| `status` | text | Pipeline stage (`pending`, `shortlisted`, `assessment_scheduled`, etc.) |
-| `best_match_job_id` | integer | FK to best-matching job posting |
+`job_descriptions.work_mode` replaces the misleading legacy `location` name.
+Reconciliation renames or merges that column without discarding its values,
+normalizes remote/on-site/hybrid spelling variants, and treats old city-style
+values as `On-Site`.
 
-### `sectors`
+The raw assessment access token is returned only in the invitation link and is
+never stored or logged. `access_token_hash` is its unique SHA-256 lookup value.
+`resume_path`, `custom_question_bank.file_path`, and
+`proctoring_violations.screenshot_path` are storage references; violation images
+are exposed only through the assignment-checked proctor endpoint.
 
-Organizational divisions for sector-scoped access control.
+## Allowed values and checks
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | serial | Primary key |
-| `name` | text | Unique sector name |
-| `description` | text | Sector description |
-| `email_alias` | text | Sector email address |
+| Field | Allowed values |
+| --- | --- |
+| `users.role` | `interviewer`, `admin`, `proctor`, `super_admin`, `sector_admin`, `recruiter` |
+| `candidates.status` | `applied`, `absence_of_details`, `pending`, `under_review`, `rejected`, `completed`, `hired` |
+| `candidates.shortlist_status` | null, `High Match`, `Potential`, `Reject` |
+| `job_descriptions.status` | `active`, `paused`, `closed`, `draft` |
+| `job_descriptions.employment_type` | `full-time`, `part-time`, `contract`, `internship` |
+| `job_descriptions.experience_level` | `junior`, `mid`, `senior`, `lead`, `principal` |
+| `job_descriptions.work_mode` | `Remote`, `On-Site`, `Hybrid` |
+| `scheduled_assessments.status` | `scheduled`, `in_progress`, `completed`, `cancelled` |
+| `assessments.status` | `started`, `in_progress`, `completed` |
+| `assessments.final_decision` | null, `Hire`, `No-Hire` |
+| `proctoring_violations.severity` | `low`, `medium`, `high`, `critical` |
+| `email_logs.status` | `sent`, `failed`, `bounced` |
+| `candidate_job_matches.status` | `auto_matched`, `confirmed`, `rejected` |
 
-### `job_descriptions`
+The database also enforces:
 
-Job postings with requirements, skills, and metadata.
+- candidate experience is non-negative; candidate match scores are 0–100;
+- job minimum experience is non-negative and maximum is null or at least the
+  minimum;
+- assessment and candidate/job match scores are 0–100;
+- assessment violation counts are non-negative and elapsed time is 0–3600
+  seconds;
+- response question/problem IDs are positive, answer times are non-negative,
+  and coding pass counts cannot exceed total tests;
+- psychometric scores, when present, are 1–10.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | serial | Primary key |
-| `title` | text | Job title |
-| `description` | text | Full description |
-| `required_skills` | text | JSON array of required skills |
-| `preferred_skills` | text | JSON array of preferred skills |
-| `min_experience` | integer | Minimum years of experience |
-| `max_experience` | integer | Maximum years of experience |
-| `department` | text | Department name |
-| `location` | text | Job location |
-| `sector_id` | integer | FK to `sectors` |
-| `status` | text | `active`, `closed`, `draft` |
-| `employment_type` | text | `full-time`, `part-time`, `contract` |
-| `experience_level` | text | `junior`, `mid`, `senior`, `lead`, `principal` |
-| `salary_range` | text | Salary information |
-| `closes_at` | timestamp | Application deadline |
-| `created_by` | integer | FK to `users` |
+The scorer writes `automated_recommendation`, `automated_rationale`, and
+`recommended_next_step`. A later interviewer outcome is stored independently
+in `final_decision` and `final_rationale`, so the human review never overwrites
+the automated evidence. `job_descriptions.role_complexity_level` remains
+application-validated text.
 
-### `scheduled_assessments`
+## Uniqueness and deliberate snapshots
 
-Assessment scheduling records linking candidates, interviewers, and time
-windows.
+User and candidate email addresses are unique case-insensitively through
+indexes on `LOWER(email)`. The schema also guarantees:
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | serial | Primary key |
-| `candidate_id` | integer | FK to `candidates` |
-| `interviewer_id` | integer | FK to `users` |
-| `scheduled_time` | timestamp | Scheduled start time |
-| `status` | text | `scheduled`, `in_progress`, `completed`, `cancelled` |
-| `assessment_id` | integer | FK to `assessments` (set after start) |
+- unique sector names and sector email aliases;
+- one schedule per `access_token_hash`;
+- at most one active (`scheduled` or `in_progress`) schedule per candidate;
+- at most one assessment per schedule;
+- one candidate/job match per pair;
+- one MCQ, coding, or psychometric row per assessment/question or problem.
 
-### `assessments`
+Several repeated values are intentional lifecycle snapshots, not competing
+foreign keys:
 
-Active and completed assessment sessions with scores and metadata.
+- `candidates.best_match_job_id` and `candidates.match_score` summarize the
+  selected `candidate_job_matches` row;
+- schedule questions are generated before the invitation, then copied to
+  `assessments.questions_data` so the live session has a stable snapshot;
+- schedule and assessment job/candidate/start fields preserve their respective
+  orchestration and session records;
+- `assessments.proctoring_violations` caches the count of canonical
+  `proctoring_violations` rows and is updated in the same transaction;
+- `audit_log.user_email` preserves the actor identity even if `user_id` is later
+  nulled.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | serial | Primary key |
-| `candidate_id` | integer | FK to `candidates` |
-| `job_id` | integer | FK to `job_descriptions` |
-| `technical_score` | real | MCQ + coding combined score (0-100) |
-| `psychometric_score` | real | Psychometric evaluation score (0-100) |
-| `overall_score` | real | Weighted average of all scores |
-| `decision` | text | `Hire`, `No-Hire`, `Maybe` |
-| `proctoring_violations` | integer | Total violation count |
-| `status` | text | `in_progress`, `completed` |
-| `questions_data` | jsonb | Generated MCQ, coding, and psychometric questions |
-| `time_elapsed_seconds` | integer | Elapsed time for resume support |
-| `started_at` | timestamp | Assessment start time |
-| `completed_at` | timestamp | Assessment completion time |
+## Indexing
 
-### `mcq_responses`
+Foreign keys and frequent filters have explicit indexes. Composite unique
+indexes also serve their leftmost lookup columns, so redundant single-column
+indexes are intentionally absent. Important filtered indexes enforce one active
+schedule per candidate and one assessment per non-null schedule.
 
-Individual MCQ answer records.
+[`database/schema_contract.py`](../database/schema_contract.py) contains the
+authoritative required and forbidden index names; avoid maintaining a second
+handwritten index inventory here.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `assessment_id` | integer | FK to `assessments` |
-| `question_id` | integer | Question identifier |
-| `selected_answer` | text | `A`, `B`, `C`, or `D` |
-| `is_correct` | boolean | Whether the answer is correct |
-| `time_spent` | integer | Seconds spent on the question |
+## Supabase and runtime access
 
-### `coding_submissions`
+The browser never accesses these tables directly. Flask uses a direct PostgreSQL
+connection, and request authorization is enforced by the backend.
 
-Code submissions for coding challenges.
+All 14 tables have RLS enabled. The schema revokes public-schema, table,
+sequence, and function access from Supabase Data API roles `anon` and
+`authenticated`. When the restricted `hiresense_app` role exists, it receives a
+`hiresense_backend_access` policy on each table and only normal DML/sequence
+privileges. It must not be a superuser and must not have create-role,
+create-database, replication, or bypass-RLS privileges.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `assessment_id` | integer | FK to `assessments` |
-| `problem_id` | integer | Problem identifier |
-| `language` | text | `python`, `javascript`, or `java` |
-| `code` | text | Submitted code |
-| `test_cases_passed` | integer | Passing test count |
-| `total_test_cases` | integer | Total test count |
+Use `DATABASE_URL` for the `hiresense_app` runtime connection. Reserve
+`DATABASE_ADMIN_URL` for schema installation and reconciliation. The RLS policy
+allows the trusted backend role to reach all rows; user-, role-, sector-, and
+assignment-level authorization therefore remains a Flask responsibility. In
+production, both URLs must set `sslmode=verify-full` and point `sslrootcert`
+at Supabase's downloaded CA certificate.
 
-### `psychometric_responses`
+## Install, reconcile, and validate
 
-Psychometric scenario evaluation responses.
+Run from the repository root:
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `assessment_id` | integer | FK to `assessments` |
-| `question_id` | integer | Scenario identifier |
-| `trait` | text | Evaluated trait (leadership, teamwork, etc.) |
-| `score` | integer | Score (1-10) |
-| `scenario_response` | text | Selected response |
+```powershell
+# Fresh, empty PostgreSQL database
+python backend/scripts/run_migration.py --schema
 
-### `proctoring_events`
+# Existing HireSense database
+python backend/scripts/run_migration.py --reconcile
 
-Detected suspicious activities during assessments.
+# Static contract check
+python database/validate_schema.py
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `assessment_id` | integer | FK to `assessments` |
-| `event_type` | text | `multiple_faces`, `no_face`, `tab_switch`, `copy_paste` |
-| `severity` | text | `low`, `medium`, `high` |
-| `details` | text | Additional context |
+# Idempotence and legacy-upgrade integration check against a disposable database
+python database/validate_schema.py --database-url postgresql://user:password@host/database
+```
 
-### `proctoring_violations`
+The runner applies SQL transactionally and verifies tables, exact columns,
+timezone types, checks, nullability, foreign keys, indexes, RLS, Data API
+revocations, and runtime-role safety before committing. The integration
+validator uses an isolated temporary schema and runs the fresh schema and
+reconciliation twice.
 
-Recorded violations with optional screenshot evidence.
+Supported artifacts:
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `assessment_id` | integer | FK to `assessments` |
-| `violation_type` | text | Type of violation |
-| `description` | text | Violation description |
-| `screenshot_url` | text | URL to screenshot evidence |
-| `severity` | text | `low`, `medium`, `high` |
+| Starting state | Artifact |
+| --- | --- |
+| Empty database | [`database/schema_postgres.sql`](../database/schema_postgres.sql) |
+| Existing legacy database | [`database/migrations/20260713_reconcile_canonical_schema.sql`](../database/migrations/20260713_reconcile_canonical_schema.sql) |
 
-### `email_logs`
+Older migrations are historical references, not an ordered installation
+procedure.
 
-Audit trail of all system-sent emails.
+## Removed legacy objects
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `recipient_email` | text | Recipient address |
-| `recipient_name` | text | Recipient name |
-| `email_type` | text | `rejection`, `assessment_invitation`, `final_decision` |
-| `subject` | text | Email subject line |
-| `status` | text | `sent`, `failed`, `bounced` |
-| `error_message` | text | Error details if failed |
+Reconciliation copies recoverable canonical data before removing obsolete
+objects. The final contract rejects:
 
-### `candidate_job_matches`
-
-AI-computed candidate-to-job match records.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `candidate_id` | integer | FK to `candidates` |
-| `job_id` | integer | FK to `job_descriptions` |
-| `match_score` | integer | Overall match (0-100) |
-| `skill_match_score` | integer | Skill overlap score (0-100) |
-| `experience_match_score` | integer | Experience fit score (0-100) |
-| `ai_reasoning` | text | AI explanation of the match |
-| `status` | text | `auto_matched`, `confirmed`, `rejected` |
-
-### `audit_log`
-
-Compliance audit trail for all user actions.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `user_id` | integer | FK to `users` |
-| `user_email` | text | Email at time of action |
-| `action` | text | Action type (for example, `create_job`, `match_candidate`) |
-| `entity_type` | text | Target entity (for example, `job_posting`, `candidate`) |
-| `entity_id` | integer | Target entity ID |
-| `details` | jsonb | Additional context |
-| `ip_address` | text | Client IP address |
-
-## Indexes
-
-The schema includes indexes for query performance:
-
-| Table | Index | Columns |
-|-------|-------|---------|
-| `users` | `idx_users_email` | `email` |
-| `users` | `idx_users_role` | `role` |
-| `users` | `idx_users_sector` | `sector_id` |
-| `candidates` | `idx_candidates_email` | `email` |
-| `candidates` | `idx_candidates_status` | `shortlist_status` |
-| `candidates` | `idx_candidates_best_job` | `best_match_job_id` |
-| `candidates` | `idx_candidates_sector` | `sector_id` |
-| `assessments` | `idx_assessments_candidate` | `candidate_id` |
-| `assessments` | `idx_assessments_status` | `status` |
-| `scheduled_assessments` | `idx_scheduled_assessments_candidate` | `candidate_id` |
-| `scheduled_assessments` | `idx_scheduled_assessments_time` | `scheduled_time` |
-| `job_descriptions` | `idx_job_descriptions_sector` | `sector_id` |
-| `job_descriptions` | `idx_job_descriptions_status` | `status` |
-| `job_descriptions` | `idx_job_descriptions_level` | `experience_level` |
-| `candidate_job_matches` | `idx_candidate_job_matches_score` | `match_score DESC` |
-| `audit_log` | `idx_audit_log_created` | `created_at DESC` |
-| `email_logs` | `idx_email_logs_recipient` | `recipient_email` |
-| `email_logs` | `idx_email_logs_type` | `email_type` |
-
-## Migrations
-
-The repository has one supported artifact for each database starting state:
-
-| Starting state | Command | Artifact |
-|----------------|---------|----------|
-| Fresh, empty PostgreSQL database | `python backend/scripts/run_migration.py --schema` | `database/schema_postgres.sql` |
-| Existing legacy HireSense database | `python backend/scripts/run_migration.py --reconcile` | `database/migrations/20260713_reconcile_canonical_schema.sql` |
-
-The runner refuses the wrong mode, applies the SQL transactionally, and checks
-the canonical runtime columns before committing. Other migration files are
-historical records, not an ordered fresh-install procedure.
-
-## Schema files
-
-| File | Description |
-|------|-------------|
-| `database/schema_postgres.sql` | Canonical PostgreSQL schema for fresh installations |
-| `database/migrations/20260713_reconcile_canonical_schema.sql` | Non-destructive reconciliation for known legacy variants |
-| `database/validate_schema.py` | Static validator for canonical schema contracts |
+- tables `admin_audit_log`, `proctoring_events`, `questions`, and
+  `sector_email_configs`;
+- columns `users.permissions`, `candidates.job_id`,
+  `candidates.parsed_skills_json`, `job_descriptions.created_by_id`,
+  `scheduled_assessments.assessment_id`, `is_streaming`, `stream_started_at`,
+  and `stream_ended_at`, `coding_submissions.execution_time` and
+  `error_message`, and `custom_question_bank.filename`;
+- redundant legacy email, response, token, and candidate-match indexes listed
+  in the machine-readable contract.

@@ -100,7 +100,7 @@ if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 # ── Connect ────────────────────────────────────────────────────────────────────
-print(f"\nConnecting to database...")
+print("\nConnecting to database...")
 try:
     conn = psycopg2.connect(db_url)
     cur = conn.cursor()

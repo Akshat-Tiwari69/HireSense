@@ -7,7 +7,7 @@ import json
 import psycopg2
 
 from db_config import db_connection
-from user_db import DatabaseError
+from user_db import DatabaseError, DuplicateEmailError
 
 
 def _parse_json_list(raw):
@@ -100,6 +100,8 @@ def insert_candidate(name, email, phone, resume_path, parsed_data, pros=None, co
 
         return candidate_id
 
+    except psycopg2.errors.UniqueViolation as e:
+        raise DuplicateEmailError("Email already exists") from e
     except psycopg2.IntegrityError as e:
         raise DatabaseError(f"Integrity error: {str(e)}") from e
     except Exception as e:
@@ -121,11 +123,17 @@ def insert_candidate_application(
                 INSERT INTO candidates
                 (name, email, phone, resume_path, parsed_skills, years_experience,
                  education, match_score, shortlist_status, pros, cons, status,
-                 best_match_job_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 best_match_job_id, sector_id)
+                SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       %s, j.sector_id
+                FROM job_descriptions j
+                WHERE j.id = %s
                 RETURNING id
-            """, (*values, job_id))
-            candidate_id = cursor.fetchone()[0]
+            """, (*values, job_id, job_id))
+            inserted = cursor.fetchone()
+            if not inserted:
+                raise DatabaseError("Selected job does not exist")
+            candidate_id = inserted[0]
             match_score = parsed_data.get('match_score', 0)
             cursor.execute("""
                 INSERT INTO candidate_job_matches
@@ -138,6 +146,10 @@ def insert_candidate_application(
             """, (candidate_id, job_id, match_score, ai_reasoning))
             conn.commit()
             return candidate_id
+    except psycopg2.errors.UniqueViolation as e:
+        raise DuplicateEmailError("Email already exists") from e
+    except DatabaseError:
+        raise
     except psycopg2.IntegrityError as e:
         raise DatabaseError(f"Integrity error: {str(e)}") from e
     except Exception as e:
@@ -186,16 +198,54 @@ def get_candidate_by_id(candidate_id):
         raise DatabaseError(f"Error retrieving candidate: {str(e)}") from e
 
 
-def get_all_candidates():
+def get_interviewer_candidates(interviewer_id, sector_id=None):
     try:
         with db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, name, email, phone, resume_path, parsed_skills, years_experience,
-                       education, match_score, shortlist_status, pros, cons, status,
-                       created_at, updated_at
-                FROM candidates ORDER BY created_at DESC
-            """)
+            sector_clause = " AND c.sector_id = %s" if sector_id is not None else ""
+            params = [interviewer_id, interviewer_id]
+            if sector_id is not None:
+                params.append(sector_id)
+            cursor.execute(
+                f"""
+                SELECT c.id, c.name, c.email, c.phone, c.resume_path,
+                       c.parsed_skills, c.years_experience, c.education,
+                       c.match_score, c.shortlist_status, c.pros, c.cons,
+                       c.status, c.created_at, c.updated_at,
+                       assignment.assessment_id, assignment.scheduled_time,
+                       assignment.assessment_status
+                FROM candidates c
+                LEFT JOIN LATERAL (
+                    SELECT a.id AS assessment_id, sa.scheduled_time,
+                           sa.status AS assessment_status
+                    FROM scheduled_assessments sa
+                    LEFT JOIN assessments a
+                      ON a.scheduled_assessment_id = sa.id
+                    WHERE sa.candidate_id = c.id
+                      AND sa.interviewer_id = %s
+                    ORDER BY sa.created_at DESC, a.created_at DESC NULLS LAST
+                    LIMIT 1
+                ) assignment ON TRUE
+                WHERE (
+                    EXISTS (
+                        SELECT 1
+                        FROM scheduled_assessments own_assignment
+                        WHERE own_assignment.candidate_id = c.id
+                          AND own_assignment.interviewer_id = %s
+                    )
+                    OR (
+                        c.status IN ('applied', 'pending', 'absence_of_details')
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM scheduled_assessments any_assignment
+                            WHERE any_assignment.candidate_id = c.id
+                        )
+                   )
+                ){sector_clause}
+                ORDER BY c.created_at DESC
+                """,
+                tuple(params),
+            )
             rows = cursor.fetchall()
 
         def _parse_pros_cons(raw):
@@ -228,7 +278,10 @@ def get_all_candidates():
                 'cons': _parse_pros_cons(row[11]),
                 'status': row[12],
                 'created_at': row[13],
-                'updated_at': row[14]
+                'updated_at': row[14],
+                'assessment_id': row[15],
+                'assessment_date': row[16],
+                'assessment_status': row[17],
             }
             for row in rows
         ]
@@ -250,31 +303,3 @@ def update_candidate_shortlist(candidate_id, status, score):
 
     except Exception as e:
         raise DatabaseError(f"Error updating candidate shortlist: {str(e)}") from e
-
-
-def update_candidate_status(candidate_id, status, pros=None, cons=None):
-    try:
-        with db_connection() as conn:
-            cursor = conn.cursor()
-            pros_text = _serialize_lines(pros)
-            cons_text = _serialize_lines(cons)
-
-            if pros_text or cons_text:
-                cursor.execute("""
-                    UPDATE candidates
-                    SET status = %s, pros = COALESCE(%s, pros),
-                        cons = COALESCE(%s, cons), updated_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """, (status, pros_text, cons_text, candidate_id))
-            else:
-                cursor.execute("""
-                    UPDATE candidates
-                    SET status = %s, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """, (status, candidate_id))
-
-            conn.commit()
-            return cursor.rowcount > 0
-
-    except Exception as e:
-        raise DatabaseError(f"Error updating candidate status: {str(e)}") from e

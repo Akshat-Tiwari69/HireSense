@@ -2,7 +2,6 @@
 
 import app as app_module
 from app import app
-from flask_jwt_extended import create_access_token
 
 
 def test_root_describes_service():
@@ -17,19 +16,10 @@ def test_root_describes_service():
     }
 
 
-def test_proctor_role_cannot_read_uploaded_candidate_files():
-    with app.app_context():
-        token = create_access_token(
-            identity="9",
-            additional_claims={"role": "proctor", "name": "Proctor"},
-        )
+def test_generic_uploaded_file_route_is_not_registered():
+    response = app.test_client().get("/uploads/private-resume.pdf")
 
-    response = app.test_client().get(
-        "/uploads/private-resume.pdf",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 403
+    assert response.status_code == 404
 
 
 def test_health_endpoint():
@@ -45,6 +35,13 @@ def test_removed_legacy_assessment_route_is_not_registered():
     assert response.status_code == 404
 
 
+def test_guessable_candidate_assessment_routes_are_not_registered():
+    client = app.test_client()
+
+    assert client.get("/api/interviewee/my-assessment/7").status_code == 404
+    assert client.post("/api/interviewee/assessment/start/7").status_code == 404
+
+
 def test_http_errors_use_json_contract():
     response = app.test_client().get("/definitely-not-a-route")
 
@@ -52,7 +49,7 @@ def test_http_errors_use_json_contract():
     assert response.get_json()["status"] == "error"
 
 
-def test_readiness_reports_database_success(monkeypatch):
+def test_readiness_reports_database_success_and_disabled_code_runner(monkeypatch):
     class Cursor:
         def execute(self, query):
             assert query == "SELECT 1"
@@ -71,11 +68,17 @@ def test_readiness_reports_database_success(monkeypatch):
 
     connection = Connection()
     monkeypatch.setattr(app_module, "get_connection", lambda: connection)
+    monkeypatch.setenv("CODE_RUNNER_ENABLED", "false")
+    monkeypatch.delenv("CODE_RUNNER_URL", raising=False)
 
     response = app.test_client().get("/api/health/ready")
 
     assert response.status_code == 200
-    assert response.get_json() == {"status": "ready", "database": "ok"}
+    assert response.get_json() == {
+        "status": "ready",
+        "database": "ok",
+        "code_runner": "disabled",
+    }
     assert connection.closed is True
 
 
@@ -84,12 +87,14 @@ def test_readiness_reports_database_failure(monkeypatch):
         raise RuntimeError("database offline")
 
     monkeypatch.setattr(app_module, "get_connection", unavailable)
+    monkeypatch.setenv("CODE_RUNNER_ENABLED", "false")
     response = app.test_client().get("/api/health/ready")
 
     assert response.status_code == 503
     assert response.get_json() == {
         "status": "not_ready",
         "database": "unavailable",
+        "code_runner": "disabled",
     }
 
 

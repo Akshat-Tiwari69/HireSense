@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly APP_ROOT=/opt/hiresense
+readonly REPOSITORY="$APP_ROOT/repository.git"
+readonly RELEASES="$APP_ROOT/releases"
+readonly CURRENT="$APP_ROOT/current"
+readonly BUILD_USER=hiresense-build
+readonly BUILD_GROUP=hiresense-build
+readonly DEPLOY_GROUP=hiresense
+readonly REPOSITORY_URL=https://github.com/Akshat-Tiwari69/HireSense.git
+readonly HEALTH_URL=http://127.0.0.1:5000/api/health/ready
+
+if [[ "$EUID" -ne 0 ]]; then
+  echo "deploy-hiresense must run as root." >&2
+  exit 77
+fi
+
+release_sha="${1:-}"
+allow_non_main=0
+prepare_only=0
+if [[ "$#" -lt 1 || "$#" -gt 3 ]]; then
+  echo "Usage: deploy-hiresense <40-character-git-sha> [--allow-non-main] [--prepare-only]" >&2
+  exit 64
+fi
+if [[ ! "$release_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Usage: deploy-hiresense <40-character-git-sha> [--allow-non-main] [--prepare-only]" >&2
+  exit 64
+fi
+shift
+for option in "$@"; do
+  case "$option" in
+    --allow-non-main) allow_non_main=1 ;;
+    --prepare-only) prepare_only=1 ;;
+    *)
+      echo "Unknown deployment option: $option" >&2
+      exit 64
+      ;;
+  esac
+done
+if [[ "$allow_non_main" == "1" && "${SUDO_USER:-root}" == "hiresense-deploy" ]]; then
+  echo "The automated deploy identity may only deploy commits on main." >&2
+  exit 77
+fi
+
+exec 9>/run/lock/hiresense-deploy.lock
+if ! flock -n 9; then
+  echo "Another HireSense deployment is already running." >&2
+  exit 75
+fi
+
+install -d -m 0755 -o root -g root "$APP_ROOT" "$RELEASES"
+if [[ ! -d "$REPOSITORY" ]]; then
+  install -d -m 0700 -o "$BUILD_USER" -g "$BUILD_GROUP" "$REPOSITORY"
+  runuser -u "$BUILD_USER" -- git clone --mirror "$REPOSITORY_URL" "$REPOSITORY"
+fi
+
+if [[ "$(stat -c '%U:%G' "$REPOSITORY")" != "$BUILD_USER:$BUILD_GROUP" ]]; then
+  echo "Repository mirror has unsafe ownership." >&2
+  exit 77
+fi
+
+runuser -u "$BUILD_USER" -- git --git-dir="$REPOSITORY" fetch --prune origin "+refs/heads/*:refs/heads/*"
+if ! runuser -u "$BUILD_USER" -- git --no-replace-objects --git-dir="$REPOSITORY" cat-file -e "$release_sha^{commit}"; then
+  echo "Commit $release_sha is not available from GitHub." >&2
+  exit 65
+fi
+
+if [[ "$allow_non_main" != "1" ]] && ! runuser -u "$BUILD_USER" -- git --no-replace-objects --git-dir="$REPOSITORY" merge-base --is-ancestor "$release_sha" refs/heads/main; then
+  echo "Refusing to deploy a commit that is not on origin/main." >&2
+  exit 65
+fi
+
+release_dir="$RELEASES/$release_sha"
+if [[ -e "$release_dir" ]]; then
+  if [[ ! -d "$release_dir" \
+      || "$(stat -c '%U:%G' "$release_dir")" != "root:$DEPLOY_GROUP" \
+      || ! -f "$release_dir/.release" \
+      || "$(<"$release_dir/.release")" != "$release_sha" \
+      || -n "$(find "$release_dir" -xdev \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit)" ]]; then
+    echo "Existing release $release_dir failed its ownership or integrity checks." >&2
+    exit 77
+  fi
+else
+  build_dir="$release_dir"
+  install -d -m 0750 -o "$BUILD_USER" -g "$BUILD_GROUP" "$build_dir"
+  build_in_progress=1
+  trap 'if [[ "${build_in_progress:-0}" == "1" ]]; then rm -rf -- "${build_dir:?}"; fi' EXIT
+
+  runuser -u "$BUILD_USER" -- bash -c \
+    'git --no-replace-objects --git-dir="$1" archive "$2" | tar -x -C "$3"' \
+    _ "$REPOSITORY" "$release_sha" "$build_dir"
+
+  runuser -u "$BUILD_USER" -- python3 -m venv "$build_dir/.venv"
+  runuser -u "$BUILD_USER" -- "$build_dir/.venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir -r "$build_dir/backend/requirements.txt"
+  runuser -u "$BUILD_USER" -- "$build_dir/.venv/bin/python" -m pip check
+  runuser -u "$BUILD_USER" -- "$build_dir/.venv/bin/python" -m compileall -q "$build_dir/backend"
+  runuser -u "$BUILD_USER" -- "$build_dir/.venv/bin/python" "$build_dir/database/validate_schema.py"
+
+  runuser -u "$BUILD_USER" -- npm --prefix "$build_dir/frontend" ci --no-audit --no-fund
+  runuser -u "$BUILD_USER" -- npm --prefix "$build_dir/frontend" run build
+  rm -rf "$build_dir/frontend/node_modules"
+
+  printf '%s\n' "$release_sha" > "$build_dir/.release"
+  chown -R root:"$DEPLOY_GROUP" "$build_dir"
+  chmod -R u=rwX,g=rX,o= "$build_dir"
+  build_in_progress=0
+  trap - EXIT
+fi
+
+if [[ "$prepare_only" == "1" ]]; then
+  echo "HireSense release prepared at $release_sha"
+  exit 0
+fi
+
+previous_release="$(readlink -f "$CURRENT" 2>/dev/null || true)"
+ln -sfn "$release_dir" "$APP_ROOT/current.next"
+mv -Tf "$APP_ROOT/current.next" "$CURRENT"
+
+if ! systemctl restart hiresense.service; then
+  if [[ -n "$previous_release" && -d "$previous_release" ]]; then
+    ln -sfn "$previous_release" "$APP_ROOT/current.next"
+    mv -Tf "$APP_ROOT/current.next" "$CURRENT"
+    systemctl restart hiresense.service || true
+  fi
+  exit 1
+fi
+
+ready=0
+for _attempt in {1..45}; do
+  if curl --fail --silent --show-error --max-time 3 "$HEALTH_URL" >/dev/null; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$ready" != "1" ]]; then
+  echo "New release failed its readiness check; rolling back." >&2
+  if [[ -n "$previous_release" && -d "$previous_release" ]]; then
+    ln -sfn "$previous_release" "$APP_ROOT/current.next"
+    mv -Tf "$APP_ROOT/current.next" "$CURRENT"
+    systemctl restart hiresense.service || true
+  fi
+  exit 1
+fi
+
+find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended \
+  -regex '.*/[0-9a-f]{40}' -printf '%T@ %p\n' \
+  | sort -nr \
+  | awk 'NR > 5 {print $2}' \
+  | while IFS= read -r old_release; do
+      if [[ "$old_release" != "$(readlink -f "$CURRENT")" && "$old_release" != "$previous_release" ]]; then
+        rm -rf -- "$old_release"
+      fi
+    done
+
+echo "HireSense deployed at $release_sha"

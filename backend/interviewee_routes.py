@@ -6,10 +6,8 @@ This file creates interviewee_bp and registers sub-blueprints so all routes
 remain at /api/interviewee/... with no changes to app.py or the frontend.
 
 Sub-module responsibilities:
-  interviewee_session.py     — GET /my-assessment/<id>
-                               POST /assessment/start/<id>
-                               GET  /assessment/verify/<token>
-                               POST /assessment/start-by-token/<token>
+  interviewee_session.py     — GET  /assessment/verify
+                               POST /assessment/start
   interviewee_answers.py     — POST /assessment/<id>/submit-answer
                                POST /assessment/<id>/complete
   interviewee_monitoring.py  — POST /assessment/<id>/violation

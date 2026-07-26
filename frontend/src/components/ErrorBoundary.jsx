@@ -1,7 +1,7 @@
 import { Component } from 'react';
 import { AlertTriangle, Home, RefreshCw } from 'lucide-react';
+import Logo from './Logo';
 import { Button } from './ui/button';
-import { Card } from './ui/card';
 
 class ErrorBoundary extends Component {
     constructor(props) {
@@ -26,48 +26,47 @@ class ErrorBoundary extends Component {
     render() {
         if (this.state.hasError) {
             return (
-                <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
-                    <Card className="w-full max-w-md shadow-2xl border-none text-center">
-                        <div className="p-12">
-                            <div className="flex justify-center mb-6">
-                                <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center">
-                                    <AlertTriangle className="w-14 h-14 text-red-600" />
+                <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+                    <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-10">
+                            <Logo size="large" />
+                            <div className="mt-8 flex justify-center">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
+                                    <AlertTriangle className="h-6 w-6 text-red-700" aria-hidden="true" />
                                 </div>
                             </div>
 
-                            <h1 className="text-2xl font-bold text-slate-900 mb-3">Oops! Something went wrong</h1>
-                            <p className="text-slate-600 mb-6">
-                                An unexpected error occurred. Don't worry, we've logged it and our team will look into it.
+                            <h1 className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">Something went wrong</h1>
+                            <p className="mt-3 text-sm leading-6 text-slate-600">
+                                The page could not finish loading. Reload it once, or return to the home page and try again.
                             </p>
 
                             {import.meta.env.DEV && this.state.error && (
-                                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-left">
-                                    <p className="text-xs font-mono text-red-800 break-all">
+                                <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-left">
+                                    <p className="break-all font-mono text-xs text-red-800">
                                         {this.state.error.toString()}
                                     </p>
                                 </div>
                             )}
 
-                            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                            <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
                                 <Button
+                                    type="button"
                                     onClick={() => window.location.reload()}
                                     variant="outline"
-                                    className="border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50"
                                 >
-                                    <RefreshCw className="w-4 h-4 mr-2" />
-                                    Reload Page
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Reload page
                                 </Button>
                                 <Button
+                                    type="button"
                                     onClick={this.handleReset}
-                                    className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg"
                                 >
-                                    <Home className="w-4 h-4 mr-2" />
-                                    Go Home
+                                    <Home className="mr-2 h-4 w-4" />
+                                    Go home
                                 </Button>
                             </div>
-                        </div>
-                    </Card>
-                </div>
+                    </div>
+                </main>
             );
         }
 

@@ -1,15 +1,22 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
+
+import { useAuth } from '../contexts/AuthContext';
+import LoadingScreen from './common/LoadingScreen';
 
 const ProtectedRoute = ({ element, allowedRoles = [] }) => {
-  const token = localStorage.getItem('authToken');
-  const userRole = localStorage.getItem('userRole');
+  const location = useLocation();
+  const { status, user } = useAuth();
 
-  if (!token) {
-    return <Navigate to="/login" replace />;
+  if (status === 'checking') {
+    return <LoadingScreen message="Verifying your session..." />;
   }
 
-  if (allowedRoles.length > 0 && !allowedRoles.includes(userRole)) {
-    return <Navigate to="/login" replace />;
+  if (status !== 'authenticated') {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  if (allowedRoles.length > 0 && !allowedRoles.includes(user?.role)) {
+    return <Navigate to="/login" replace state={{ accessDenied: true }} />;
   }
 
   return element;

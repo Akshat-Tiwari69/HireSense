@@ -1,13 +1,28 @@
 import { Fragment } from 'react';
-import { Button } from '../../ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 import { Badge } from '../../ui/badge';
+import { Button } from '../../ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 import { TabsContent } from '../../ui/tabs';
+import StatusBadge from '../../workspace/StatusBadge';
 import {
-  Plus, Edit, Trash2, Eye, ChevronDown, ChevronUp,
-  MapPin, IndianRupee, Clock, Building2
+  Briefcase,
+  Building2,
+  ChevronDown,
+  ChevronUp,
+  Edit,
+  Eye,
+  IndianRupee,
+  MapPin,
+  Plus,
+  Trash2,
 } from 'lucide-react';
+
+const scoreClassName = (score) => {
+  if (score >= 75) return 'text-emerald-700';
+  if (score >= 50) return 'text-amber-700';
+  return 'text-red-700';
+};
 
 const JobPostingsTab = ({
   jobPostings,
@@ -24,218 +39,305 @@ const JobPostingsTab = ({
   openEditJob,
   handleDeleteJob,
   fetchJobCandidates,
-}) => (
-  <TabsContent value="job-postings">
-    <Card className="bg-white border-none shadow-md hover:shadow-xl transition-all duration-300">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="text-slate-900">Job Postings</CardTitle>
-          <CardDescription className="text-slate-600">Manage job openings with required/preferred skills. AI will match candidates to the best-fit role.</CardDescription>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setSectorModalOpen(true)} className="border-slate-300 text-slate-700">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Sector
-          </Button>
-          <Button onClick={() => { setEditingJob(null); setJobForm({ title: '', description: '', required_skills: '', preferred_skills: '', min_experience: 0, max_experience: '', department: '', location: '', sector_id: '', status: 'active', employment_type: 'full-time', experience_level: 'mid', salary_range: '' }); setJobModalOpen(true); }} className="bg-indigo-600 hover:bg-indigo-700">
-            <Plus className="w-4 h-4 mr-2" />
-            Create Job
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {/* Sectors overview */}
-        {sectors.length > 0 && (
-          <div className="mb-6">
-            <p className="text-sm font-semibold text-slate-700 mb-2">Sectors</p>
-            <div className="flex flex-wrap gap-2">
-              {sectors.map(s => (
-                <Badge key={s.id} className="bg-indigo-100 text-indigo-800 border-indigo-200">
-                  {s.name} {s.email_alias && <span className="ml-1 opacity-70">({s.email_alias})</span>}
-                </Badge>
-              ))}
-            </div>
+  handleReviewCandidateMatch,
+  reviewingMatch,
+}) => {
+  const openCreateJob = () => {
+    setEditingJob(null);
+    setJobForm({
+      title: '',
+      description: '',
+      required_skills: '',
+      preferred_skills: '',
+      min_experience: 0,
+      max_experience: '',
+      department: '',
+      work_mode: 'On-Site',
+      sector_id: '',
+      status: 'active',
+      employment_type: 'full-time',
+      experience_level: 'mid',
+      salary_range: '',
+      closes_at: '',
+      role_complexity_level: 'intermediate',
+    });
+    setJobModalOpen(true);
+  };
+
+  return (
+    <TabsContent value="job-postings">
+      <Card>
+        <CardHeader className="gap-4 border-b lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1.5">
+            <CardTitle>Open roles</CardTitle>
+            <CardDescription>Maintain role requirements and inspect the candidates matched to each opening.</CardDescription>
           </div>
-        )}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button type="button" variant="outline" onClick={() => setSectorModalOpen(true)}>
+              <Plus />
+              Add sector
+            </Button>
+            <Button type="button" onClick={openCreateJob}>
+              <Plus />
+              Create role
+            </Button>
+          </div>
+        </CardHeader>
 
-        <Table>
-          <TableHeader>
-            <TableRow className="border-slate-200">
-              <TableHead className="text-slate-700 w-8"></TableHead>
-              <TableHead className="text-slate-700">Title</TableHead>
-              <TableHead className="text-slate-700">Department</TableHead>
-              <TableHead className="text-slate-700">Sector</TableHead>
-              <TableHead className="text-slate-700">Work Mode</TableHead>
-              <TableHead className="text-slate-700">Level / Type</TableHead>
-              <TableHead className="text-slate-700">Experience</TableHead>
-              <TableHead className="text-slate-700">Salary</TableHead>
-              <TableHead className="text-slate-700">Status</TableHead>
-              <TableHead className="text-slate-700">Candidates</TableHead>
-              <TableHead className="text-slate-700">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {jobPostings.map((job) => (
-              <Fragment key={job.id}>
-                <TableRow className="border-slate-200 cursor-pointer hover:bg-slate-50" onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}>
-                  <TableCell className="text-slate-400 px-2">
-                    {expandedJob === job.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </TableCell>
-                  <TableCell className="text-slate-900 font-medium">{job.title}</TableCell>
-                  <TableCell className="text-slate-700 text-sm">{job.department || <span className="text-slate-400">—</span>}</TableCell>
-                  <TableCell className="text-slate-700 text-sm">{job.sector_name || <span className="text-slate-400">Unassigned</span>}</TableCell>
-                  <TableCell className="text-slate-700 text-sm">
-                    {job.location ? (
-                      <span className="flex items-center gap-1"><MapPin className="w-3 h-3 text-slate-400" />{job.location}</span>
-                    ) : <span className="text-slate-400">—</span>}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-1">
-                      <Badge className={`text-xs ${
-                        job.experience_level === 'senior' ? 'bg-purple-600' :
-                        job.experience_level === 'lead' ? 'bg-red-600' :
-                        job.experience_level === 'principal' ? 'bg-amber-700' :
-                        job.experience_level === 'junior' ? 'bg-green-600' :
-                        'bg-blue-600'
-                      } text-white`}>
-                        {(job.experience_level || 'mid').charAt(0).toUpperCase() + (job.experience_level || 'mid').slice(1)}
-                      </Badge>
-                      <span className="text-xs text-slate-500">{(job.employment_type || 'full-time').replace('-', ' ')}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-slate-700 text-sm">
-                    {job.min_experience || 0}{job.max_experience ? `–${job.max_experience}` : '+'} yrs
-                  </TableCell>
-                  <TableCell className="text-slate-700 text-sm">
-                    {job.salary_range ? (
-                      <span className="flex items-center gap-1"><IndianRupee className="w-3 h-3 text-slate-400" />{job.salary_range}</span>
-                    ) : <span className="text-slate-400">—</span>}
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={job.status === 'active' ? 'bg-green-600' : job.status === 'closed' ? 'bg-red-600' : 'bg-slate-600'}>
-                      {job.status ? job.status.charAt(0).toUpperCase() + job.status.slice(1) : 'Active'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); fetchJobCandidates(job.id); }} className="text-indigo-600 hover:text-indigo-800 text-xs">
-                      <Eye className="w-3 h-3 mr-1" /> View
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditJob(job); }} className="text-slate-600 hover:text-indigo-600">
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleDeleteJob(job.id); }} disabled={deletingJob === job.id} className="text-red-400 hover:text-red-600">
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-                {/* Expanded detail row */}
-                {expandedJob === job.id && (
-                  <TableRow className="bg-slate-50/80 border-slate-200">
-                    <TableCell colSpan={11} className="py-4 px-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Left: Description */}
-                        <div>
-                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Description</p>
-                          {job.description ? (
-                            <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed">{job.description}</p>
-                          ) : (
-                            <p className="text-sm text-slate-400 italic">No description provided</p>
-                          )}
-                        </div>
-                        {/* Right: Skills & Details */}
-                        <div className="space-y-4">
-                          <div>
-                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Required Skills</p>
-                            <div className="flex flex-wrap gap-1">
-                              {(job.required_skills_list || []).length > 0 ? (
-                                job.required_skills_list.map((skill, i) => (
-                                  <Badge key={i} className="bg-blue-100 text-blue-800 text-xs">{skill}</Badge>
-                                ))
-                              ) : <span className="text-sm text-slate-400">None specified</span>}
-                            </div>
-                          </div>
-                          {job.preferred_skills_list?.length > 0 && (
-                            <div>
-                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Preferred Skills</p>
-                              <div className="flex flex-wrap gap-1">
-                                {job.preferred_skills_list.map((skill, i) => (
-                                  <Badge key={i} variant="outline" className="text-xs border-green-300 text-green-700">{skill}</Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200">
-                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                              <Building2 className="w-4 h-4 text-slate-400" />
-                              <span><span className="font-medium">Dept:</span> {job.department || '—'}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                              <MapPin className="w-4 h-4 text-slate-400" />
-                              <span><span className="font-medium">Work Mode:</span> {job.location || '—'}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                              <Clock className="w-4 h-4 text-slate-400" />
-                              <span><span className="font-medium">Type:</span> {(job.employment_type || 'full-time').replace('-', ' ')}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                              <IndianRupee className="w-4 h-4 text-slate-400" />
-                              <span><span className="font-medium">Salary:</span> {job.salary_range || '—'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
-            ))}
-          </TableBody>
-        </Table>
-        {jobPostings.length === 0 && (
-          <p className="text-slate-600 text-center py-8">No job postings found. Create one with required skills to enable AI candidate matching.</p>
-        )}
+        <CardContent className="pt-5">
+          {sectors.length > 0 ? (
+            <div className="mb-5 rounded-lg border bg-slate-50/60 p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Sectors</p>
+              <div className="flex flex-wrap gap-2">
+                {sectors.map((sector) => (
+                  <Badge key={sector.id} variant="outline" className="border-slate-200 bg-card text-slate-700">
+                    {sector.name}
+                    {sector.email_alias ? <span className="ml-1 text-muted-foreground">· {sector.email_alias}</span> : null}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
-        {/* Matched candidates for selected job */}
-        {selectedJobForCandidates && jobCandidates.length > 0 && (
-          <div className="mt-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
-            <h4 className="font-semibold text-indigo-900 mb-3">
-              Matched Candidates for Job #{selectedJobForCandidates}
-            </h4>
-            <Table>
+          {jobPostings.length === 0 ? (
+            <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
+              <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <Briefcase className="h-5 w-5" />
+              </span>
+              <p className="font-medium text-foreground">No roles have been created</p>
+              <p className="mt-1 max-w-md text-sm text-muted-foreground">Create a role with required skills to begin matching candidates.</p>
+            </div>
+          ) : (
+            <Table className="min-w-[1040px]" aria-label="Job postings">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-indigo-800">Candidate</TableHead>
-                  <TableHead className="text-indigo-800">Match Score</TableHead>
-                  <TableHead className="text-indigo-800">Skill Match</TableHead>
-                  <TableHead className="text-indigo-800">Exp Match</TableHead>
-                  <TableHead className="text-indigo-800">AI Reasoning</TableHead>
+                  <TableHead className="w-12"><span className="sr-only">Expand</span></TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Work arrangement</TableHead>
+                  <TableHead>Level</TableHead>
+                  <TableHead>Compensation</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Candidates</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {jobCandidates.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-medium text-slate-900">{c.name} <span className="text-xs text-slate-500">({c.email})</span></TableCell>
-                    <TableCell>
-                      <span className={`font-bold ${c.match_score >= 75 ? 'text-green-600' : c.match_score >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {c.match_score}%
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-slate-700">{c.skill_match_score}%</TableCell>
-                    <TableCell className="text-slate-700">{c.experience_match_score}%</TableCell>
-                    <TableCell className="text-slate-600 text-xs max-w-[250px] truncate" title={c.ai_reasoning}>{c.ai_reasoning || 'N/A'}</TableCell>
-                  </TableRow>
-                ))}
+                {jobPostings.map((job) => {
+                  const isExpanded = expandedJob === job.id;
+                  const employmentType = (job.employment_type || 'full-time').replace('-', ' ');
+                  const experienceLevel = job.experience_level || 'mid';
+
+                  return (
+                    <Fragment key={job.id}>
+                      <TableRow>
+                        <TableCell>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${job.title}`}
+                            title={isExpanded ? 'Collapse role details' : 'Expand role details'}
+                          >
+                            {isExpanded ? <ChevronUp /> : <ChevronDown />}
+                          </Button>
+                        </TableCell>
+                        <TableCell>
+                          <p className="font-medium text-foreground">{job.title}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {[job.department, job.sector_name].filter(Boolean).join(' · ') || 'Unassigned'}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <p className="flex items-center gap-1.5 text-sm text-foreground">
+                            <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                            {job.work_mode || 'On-Site'}
+                          </p>
+                          <p className="mt-1 text-xs capitalize text-muted-foreground">{employmentType}</p>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-sm capitalize text-foreground">{experienceLevel}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {job.min_experience || 0}{job.max_experience ? `–${job.max_experience}` : '+'} years
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          {job.salary_range ? (
+                            <span className="flex items-center gap-1 text-sm text-foreground">
+                              <IndianRupee className="h-3.5 w-3.5 text-muted-foreground" />
+                              {job.salary_range}
+                            </span>
+                          ) : <span className="text-sm text-muted-foreground">Not specified</span>}
+                        </TableCell>
+                        <TableCell><StatusBadge status={job.status || 'active'} /></TableCell>
+                        <TableCell>
+                          <Button type="button" variant="ghost" onClick={() => fetchJobCandidates(job.id)}>
+                            <Eye />
+                            View matches
+                          </Button>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              onClick={() => openEditJob(job)}
+                              aria-label={`Edit ${job.title}`}
+                              title="Edit role"
+                            >
+                              <Edit />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteJob(job.id)}
+                              disabled={deletingJob === job.id}
+                              className="text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                              aria-label={`Remove ${job.title}`}
+                              title="Close or remove role"
+                            >
+                              <Trash2 />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+
+                      {isExpanded ? (
+                        <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                          <TableCell colSpan={8} className="p-5">
+                            <div className="grid gap-6 lg:grid-cols-2">
+                              <section>
+                                <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Description</h4>
+                                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">
+                                  {job.description || 'No description provided.'}
+                                </p>
+                              </section>
+                              <section className="space-y-4">
+                                <div>
+                                  <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Required skills</h4>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {(job.required_skills_list || []).length > 0
+                                      ? job.required_skills_list.map((skill, index) => (
+                                        <Badge key={`${skill}-${index}`} variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                                          {skill}
+                                        </Badge>
+                                      ))
+                                      : <span className="text-sm text-muted-foreground">None specified</span>}
+                                  </div>
+                                </div>
+                                {job.preferred_skills_list?.length > 0 ? (
+                                  <div>
+                                    <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Preferred skills</h4>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {job.preferred_skills_list.map((skill, index) => (
+                                        <Badge key={`${skill}-${index}`} variant="outline" className="border-slate-200 bg-card text-slate-700">
+                                          {skill}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null}
+                                <div className="flex items-center gap-2 border-t pt-4 text-sm text-muted-foreground">
+                                  <Building2 className="h-4 w-4" />
+                                  {job.department || 'No department'} · {job.sector_name || 'No sector'}
+                                </div>
+                              </section>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  </TabsContent>
-);
+          )}
+
+          {selectedJobForCandidates ? (
+            <section className="mt-6 rounded-xl border border-blue-200 bg-blue-50/40 p-4 sm:p-5" aria-live="polite">
+              <div className="mb-4">
+                <h3 className="font-semibold text-foreground">Matched candidates</h3>
+                <p className="mt-1 text-sm text-muted-foreground">Results for role ID {selectedJobForCandidates}</p>
+              </div>
+              {jobCandidates.length === 0 ? (
+                <p className="rounded-lg border border-dashed bg-card px-4 py-8 text-center text-sm text-muted-foreground">
+                  No matched candidates were returned for this role.
+                </p>
+              ) : (
+                <Table className="min-w-[1040px]" aria-label="Matched candidates for selected role">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Candidate</TableHead>
+                      <TableHead>Match score</TableHead>
+                      <TableHead>Skill match</TableHead>
+                      <TableHead>Experience match</TableHead>
+                      <TableHead>Reasoning</TableHead>
+                      <TableHead>Review state</TableHead>
+                      <TableHead className="text-right">Decision</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {jobCandidates.map((candidate) => (
+                      <TableRow key={candidate.id}>
+                        <TableCell>
+                          <p className="font-medium text-foreground">{candidate.name}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{candidate.email}</p>
+                        </TableCell>
+                        <TableCell className={`font-semibold tabular-nums ${scoreClassName(candidate.match_score)}`}>
+                          {candidate.match_score}%
+                        </TableCell>
+                        <TableCell className="tabular-nums text-foreground">{candidate.skill_match_score}%</TableCell>
+                        <TableCell className="tabular-nums text-foreground">{candidate.experience_match_score}%</TableCell>
+                        <TableCell className="max-w-[280px] truncate text-xs text-muted-foreground" title={candidate.ai_reasoning}>
+                          {candidate.ai_reasoning || 'Not available'}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={candidate.status || 'auto_matched'} />
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {candidate.reviewed_at
+                              ? `Reviewed ${new Date(candidate.reviewed_at).toLocaleString()}`
+                              : 'Awaiting review'}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={reviewingMatch === `${candidate.candidate_id}:${selectedJobForCandidates}` || candidate.status === 'confirmed'}
+                              onClick={() => handleReviewCandidateMatch(candidate.candidate_id, selectedJobForCandidates, 'confirmed')}
+                              aria-label={`Confirm ${candidate.name} match`}
+                            >
+                              Confirm
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={reviewingMatch === `${candidate.candidate_id}:${selectedJobForCandidates}` || candidate.status === 'rejected'}
+                              onClick={() => handleReviewCandidateMatch(candidate.candidate_id, selectedJobForCandidates, 'rejected')}
+                              aria-label={`Reject ${candidate.name} match`}
+                              className="text-red-700 hover:bg-red-50 hover:text-red-800"
+                            >
+                              Reject
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </section>
+          ) : null}
+        </CardContent>
+      </Card>
+    </TabsContent>
+  );
+};
 
 export default JobPostingsTab;

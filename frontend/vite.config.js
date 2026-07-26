@@ -10,6 +10,13 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    proxy: {
+      '/api': 'http://127.0.0.1:5000',
+      '/socket.io': {
+        target: 'http://127.0.0.1:5000',
+        ws: true,
+      },
+    },
   },
   resolve: {
     alias: {
@@ -35,5 +42,23 @@ export default defineConfig({
   },
   ssr: {
     noExternal: [],
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary'],
+      include: [
+        'src/services/session.js',
+        'src/services/api.js',
+      ],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        branches: 80,
+        statements: 80,
+      },
+    },
   },
 })

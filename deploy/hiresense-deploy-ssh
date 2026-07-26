@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+read -r verb release_sha extra <<<"${SSH_ORIGINAL_COMMAND:-}"
+if [[ "$verb" != "deploy" \
+    || ! "$release_sha" =~ ^[0-9a-f]{40}$ \
+    || -n "${extra:-}" ]]; then
+  echo "Only 'deploy <40-character-git-sha>' is allowed." >&2
+  exit 64
+fi
+
+exec sudo /usr/local/sbin/deploy-hiresense "$release_sha"

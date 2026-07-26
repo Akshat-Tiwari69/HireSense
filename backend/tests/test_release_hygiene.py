@@ -1,5 +1,6 @@
 """Regression checks for release-time secret, storage, and entry-point hygiene."""
 
+import inspect
 import logging
 
 import pytest
@@ -7,6 +8,10 @@ from flask import Flask
 from flask_jwt_extended import JWTManager
 
 import interviewee_monitoring
+import interviewer_routes
+import admin_content
+import admin_users
+import auth
 from request_logger import init_request_logging, redact_sensitive_path
 from storage_config import BACKEND_DIR, get_upload_root, get_upload_subdirectory
 
@@ -51,6 +56,12 @@ def test_request_log_never_contains_assessment_token(caplog):
     assert response.status_code == 200
     assert token not in caplog.text
     assert "/api/interviewee/assessment/verify/<redacted>" in caplog.text
+
+
+def test_request_logging_does_not_verify_jwts_a_second_time():
+    source = inspect.getsource(init_request_logging)
+
+    assert "verify_jwt_in_request" not in source
 
 
 @pytest.mark.parametrize("logger_name", ["werkzeug", "gunicorn.access"])
@@ -145,7 +156,87 @@ def test_frontend_api_does_not_enable_cookie_credentials():
     assert "withCredentials" not in api_source
 
 
-def test_interviewer_route_does_not_print_full_assessment_link():
-    source = (BACKEND_DIR / "interviewer_routes.py").read_text(encoding="utf-8")
+def test_production_invitation_url_never_uses_request_origin_or_referer(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("FRONTEND_URL", raising=False)
+    app = Flask(__name__)
+
+    with app.test_request_context(
+        headers={
+            "Origin": "https://attacker.example",
+            "Referer": "https://attacker.example/interviewer",
+        }
+    ):
+        with pytest.raises(RuntimeError, match="FRONTEND_URL"):
+            interviewer_routes._assessment_frontend_url()
+
+
+def test_development_invitation_url_uses_fixed_localhost_fallback(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("FRONTEND_URL", raising=False)
+    app = Flask(__name__)
+
+    with app.test_request_context(headers={"Origin": "https://attacker.example"}):
+        assert (
+            interviewer_routes._assessment_frontend_url()
+            == "http://localhost:5173"
+        )
+
+
+def test_configured_invitation_url_wins_over_request_headers(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("FRONTEND_URL", "https://hiring.example/app/")
+    app = Flask(__name__)
+
+    with app.test_request_context(headers={"Origin": "https://attacker.example"}):
+        assert (
+            interviewer_routes._assessment_frontend_url()
+            == "https://hiring.example/app"
+        )
+
+
+def test_interviewer_route_keeps_tokens_and_candidate_pii_out_of_logs():
+    source = inspect.getsource(interviewer_routes.schedule_assessment)
 
     assert "[SCHEDULE] Assessment link:" not in source
+    assert "headers.get('Origin')" not in source
+    assert "headers.get('Referer')" not in source
+    assert "_assessment_frontend_url()" in source
+    assert "Data received: {data}" not in source
+    assert "Found candidate: {candidate['name']}" not in source
+    assert "Sending invitation email to {candidate['email']}" not in source
+
+
+def test_authentication_logs_never_include_staff_email_or_password_outcomes():
+    source = inspect.getsource(auth.login)
+
+    assert "{email}" not in source
+    assert "Invalid password" not in source
+    assert "User not found" not in source
+
+
+def test_candidate_workflows_do_not_log_candidate_pii():
+    sources = "\n".join(
+        [
+            inspect.getsource(admin_content._process_single_resume),
+            inspect.getsource(interviewer_routes.reject_candidate),
+            inspect.getsource(interviewer_routes.schedule_assessment),
+        ]
+    )
+
+    assert "print(" not in sources
+    assert "<{email}>" not in sources
+    assert "Found candidate:" not in sources
+    assert "Sending rejection email" not in sources
+
+
+def test_admin_user_audit_logs_use_ids_instead_of_email_addresses():
+    sources = "\n".join(
+        [
+            inspect.getsource(admin_users.create_user),
+            inspect.getsource(admin_users.delete_user),
+        ]
+    )
+
+    assert "creating %s with role" not in sources
+    assert "(%s, role=%s)" not in sources

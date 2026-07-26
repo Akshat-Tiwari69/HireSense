@@ -4,11 +4,12 @@ Interviewee session routes — verifying access, starting, and resuming assessme
 
 import logging
 import contextlib
-from datetime import datetime
-import pytz
+import json
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 
 from db_config import get_connection, return_connection
+from datetime_utils import parse_client_datetime
 
 from candidate_db import get_candidate_by_id
 from assessment_db import (
@@ -26,7 +27,12 @@ from assessment_db import (
     get_saved_coding_submission,
     verify_assessment_access_token,
 )
-from questions_bank import get_mcq_questions, get_coding_problem, get_psychometric_scenarios
+from questions_bank import (
+    get_coding_problem,
+    get_mcq_questions,
+    get_psychometric_scenarios,
+    normalize_starter_code,
+)
 from ai_question_generator import get_ai_question_generator
 
 
@@ -43,6 +49,32 @@ def _check_assessment_token(assessment_id: int, *, allow_expired: bool = False):
 logger = logging.getLogger(__name__)
 
 interviewee_session_bp = Blueprint('interviewee_session', __name__)
+
+
+def _load_scheduled_configuration(scheduled_assessment_id):
+    """Load cached questions while keeping the relational role authoritative."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT questions_data, is_technical_role "
+            "FROM scheduled_assessments WHERE id = %s",
+            (scheduled_assessment_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None, True
+
+        questions_data = row[0]
+        if isinstance(questions_data, str):
+            questions_data = json.loads(questions_data)
+        if not isinstance(questions_data, dict):
+            questions_data = None
+
+        is_technical_role = row[1] if row[1] is not None else True
+        return questions_data, bool(is_technical_role)
+    finally:
+        return_connection(conn)
 
 @interviewee_session_bp.route('/assessment/<int:assessment_id>/remaining-time', methods=['GET'])
 def get_remaining_time(assessment_id):
@@ -75,26 +107,11 @@ def get_remaining_time(assessment_id):
         return jsonify({'status': 'error', 'message': 'Failed to fetch remaining time'}), 500
 
 
-@interviewee_session_bp.route('/my-assessment/<int:candidate_id>', methods=['GET'])
-def get_my_assessment(candidate_id):
-    """REMOVED: Exposed schedule info by guessable candidate ID. Use token-based flow."""
-    return jsonify({
-        'status': 'error',
-        'message': 'This endpoint has been removed. Use /api/interviewee/assessment/verify/<token>'
-    }), 410
-
-
-@interviewee_session_bp.route('/assessment/start/<int:candidate_id>', methods=['POST'])
-def start_assessment(candidate_id):
-    """REMOVED: Allowed starting assessments by guessable ID. Use token-based flow."""
-    return jsonify({
-        'status': 'error',
-        'message': 'This endpoint has been removed. Use /api/interviewee/assessment/start-by-token/<token>'
-    }), 410
-
-
-@interviewee_session_bp.route('/assessment/verify/<token>', methods=['GET'])
-def verify_assessment_token(token):
+@interviewee_session_bp.route('/assessment/verify', methods=['GET'])
+def verify_assessment_token():
+    token = request.headers.get('X-Assessment-Token', '').strip()
+    if not token:
+        return jsonify({'status': 'error', 'message': 'Assessment token required'}), 403
     try:
         assessment = get_assessment_by_token(token)
         if not assessment:
@@ -113,11 +130,8 @@ def verify_assessment_token(token):
                 'data': {'can_start': False, 'assessment_status': assessment['status']},
             }), 409
 
-        ist = pytz.timezone('Asia/Kolkata')
-        scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
-        if scheduled_dt.tzinfo is None:
-            scheduled_dt = ist.localize(scheduled_dt)
-        current_dt = datetime.now(ist)
+        scheduled_dt = parse_client_datetime(assessment['scheduled_time'])
+        current_dt = datetime.now(timezone.utc)
         minutes_until = int((scheduled_dt - current_dt).total_seconds() / 60)
         # Allow starting from 30 min before to 30 min after scheduled time
         can_start = -30 <= minutes_until <= 30
@@ -135,8 +149,11 @@ def verify_assessment_token(token):
         return jsonify({'status': 'error', 'message': 'Failed to verify assessment'}), 500
 
 
-@interviewee_session_bp.route('/assessment/start-by-token/<token>', methods=['POST'])
-def start_assessment_with_token(token):
+@interviewee_session_bp.route('/assessment/start', methods=['POST'])
+def start_assessment_with_token():
+    token = request.headers.get('X-Assessment-Token', '').strip()
+    if not token:
+        return jsonify({'status': 'error', 'message': 'Assessment token required'}), 403
     assessment = None
     try:
         assessment = get_assessment_by_token(token)
@@ -157,11 +174,8 @@ def start_assessment_with_token(token):
                 'message': 'This assessment has reached its time limit and was completed.',
             }), 409
 
-        ist = pytz.timezone('Asia/Kolkata')
-        scheduled_dt = datetime.fromisoformat(str(assessment['scheduled_time']).replace('Z', ''))
-        if scheduled_dt.tzinfo is None:
-            scheduled_dt = ist.localize(scheduled_dt)
-        current_dt = datetime.now(ist)
+        scheduled_dt = parse_client_datetime(assessment['scheduled_time'])
+        current_dt = datetime.now(timezone.utc)
         minutes_diff = int((current_dt - scheduled_dt).total_seconds() / 60)
 
         if abs(minutes_diff) > 30 and assessment['status'] != 'in_progress':
@@ -194,33 +208,22 @@ def start_assessment_with_token(token):
                 coding_problem = stored_questions.get('coding_problem', {})
                 psychometric_scenarios = stored_questions.get('psychometric_scenarios', [])
 
-        if not stored_questions:
-            pconn = None
-            try:
-                pconn = get_connection()
-                pcur = pconn.cursor()
-                pcur.execute(
-                    "SELECT questions_data, is_technical_role FROM scheduled_assessments WHERE id = %s",
-                    (assessment['id'],)
+        try:
+            pre_generated, is_technical_role = _load_scheduled_configuration(
+                assessment['id']
+            )
+            if not stored_questions and pre_generated:
+                mcq_questions = pre_generated.get('mcq_questions', [])
+                coding_problem = pre_generated.get('coding_problem')
+                psychometric_scenarios = pre_generated.get(
+                    'psychometric_scenarios', []
                 )
-                prow = pcur.fetchone()
-                if prow and prow[0]:
-                    import json
-                    pre_generated = json.loads(prow[0]) if isinstance(prow[0], str) else prow[0]
-                    if pre_generated:
-                        mcq_questions = pre_generated.get('mcq_questions', [])
-                        coding_problem = pre_generated.get('coding_problem')
-                        psychometric_scenarios = pre_generated.get('psychometric_scenarios', [])
-                        is_technical_role = pre_generated.get('is_technical_role', True)
-                        stored_questions = pre_generated
-                if prow:
-                    is_technical_role = prow[1] if prow[1] is not None else True
-            except Exception as pre_err:
-                logger.warning(f"Could not load pre-generated questions: {pre_err}")
-            finally:
-                if pconn:
-                    with contextlib.suppress(Exception):
-                        return_connection(pconn)
+                stored_questions = pre_generated
+        except Exception as pre_err:
+            logger.warning(f"Could not load pre-generated questions: {pre_err}")
+
+        if not is_technical_role:
+            coding_problem = None
 
         if stored_questions and not questions_loaded_from_assessment:
             save_assessment_questions(assessment_id, stored_questions)
@@ -236,7 +239,7 @@ def start_assessment_with_token(token):
             )
             save_assessment_questions(assessment_id, {
                 'mcq_questions': mcq_questions, 'coding_problem': coding_problem,
-                'psychometric_scenarios': psychometric_scenarios, 'is_technical_role': is_technical_role
+                'psychometric_scenarios': psychometric_scenarios
             })
             logger.info(f"Stored questions for assessment {assessment_id}")
 
@@ -418,6 +421,6 @@ def _format_coding_problem(coding_problem):
         'difficulty': coding_problem['difficulty'],
         'constraints': coding_problem.get('constraints', []),
         'hints': coding_problem.get('hints', []),
-        'starter_code': coding_problem.get('starter_code', {}),
+        'starter_code': normalize_starter_code(coding_problem.get('starter_code')),
         'test_cases': [tc for tc in coding_problem.get('test_cases', []) if not tc.get('is_hidden', False)]
     }

@@ -92,11 +92,14 @@ In Railway dashboard, add:
 ```
 APP_ENV=production
 ALLOW_RUNTIME_ENV_MUTATION=false
-JWT_SECRET_KEY=your-production-secret-key
+JWT_SECRET_KEY=<generated-64-character-random-value>
+JWT_ACCESS_TOKEN_MINUTES=60
 DATABASE_URL=postgresql://... (auto-set by Railway)
 OPENAI_API_KEY=sk-your-openai-key
 RESEND_API_KEY=re_your-resend-key
+FRONTEND_URL=https://your-frontend-domain.com
 CORS_ORIGINS=https://your-frontend-domain.com
+TRUST_PROXY_HOPS=1
 UPLOAD_FOLDER=/data/uploads
 ```
 
@@ -135,6 +138,14 @@ services:
         value: false
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: JWT_ACCESS_TOKEN_MINUTES
+        value: 60
+      - key: FRONTEND_URL
+        value: https://your-frontend-domain.com
+      - key: CORS_ORIGINS
+        value: https://your-frontend-domain.com
+      - key: TRUST_PROXY_HOPS
+        value: 1
       - key: DATABASE_URL
         fromDatabase:
           name: elite-hire-db
@@ -290,10 +301,14 @@ create_user(
 | `APP_ENV` | Application environment; use `production` for hosted deployments | `production` |
 | `ALLOW_RUNTIME_ENV_MUTATION` | Local admin `.env` editing opt-in; keep disabled in production | `false` |
 | `JWT_SECRET_KEY` | JWT signing key | `random-64-char-string` |
+| `JWT_ACCESS_TOKEN_MINUTES` | Staff bearer-token lifetime (5-480 minutes) | `60` |
 | `DATABASE_URL` | PostgreSQL connection | `postgresql://user:pass@host/db` |
 | `OPENAI_API_KEY` | OpenAI API key | `sk-...` |
 | `RESEND_API_KEY` | Resend email API key | `re_...` |
-| `CORS_ORIGINS` | Allowed CORS origins | `https://frontend.com` |
+| `FRONTEND_URL` | Canonical frontend base URL used in invitations | `https://frontend.com` |
+| `CORS_ORIGINS` | Comma-separated HTTPS browser origins; required in production | `https://frontend.com` |
+| `TRUST_PROXY_HOPS` | Exact reverse-proxy count (`0` without a proxy, `1` on Railway/Render) | `1` |
+| `UPLOAD_FOLDER` | Private persistent storage path for resumes and evidence | `/data/uploads` |
 
 ### Generate Secure Keys
 
@@ -311,23 +326,18 @@ openssl rand -hex 32
 
 ### Production CORS Setup
 
-```python
-# app.py
-from flask_cors import CORS
-import os
+Set `CORS_ORIGINS` to the exact HTTPS origins that host the frontend, without
+paths, queries, fragments, credentials, or wildcards. The same validated list
+protects HTTP and Socket.IO. Startup fails outside development if the variable
+is missing or unsafe.
 
-app = Flask(__name__)
-
-# Production CORS
-cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:5173')
-CORS(app, resources={
-    r"/api/*": {
-        "origins": cors_origins.split(','),
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+```text
+CORS_ORIGINS=https://hire.example.com,https://admin.hire.example.com
 ```
+
+Do not add the API origin unless it also serves a browser client. Local HTTP
+origins are accepted only when `APP_ENV` is `dev`, `development`, `local`, or
+`test`.
 
 ---
 
@@ -395,8 +405,10 @@ if os.environ.get('APP_ENV') == 'production':
 - [ ] `APP_ENV=production`
 - [ ] `ALLOW_RUNTIME_ENV_MUTATION=false`
 - [ ] JWT_SECRET_KEY is secure (64+ chars)
+- [ ] `JWT_ACCESS_TOKEN_MINUTES` is set to the intended staff session length
 - [ ] DATABASE_URL configured
-- [ ] CORS_ORIGINS set to frontend domain
+- [ ] `FRONTEND_URL` and `CORS_ORIGINS` use the exact production HTTPS frontend origin
+- [ ] `TRUST_PROXY_HOPS` matches the deployment proxy topology (`1` on Railway/Render)
 - [ ] OpenAI API key configured
 - [ ] Email service configured (Resend or SMTP)
 - [ ] Gunicorn as WSGI server

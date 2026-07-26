@@ -15,10 +15,23 @@ logger = logging.getLogger(__name__)
 admin_users_bp = Blueprint('admin_users', __name__)
 
 _PRIVILEGED_ROLES = {'admin', 'super_admin'}
+_SECTOR_SCOPED_ROLES = {'recruiter', 'sector_admin'}
 
 
 def _is_super_admin():
     return get_jwt().get('role') == 'super_admin'
+
+
+def _sector_id_for_role(value, role):
+    if role not in _SECTOR_SCOPED_ROLES:
+        return None
+    try:
+        sector_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('sector_id is required for this role') from exc
+    if isinstance(value, bool) or sector_id <= 0:
+        raise ValueError('sector_id is required for this role')
+    return sector_id
 
 
 @admin_users_bp.route('/users', methods=['GET'])
@@ -29,7 +42,9 @@ def get_all_users():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id")
+        cursor.execute(
+            "SELECT id, name, email, role, sector_id, created_at FROM users ORDER BY id"
+        )
         rows = cursor.fetchall()
 
         users = [{
@@ -37,7 +52,8 @@ def get_all_users():
             'name': row[1],
             'email': row[2],
             'role': row[3],
-            'created_at': row[4]
+            'sector_id': row[4],
+            'created_at': row[5]
         } for row in rows]
 
         return jsonify({'status': 'success', 'data': users}), 200
@@ -88,28 +104,46 @@ def create_user():
                 'message': 'Only super admins can create privileged users'
             }), 403
 
+        try:
+            sector_id = _sector_id_for_role(data.get('sector_id'), role)
+        except ValueError as exc:
+            return jsonify({'status': 'error', 'message': str(exc)}), 400
+
         actor_id = get_jwt_identity()
-        logger.info("[ADMIN ACTION] user %s creating %s with role %s", actor_id, email, role)
+        logger.info("[ADMIN ACTION] user %s creating role %s", actor_id, role)
 
         password_hash = hash_password(password)
 
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s) RETURNING id",
-            (name, email, password_hash, role)
+            "INSERT INTO users (name, email, password_hash, role, sector_id) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (name, email, password_hash, role, sector_id)
         )
         result = cursor.fetchone()
         user_id = result[0] if result else None
         conn.commit()
 
-        logger.info("[ADMIN ACTION] user %s created user %s (%s)", actor_id, user_id, email)
+        logger.info("[ADMIN ACTION] user %s created user %s", actor_id, user_id)
 
         return jsonify({
             'status': 'success',
             'message': 'User created successfully',
-            'data': {'id': user_id, 'name': name, 'email': email, 'role': role}
+            'data': {
+                'id': user_id,
+                'name': name,
+                'email': email,
+                'role': role,
+                'sector_id': sector_id,
+            }
         }), 201
+    except psycopg2.errors.ForeignKeyViolation:
+        if conn:
+            conn.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'sector_id does not reference an existing sector',
+        }), 400
     except psycopg2.IntegrityError:
         if conn:
             conn.rollback()
@@ -135,7 +169,7 @@ def update_user(user_id):
         if not isinstance(data, dict):
             return jsonify({'status': 'error', 'message': 'A JSON object is required'}), 400
 
-        unknown_fields = set(data) - {'name', 'email', 'role', 'password'}
+        unknown_fields = set(data) - {'name', 'email', 'role', 'password', 'sector_id'}
         if unknown_fields:
             return jsonify({'status': 'error', 'message': 'Unsupported user fields'}), 400
 
@@ -143,7 +177,7 @@ def update_user(user_id):
 
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+        cursor.execute("SELECT role, sector_id FROM users WHERE id = %s", (user_id,))
         target = cursor.fetchone()
         if not target:
             return jsonify({'status': 'error', 'message': 'User not found'}), 404
@@ -178,6 +212,19 @@ def update_user(user_id):
                 }), 403
             field_names.append('role')
             values.append(requested_role)
+        else:
+            requested_role = target[0]
+
+        if 'role' in data or 'sector_id' in data:
+            try:
+                sector_id = _sector_id_for_role(
+                    data.get('sector_id', target[1]),
+                    requested_role,
+                )
+            except ValueError as exc:
+                return jsonify({'status': 'error', 'message': str(exc)}), 400
+            field_names.append('sector_id')
+            values.append(sector_id)
         if 'password' in data and data['password']:
             if not isinstance(data['password'], str) or not 8 <= len(data['password']) <= 128:
                 return jsonify({'status': 'error', 'message': 'Password must be at least 8 characters'}), 400
@@ -198,6 +245,13 @@ def update_user(user_id):
         logger.info("[ADMIN ACTION] user %s updated user %s", actor_id, user_id)
 
         return jsonify({'status': 'success', 'message': 'User updated successfully'}), 200
+    except psycopg2.errors.ForeignKeyViolation:
+        if conn:
+            conn.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'sector_id does not reference an existing sector',
+        }), 400
     except psycopg2.IntegrityError:
         if conn:
             conn.rollback()
@@ -225,20 +279,25 @@ def delete_user(user_id):
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT email, role FROM users WHERE id = %s", (user_id,))
+        cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
         user = cursor.fetchone()
 
         if not user:
             return jsonify({'status': 'error', 'message': 'User not found'}), 404
 
-        user_email, user_role = user[0], user[1]
+        user_role = user[0]
         if user_role in _PRIVILEGED_ROLES and not _is_super_admin():
             return jsonify({
                 'status': 'error',
                 'message': 'Only super admins can delete privileged users'
             }), 403
 
-        logger.warning("[ADMIN ACTION] user %s deleting user %s (%s, role=%s)", actor_id, user_id, user_email, user_role)
+        logger.warning(
+            "[ADMIN ACTION] user %s deleting user %s with role %s",
+            actor_id,
+            user_id,
+            user_role,
+        )
 
         cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
@@ -246,6 +305,13 @@ def delete_user(user_id):
         logger.info("[ADMIN ACTION] user %s deleted user %s", actor_id, user_id)
 
         return jsonify({'status': 'success', 'message': 'User deleted successfully'}), 200
+    except psycopg2.errors.ForeignKeyViolation:
+        if conn:
+            conn.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': "Reassign this user's active hiring work before deleting the account",
+        }), 409
     except Exception:
         if conn:
             conn.rollback()

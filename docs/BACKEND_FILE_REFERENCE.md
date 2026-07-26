@@ -36,7 +36,7 @@ Complete reference for all backend Python files and their functions.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `resume_analyzer.py` | ~545 | OpenAI resume analysis (pros/cons, match scoring) |
-| `resume_parser.py` | ~150 | PDF/DOCX text extraction (PyPDF2, python-docx) |
+| `resume_parser.py` | ~150 | PDF/DOCX text extraction (pypdf, python-docx) |
 | `email_service.py` | ~800 | Email notifications (Resend API + SMTP fallback) |
 | `ai_question_generator.py` | ~810 | GPT-4o-mini question generation for assessments |
 | `job_matcher.py` | ~400 | Rule-based + AI job-candidate matching |
@@ -86,11 +86,10 @@ app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
 |-------|--------|----------|-------------|
 | `/api/health` | GET | `health_check()` | Server health status |
 | `/api/resume/upload` | POST | `upload_resume()` | Upload resume with AI analysis |
-| `/api/assessment/start` | POST | `start_assessment()` | Start assessment session |
-| `/api/assessment/mcq/submit` | POST | `submit_mcq()` | Submit MCQ answer |
-| `/api/assessment/code/submit` | POST | `submit_code()` | Submit code solution |
-| `/api/assessment/psychometric/submit` | POST | `submit_psychometric()` | Submit psychometric response |
-| `/api/assessment/complete` | POST | `complete_assessment()` | Complete and score assessment |
+| `/api/interviewee/assessment/verify` | GET | `verify_assessment_token()` | Verify the `X-Assessment-Token` header |
+| `/api/interviewee/assessment/start` | POST | `start_assessment_with_token()` | Start or resume with the token header |
+| `/api/interviewee/assessment/<id>/submit-answer` | POST | `submit_answer()` | Save a token-authorized answer |
+| `/api/interviewee/assessment/<id>/complete` | POST | `complete_assessment()` | Complete and score an assessment |
 
 ### Resume Upload Function
 
@@ -211,7 +210,6 @@ Interviewer dashboard API.
 | `/candidates/<id>/schedule` | POST | `schedule_assessment()` | Schedule assessment |
 | `/assessments/<id>` | GET | `get_assessment()` | Assessment results |
 | `/assessments/<id>/final-decision` | POST | `final_decision()` | Make hiring decision |
-| `/dashboard/stats` | GET | `get_stats()` | Dashboard statistics |
 
 ### Key Functions
 
@@ -244,7 +242,7 @@ def schedule_assessment(id):
     send_assessment_invitation(
         candidate_email=candidate['email'],
         candidate_name=candidate['name'],
-        assessment_link=f"{FRONTEND_URL}/assessment/{token}",
+        assessment_link=f"{FRONTEND_URL}/assessment#token={token}",
         scheduled_time=scheduled_time
     )
     
@@ -264,17 +262,16 @@ Candidate assessment API.
 
 | Route | Method | Function | Description |
 |-------|--------|----------|-------------|
-| `/my-assessment/<id>` | GET | `get_my_assessment()` | Check assessment status |
-| `/assessment/verify/<token>` | GET | `verify_assessment_token()` | Verify token validity |
-| `/assessment/start/<id>` | POST | `start_assessment()` | Start by candidate ID |
-| `/assessment/start-by-token/<token>` | POST | `start_by_token()` | Start by token |
+| `/assessment/verify` | GET | `verify_assessment_token()` | Verify token header validity |
+| `/assessment/start` | POST | `start_assessment_with_token()` | Start by token header |
+| `/assessment/<id>/submit-answer` | POST | `submit_answer()` | Save an assessment answer |
 | `/assessment/<id>/complete` | POST | `complete_assessment()` | Complete assessment |
-| `/proctor/report-violation` | POST | `report_violation()` | Report proctoring event |
+| `/assessment/<id>/violation` | POST | `report_violation()` | Report a token-authorized proctoring event |
 
 ### Key Functions
 
 ```python
-@interviewee_bp.route('/assessment/verify/<token>', methods=['GET'])
+@interviewee_bp.route('/assessment/verify', methods=['GET'])
 def verify_assessment_token(token):
     """Verify assessment token and time window"""
     # Get scheduled assessment
@@ -298,7 +295,7 @@ def verify_assessment_token(token):
         'candidate_name': scheduled['candidate_name']
     })
 
-@interviewee_bp.route('/assessment/start-by-token/<token>', methods=['POST'])
+@interviewee_bp.route('/assessment/start', methods=['POST'])
 def start_by_token(token):
     """Start assessment using token"""
     # Verify token
@@ -396,21 +393,12 @@ def update_candidate_analysis(candidate_id, pros, cons,
 ### Assessment Operations
 
 ```python
-def create_assessment(candidate_id):
-    """Create new assessment session"""
-    ...
-
 def get_assessment_by_id(assessment_id):
     """Get assessment by ID"""
     ...
 
-def update_assessment_scores(assessment_id, mcq_score, coding_score,
-                             technical_score, psychometric_score, overall_score):
-    """Update assessment scores"""
-    ...
-
-def complete_assessment(assessment_id, decision, rationale):
-    """Mark assessment as complete"""
+def finalize_assessment(assessment_id):
+    """Atomically score and complete an assessment"""
     ...
 ```
 
@@ -541,10 +529,10 @@ Resume text extraction.
 
 ```python
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF using PyPDF2"""
+    """Extract text from PDF using pypdf"""
     text = ""
     with open(file_path, 'rb') as file:
-        reader = PyPDF2.PdfReader(file)
+        reader = pypdf.PdfReader(file)
         for page in reader.pages:
             text += page.extract_text() + "\n"
     return text
@@ -740,10 +728,10 @@ Assessment lifecycle, response tracking, scoring, scheduling, and token access.
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `create_assessment(candidate_id, job_id)` | `int` | Create in-progress assessment |
 | `get_assessment_by_id(assessment_id)` | `dict \| None` | Fetch assessment record |
 | `get_assessment_by_candidate_id(candidate_id)` | `dict \| None` | Most recent assessment for a candidate |
-| `update_assessment_scores(assessment_id, technical_score, psychometric_score, decision, rationale)` | — | Finalize scores and mark completed |
+| `finalize_assessment(assessment_id)` | `dict` | Atomically score, complete, and synchronize linked lifecycle rows |
+| `record_final_decision(assessment_id, decision, rationale)` | `dict \| None` | Store the human outcome separately from automated recommendations |
 
 **Response tracking:**
 
@@ -798,7 +786,7 @@ Proctoring event logging and violation tracking.
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `log_proctoring_event(assessment_id, event_type, severity, details)` | — | Log event and increment violation counter |
-| `record_proctoring_violation(assessment_id, violation_type, description, severity, screenshot_url)` | `int` | Record violation, return violation ID |
+| `record_proctoring_violation(assessment_id, violation_type, description, severity, screenshot_path)` | `int` | Record violation with an optional private evidence path |
 | `get_violations_for_assessment(assessment_id)` | `list[dict]` | All violations ordered by timestamp DESC |
 | `count_violations_for_assessment(assessment_id)` | `int` | Total violation count |
 

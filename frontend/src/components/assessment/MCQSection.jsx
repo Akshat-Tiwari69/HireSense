@@ -1,10 +1,9 @@
-import { Button } from '../ui/button';
-import { Card, CardContent } from '../ui/card';
-import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
-import { Label } from '../ui/label';
-import { Progress } from '../ui/progress';
-import { Badge } from '../ui/badge';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Label } from '../ui/label';
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 
 const MCQSection = ({
   questions,
@@ -13,91 +12,92 @@ const MCQSection = ({
   onAnswer,
   onNextSection,
   setCurrentQuestion,
+  savingQuestionId,
 }) => {
-  if (!questions || questions.length === 0) {
-    return <p className="text-slate-400 text-center py-8">No questions available</p>;
+  if (!questions?.length) {
+    return <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No knowledge questions are assigned.</p>;
   }
 
   const question = questions[currentQuestion];
   if (!question) return null;
 
-  const answeredCount = Object.keys(mcqAnswers).length;
-  const progressPercent = (answeredCount / questions.length) * 100;
+  const answeredCount = questions.filter(({ id }) => mcqAnswers[id] !== undefined).length;
+  const selectedAnswer = mcqAnswers[question.id];
+  const progress = (answeredCount / questions.length) * 100;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex-1">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">
+    <section className="space-y-6" aria-labelledby="knowledge-question-heading">
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Knowledge check</p>
+            <h2 id="knowledge-question-heading" className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
               Question {currentQuestion + 1} of {questions.length}
-            </h3>
-            <Badge className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white border-0">
-              {question.category}
-            </Badge>
+            </h2>
           </div>
-          <div className="mt-3">
-            <Progress value={progressPercent} className="h-2 bg-slate-700" />
-            <p className="text-xs text-slate-400 mt-2">{answeredCount}/{questions.length} answered</p>
-          </div>
+          <Badge variant="outline" className="capitalize">{question.category || 'General'}</Badge>
         </div>
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+          <div className="h-full rounded-full bg-blue-600" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">{answeredCount} of {questions.length} answered</p>
       </div>
 
-      <Card className="bg-gradient-to-br from-slate-800 to-slate-900 shadow-xl border-slate-700 hover:shadow-2xl transition-all duration-300">
-        <CardContent className="pt-8">
-          <p className="text-lg text-slate-100 mb-8 leading-relaxed font-medium">{question.question}</p>
-          <RadioGroup
-            value={mcqAnswers[question.id] !== undefined ? mcqAnswers[question.id].toString() : ''}
-            onValueChange={(value) => onAnswer(question.id, parseInt(value))}
-          >
-            <div className="space-y-3">
-              {question.options.map((option, idx) => (
-                <div
-                  key={idx}
-                  className={`flex items-center space-x-4 p-5 rounded-lg border-2 transition-all duration-200 cursor-pointer ${
-                    mcqAnswers[question.id] === idx
-                      ? 'border-emerald-500 bg-emerald-500/15 shadow-md'
-                      : 'border-slate-600 hover:border-indigo-500 hover:bg-slate-700/40'
-                  }`}
-                  onClick={() => onAnswer(question.id, idx)}
-                >
-                  <RadioGroupItem value={idx.toString()} id={`option-${idx}`} className="border-slate-400" />
-                  <Label htmlFor={`option-${idx}`} className="flex-1 cursor-pointer text-slate-200 text-base">
-                    {String.fromCharCode(65 + idx)}) {option}
-                  </Label>
-                </div>
-              ))}
-            </div>
-          </RadioGroup>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-between gap-3 pt-4">
-        <Button
-          variant="outline"
-          onClick={() => setCurrentQuestion(prev => Math.max(0, prev - 1))}
-          disabled={currentQuestion === 0}
-          className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
+        <p className="text-base font-medium leading-7 text-slate-950 sm:text-lg">{question.question}</p>
+        <RadioGroup
+          className="mt-6 space-y-3"
+          value={selectedAnswer === undefined ? '' : String(selectedAnswer)}
+          onValueChange={(value) => onAnswer(question.id, Number(value))}
+          aria-label={`Answers for question ${currentQuestion + 1}`}
         >
-          <ChevronLeft className="w-4 h-4" /> Previous
+          {question.options?.map((option, index) => {
+            const optionId = `mcq-${question.id}-${index}`;
+            const selected = selectedAnswer === index;
+            return (
+              <Label
+                key={optionId}
+                htmlFor={optionId}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 text-sm font-normal leading-6 transition-colors ${
+                  selected
+                    ? 'border-blue-500 bg-blue-50/70 text-slate-950'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                <RadioGroupItem id={optionId} value={String(index)} className="mt-1" />
+                <span><span className="mr-2 font-semibold text-slate-500">{String.fromCharCode(65 + index)}.</span>{option}</span>
+              </Label>
+            );
+          })}
+        </RadioGroup>
+        {savingQuestionId === question.id && (
+          <p className="mt-3 text-xs text-slate-500" role="status">Saving answer…</p>
+        )}
+      </div>
+
+      <div className="flex flex-col-reverse justify-between gap-3 sm:flex-row">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setCurrentQuestion((value) => Math.max(0, value - 1))}
+          disabled={currentQuestion === 0}
+        >
+          <ChevronLeft className="mr-2 h-4 w-4" aria-hidden="true" />
+          Previous
         </Button>
         {currentQuestion < questions.length - 1 ? (
-          <Button
-            onClick={() => setCurrentQuestion(prev => prev + 1)}
-            className="bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 gap-2"
-          >
-            Next Question <ChevronRight className="w-4 h-4" />
+          <Button type="button" onClick={() => setCurrentQuestion((value) => value + 1)}>
+            Next question
+            <ChevronRight className="ml-2 h-4 w-4" aria-hidden="true" />
           </Button>
         ) : (
-          <Button
-            onClick={onNextSection}
-            className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 gap-2"
-          >
-            Next Section <ChevronRight className="w-4 h-4" />
+          <Button type="button" onClick={onNextSection}>
+            Continue
+            <ChevronRight className="ml-2 h-4 w-4" aria-hidden="true" />
           </Button>
         )}
       </div>
-    </div>
+    </section>
   );
 };
 

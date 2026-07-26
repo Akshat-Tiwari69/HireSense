@@ -1,6 +1,6 @@
 import { Button } from '../../ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog';
 import { Input } from '../../ui/input';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '../../ui/dialog';
 import { Label } from '../../ui/label';
 import { Loader2, Sparkles } from 'lucide-react';
 import { api } from '../../../services/api';
@@ -17,82 +17,89 @@ const SectorModal = ({
 }) => {
   const { toast } = useToast();
 
+  const enhanceSector = async () => {
+    setEnhancingSector(true);
+    try {
+      const response = await api.post('/api/admin/ai-enhance', {
+        type: 'sector',
+        title: sectorForm.name,
+        description: sectorForm.description,
+      });
+      if (response.data.status === 'success') {
+        setSectorForm((current) => ({
+          ...current,
+          name: response.data.enhanced_title || current.name,
+          description: response.data.enhanced_description || current.description,
+        }));
+        toast({ title: 'Sector refined', description: 'The name and description were updated.', duration: 3000 });
+      } else {
+        toast({ title: 'Enhancement failed', description: response.data.message, variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: 'Enhancement failed', description: error.response?.data?.message || error.message, variant: 'destructive' });
+    } finally {
+      setEnhancingSector(false);
+    }
+  };
+
   return (
     <Dialog open={sectorModalOpen} onOpenChange={setSectorModalOpen}>
-      <DialogContent className="bg-white border-slate-200 shadow-md">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle className="text-slate-900">Create Sector</DialogTitle>
-          <DialogDescription className="text-slate-600">Add a new organizational sector for job postings and access control</DialogDescription>
+          <DialogTitle>Create sector</DialogTitle>
+          <DialogDescription>Group related roles and define the email alias used by that hiring team.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
+
+        <form
+          className="space-y-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSaveSector();
+          }}
+        >
           <div className="space-y-2">
-            <Label className="text-slate-700">Sector Name *</Label>
+            <Label htmlFor="sector-name">Sector name</Label>
             <Input
+              id="sector-name"
+              autoFocus
               value={sectorForm.name}
-              onChange={(e) => setSectorForm({ ...sectorForm, name: e.target.value })}
-              className="bg-white border-slate-300 text-slate-900"
-              placeholder="e.g., Product Engineering"
+              onChange={(event) => setSectorForm({ ...sectorForm, name: event.target.value })}
+              placeholder="Product Engineering"
+              required
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-slate-700">Description</Label>
-            <Input
+            <Label htmlFor="sector-description">Description</Label>
+            <textarea
+              id="sector-description"
               value={sectorForm.description}
-              onChange={(e) => setSectorForm({ ...sectorForm, description: e.target.value })}
-              className="bg-white border-slate-300 text-slate-900"
-              placeholder="Brief description of the sector"
+              onChange={(event) => setSectorForm({ ...sectorForm, description: event.target.value })}
+              className="min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              placeholder="Describe the roles and responsibilities grouped in this sector."
             />
           </div>
-          {/* AI Enhance Button */}
-          {(sectorForm.name || sectorForm.description) && (
-            <Button
-              type="button"
-              variant="outline"
-              className="border-purple-300 text-purple-700 hover:bg-purple-50"
-              disabled={enhancingSector}
-              onClick={async () => {
-                setEnhancingSector(true);
-                try {
-                  const res = await api.post('/api/admin/ai-enhance', {
-                    type: 'sector',
-                    title: sectorForm.name,
-                    description: sectorForm.description
-                  });
-                  if (res.data.status === 'success') {
-                    setSectorForm(prev => ({
-                      ...prev,
-                      name: res.data.enhanced_title || prev.name,
-                      description: res.data.enhanced_description || prev.description
-                    }));
-                    toast({ title: 'Enhanced', description: 'Sector name and description polished by AI', duration: 3000 });
-                  } else {
-                    toast({ title: 'AI Error', description: res.data.message, variant: 'destructive' });
-                  }
-                } catch (err) {
-                  toast({ title: 'AI Error', description: err.response?.data?.message || err.message, variant: 'destructive' });
-                } finally {
-                  setEnhancingSector(false);
-                }
-              }}
-            >
-              {enhancingSector ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-              {enhancingSector ? 'Enhancing...' : 'Enhance with AI'}
+          {sectorForm.name || sectorForm.description ? (
+            <Button type="button" variant="outline" disabled={enhancingSector} onClick={enhanceSector}>
+              {enhancingSector ? <Loader2 className="animate-spin" /> : <Sparkles className="text-blue-700" />}
+              {enhancingSector ? 'Refining copy' : 'Refine with AI'}
             </Button>
-          )}
+          ) : null}
           <div className="space-y-2">
-            <Label className="text-slate-700">Email Alias</Label>
+            <Label htmlFor="sector-email-alias">Email alias</Label>
             <Input
+              id="sector-email-alias"
+              type="email"
               value={sectorForm.email_alias}
-              onChange={(e) => setSectorForm({ ...sectorForm, email_alias: e.target.value })}
-              className="bg-white border-slate-300 text-slate-900"
-              placeholder="e.g., eng@company.com"
+              onChange={(event) => setSectorForm({ ...sectorForm, email_alias: event.target.value })}
+              placeholder="engineering@example.com"
             />
           </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setSectorModalOpen(false)} className="border-slate-300 text-slate-700">Cancel</Button>
-          <Button onClick={handleSaveSector} className="bg-indigo-600 hover:bg-indigo-700">Create</Button>
-        </DialogFooter>
+
+          <DialogFooter className="border-t pt-5">
+            <Button type="button" variant="outline" onClick={() => setSectorModalOpen(false)}>Cancel</Button>
+            <Button type="submit" disabled={!sectorForm.name.trim()}>Create sector</Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

@@ -5,7 +5,7 @@ sector management, RBAC, candidate-job matching, and audit logging.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Blueprint, request, jsonify
@@ -14,6 +14,7 @@ import logging
 import psycopg2
 
 from db_config import db_connection
+from datetime_utils import parse_client_datetime
 from storage_config import get_upload_root
 from psycopg2.extras import RealDictCursor
 
@@ -40,6 +41,19 @@ SECTOR_JOB_ROLES = {'sector_admin', 'recruiter'}
 JOB_STATUSES = {'active', 'paused', 'closed', 'draft'}
 EMPLOYMENT_TYPES = {'full-time', 'part-time', 'contract', 'internship'}
 EXPERIENCE_LEVELS = {'junior', 'mid', 'senior', 'lead', 'principal'}
+WORK_MODES = ('Remote', 'On-Site', 'Hybrid')
+WORK_MODE_ALIASES = {
+    'remote': 'Remote',
+    'fully remote': 'Remote',
+    'work from home': 'Remote',
+    'wfh': 'Remote',
+    'on site': 'On-Site',
+    'onsite': 'On-Site',
+    'office': 'On-Site',
+    'in office': 'On-Site',
+    'hybrid': 'Hybrid',
+    'hybrid remote': 'Hybrid',
+}
 
 
 class ConcurrentJobChangeError(RuntimeError):
@@ -177,9 +191,23 @@ def _normalise_skills(value, field_name, required=False):
     return json.dumps(cleaned)
 
 
+def _normalise_work_mode(value):
+    if not isinstance(value, str):
+        raise ValueError('work_mode must be a string')
+    key = ' '.join(value.strip().lower().replace('_', ' ').replace('-', ' ').split())
+    try:
+        return WORK_MODE_ALIASES[key]
+    except KeyError as exc:
+        raise ValueError(
+            f'work_mode must be one of: {", ".join(WORK_MODES)}'
+        ) from exc
+
+
 def _validate_job_data(data, current=None, partial=False):
     if not isinstance(data, dict):
         raise ValueError('A JSON request body is required')
+    if 'location' in data:
+        raise ValueError('location is no longer supported; use work_mode')
     current = dict(current or {})
     result = {}
 
@@ -187,7 +215,6 @@ def _validate_job_data(data, current=None, partial=False):
         'title': (200, True),
         'description': (20_000, False),
         'department': (200, False),
-        'location': (300, False),
         'salary_range': (200, False),
         'role_complexity_level': (50, False),
     }
@@ -199,6 +226,11 @@ def _validate_job_data(data, current=None, partial=False):
             )
             if field == 'role_complexity_level':
                 result[field] = result[field].lower()
+
+    if 'work_mode' in data or not partial:
+        result['work_mode'] = _normalise_work_mode(
+            data.get('work_mode', 'On-Site')
+        )
 
     if 'required_skills' in data or not partial:
         result['required_skills'] = _normalise_skills(
@@ -251,17 +283,13 @@ def _validate_job_data(data, current=None, partial=False):
         elif not isinstance(value, str):
             raise ValueError('closes_at must be an ISO datetime string')
         else:
-            try:
-                datetime.fromisoformat(value.replace('Z', '+00:00'))
-            except ValueError as exc:
-                raise ValueError('closes_at must be an ISO datetime string') from exc
-            result['closes_at'] = value
+            result['closes_at'] = _parse_datetime(value, 'closes_at')
 
     merged_status = result.get('status', current.get('status', 'active'))
     merged_closes_at = result.get('closes_at', current.get('closes_at'))
     if merged_status == 'active' and merged_closes_at:
         closes_at = _parse_datetime(merged_closes_at, 'closes_at')
-        now = datetime.now(closes_at.tzinfo) if closes_at.tzinfo else datetime.now()
+        now = datetime.now(timezone.utc)
         if closes_at <= now:
             raise ValueError('An active job must have a future closes_at value')
 
@@ -269,13 +297,9 @@ def _validate_job_data(data, current=None, partial=False):
 
 
 def _parse_datetime(value, field_name):
-    if isinstance(value, datetime):
-        return value
-    if not isinstance(value, str):
-        raise ValueError(f'{field_name} must be an ISO datetime string')
     try:
-        return datetime.fromisoformat(value.replace('Z', '+00:00'))
-    except ValueError as exc:
+        return parse_client_datetime(value)
+    except (TypeError, ValueError) as exc:
         raise ValueError(f'{field_name} must be an ISO datetime string') from exc
 
 
@@ -290,7 +314,7 @@ def _is_job_open(job):
     except ValueError:
         logger.warning("[JOBS] Job %s has invalid closes_at", job.get('id'))
         return False
-    now = datetime.now(closes_at.tzinfo) if closes_at.tzinfo else datetime.now()
+    now = datetime.now(timezone.utc)
     return closes_at > now
 
 
@@ -332,7 +356,7 @@ def _extract_resume_text(resume_path, candidate_id):
 
         extension = path.suffix.lower()
         if extension == '.pdf':
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
             with path.open('rb') as file_handle:
                 pdf = PdfReader(file_handle)
                 text = ' '.join(page.extract_text() or '' for page in pdf.pages)
@@ -477,6 +501,14 @@ def delete_sector(sector_id):
             )
             conn.commit()
         return jsonify({'status': 'success', 'message': 'Sector deleted'})
+    except psycopg2.IntegrityError:
+        return jsonify({
+            'status': 'error',
+            'message': (
+                'Sector is in use and cannot be deleted. '
+                'Reassign its records first.'
+            ),
+        }), 409
     except Exception:
         logger.exception("[SECTORS] Delete failed")
         return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
@@ -585,14 +617,14 @@ def create_job_posting():
             cursor.execute("""
                 INSERT INTO job_descriptions
                 (title, description, required_skills, preferred_skills, min_experience, max_experience,
-                 department, location, sector_id, status, employment_type, experience_level,
+                 department, work_mode, sector_id, status, employment_type, experience_level,
                  salary_range, closes_at, created_by, role_complexity_level)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 data['title'], data.get('description', ''), data['required_skills'],
                 data.get('preferred_skills', json.dumps([])), data.get('min_experience', 0),
-                data.get('max_experience'), data.get('department', ''), data.get('location', ''),
+                data.get('max_experience'), data.get('department', ''), data['work_mode'],
                 data.get('sector_id'), data.get('status', 'active'),
                 data.get('employment_type', 'full-time'), data.get('experience_level', 'mid'),
                 data.get('salary_range', ''), data.get('closes_at'), creator_id,
@@ -691,27 +723,68 @@ def update_job_posting(job_id):
 @jwt_required()
 @require_role('recruiter')
 def delete_job_posting(job_id):
-    """Permanently delete a job posting."""
+    """Archive jobs with history; delete only unused drafts."""
     try:
         claims = get_jwt()
         with db_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(
-                "SELECT id, title, sector_id FROM job_descriptions WHERE id = %s FOR UPDATE",
+                "SELECT id, title, sector_id, status FROM job_descriptions WHERE id = %s FOR UPDATE",
                 (job_id,),
             )
             job = cursor.fetchone()
             if not job:
                 return jsonify({'status': 'error', 'message': 'Job not found'}), 404
             _assert_sector_access(job.get('sector_id'), claims, 'jobs')
-            cursor.execute("DELETE FROM job_descriptions WHERE id = %s", (job_id,))
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM candidates WHERE best_match_job_id = %s
+                    UNION ALL
+                    SELECT 1 FROM scheduled_assessments WHERE job_id = %s
+                    UNION ALL
+                    SELECT 1 FROM assessments WHERE job_id = %s
+                    UNION ALL
+                    SELECT 1 FROM candidate_job_matches WHERE job_id = %s
+                ) AS is_referenced
+                """,
+                (job_id, job_id, job_id, job_id),
+            )
+            reference = cursor.fetchone()
+            is_referenced = bool(reference and reference['is_referenced'])
+            is_unused_draft = job.get('status') == 'draft' and not is_referenced
+            if is_unused_draft:
+                cursor.execute("DELETE FROM job_descriptions WHERE id = %s", (job_id,))
+                action = 'deleted'
+                audit_action = 'delete_job_posting'
+            else:
+                cursor.execute(
+                    """
+                    UPDATE job_descriptions
+                    SET status = 'closed', updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (job_id,),
+                )
+                action = 'archived'
+                audit_action = 'archive_job_posting'
             audit_log(
-                conn, get_jwt_identity(), 'delete_job_posting', 'job_posting', job_id,
-                {'title': job.get('title')}, request.remote_addr,
+                conn, get_jwt_identity(), audit_action,
+                'job_posting', job_id,
+                {
+                    'title': job.get('title'),
+                    'previous_status': job.get('status'),
+                    'referenced': is_referenced,
+                },
+                request.remote_addr,
             )
             conn.commit()
 
-        return jsonify({'status': 'success', 'message': 'Job posting deleted'})
+        return jsonify({
+            'status': 'success',
+            'data': {'action': action},
+            'message': f'Job posting {action}',
+        })
     except PermissionError as exc:
         return jsonify({'status': 'error', 'message': str(exc)}), 403
     except Exception:
@@ -782,7 +855,7 @@ def match_candidate_to_jobs_endpoint():
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(
                 """
-                SELECT id, parsed_skills, parsed_skills_json, years_experience,
+                SELECT id, parsed_skills, years_experience,
                        education, resume_path, sector_id, updated_at
                 FROM candidates WHERE id = %s
                 """,
@@ -810,7 +883,7 @@ def match_candidate_to_jobs_endpoint():
             return jsonify({'status': 'error', 'message': 'No active job postings to match against'}), 404
 
         # Parse candidate skills
-        skills = _parse_skills(candidate.get('parsed_skills') or candidate.get('parsed_skills_json') or '[]')
+        skills = _parse_skills(candidate.get('parsed_skills') or '[]')
         experience = candidate.get('years_experience') or 0
         education = candidate.get('education') or ''
 
@@ -949,7 +1022,7 @@ def get_candidate_matches(candidate_id):
                 return jsonify({'status': 'error', 'message': 'Candidate not found'}), 404
             _assert_sector_access(candidate.get('sector_id'), claims, 'candidates')
             cursor.execute("""
-                SELECT m.*, j.title as job_title, j.department, j.location, j.experience_level,
+                SELECT m.*, j.title as job_title, j.department, j.work_mode, j.experience_level,
                        j.required_skills, j.preferred_skills
                 FROM candidate_job_matches m
                 JOIN job_descriptions j ON m.job_id = j.id
@@ -986,6 +1059,7 @@ def review_candidate_match(candidate_id, job_id):
             raise ValueError('status must be confirmed or rejected')
 
         claims = get_jwt()
+        scoped_sector = _scoped_sector_or_error(claims)
         reviewer_id = _positive_int(get_jwt_identity(), 'JWT identity')
         with db_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1005,7 +1079,8 @@ def review_candidate_match(candidate_id, job_id):
             match = cursor.fetchone()
             if not match:
                 return jsonify({'status': 'error', 'message': 'Match not found'}), 404
-            _assert_sector_access(match.get('sector_id'), claims, 'candidate matches')
+            if match.get('sector_id') is not None:
+                _assert_sector_access(match.get('sector_id'), claims, 'candidate matches')
             _assert_sector_access(match.get('job_sector_id'), claims, 'jobs')
             if status == 'confirmed' and not _is_job_open({
                 'status': match.get('job_status'),
@@ -1031,36 +1106,53 @@ def review_candidate_match(candidate_id, job_id):
                     """
                     UPDATE candidates
                     SET best_match_job_id = %s, match_score = %s,
+                        sector_id = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     """,
-                    (job_id, match.get('match_score') or 0, candidate_id),
+                    (
+                        job_id,
+                        match.get('match_score') or 0,
+                        match.get('job_sector_id'),
+                        candidate_id,
+                    ),
                 )
             elif match.get('best_match_job_id') == job_id:
+                replacement_sector_clause = (
+                    " AND j.sector_id = %s" if scoped_sector is not None else ""
+                )
+                replacement_params = (
+                    (candidate_id, scoped_sector)
+                    if scoped_sector is not None
+                    else (candidate_id,)
+                )
                 cursor.execute(
-                    """
-                    SELECT m.job_id, m.match_score
+                    f"""
+                    SELECT m.job_id, m.match_score, j.sector_id
                     FROM candidate_job_matches m
                     JOIN job_descriptions j ON j.id = m.job_id
                     WHERE m.candidate_id = %s AND m.status <> 'rejected'
                       AND j.status = 'active'
                       AND (j.closes_at IS NULL OR j.closes_at > CURRENT_TIMESTAMP)
+                      {replacement_sector_clause}
                     ORDER BY m.match_score DESC, m.job_id
                     LIMIT 1
                     """,
-                    (candidate_id,),
+                    replacement_params,
                 )
                 replacement = cursor.fetchone()
                 cursor.execute(
                     """
                     UPDATE candidates
                     SET best_match_job_id = %s, match_score = %s,
+                        sector_id = COALESCE(%s, sector_id),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     """,
                     (
                         replacement.get('job_id') if replacement else None,
                         replacement.get('match_score') if replacement else 0,
+                        replacement.get('sector_id') if replacement else None,
                         candidate_id,
                     ),
                 )

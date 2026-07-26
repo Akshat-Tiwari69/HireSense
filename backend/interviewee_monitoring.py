@@ -26,13 +26,19 @@ logger = logging.getLogger(__name__)
 interviewee_monitoring_bp = Blueprint("interviewee_monitoring", __name__)
 
 ASSESSMENT_DURATION_SECONDS = 3_600
-MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024
+MAX_SCREENSHOT_BYTES = 300 * 1024
+MAX_SCREENSHOTS_PER_ASSESSMENT = 12
+MAX_SCREENSHOT_TOTAL_BYTES = 3 * 1024 * 1024
 VALID_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
 VIOLATION_TYPE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SCREENSHOT_DATA_PATTERN = re.compile(
     r"^data:image/(?P<format>jpeg|jpg|png|webp);base64,(?P<data>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
+
+
+class ScreenshotQuotaExceeded(RuntimeError):
+    """Raised when an assessment has retained its maximum screenshot evidence."""
 
 
 def _check_assessment_token(assessment_id: int):
@@ -64,7 +70,7 @@ def _decode_screenshot(screenshot_data):
 
     # Reject oversized input before allocating the decoded byte buffer.
     if len(encoded) > ((MAX_SCREENSHOT_BYTES + 2) // 3) * 4 + 4:
-        raise ValueError("screenshot must not exceed 5 MB")
+        raise ValueError("screenshot must not exceed 300 KB")
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -72,12 +78,41 @@ def _decode_screenshot(screenshot_data):
     if not image_bytes:
         raise ValueError("screenshot image is empty")
     if len(image_bytes) > MAX_SCREENSHOT_BYTES:
-        raise ValueError("screenshot must not exceed 5 MB")
-    return image_bytes, extension
+        raise ValueError("screenshot must not exceed 300 KB")
+
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        detected_extension = "jpg"
+    elif image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected_extension = "png"
+    elif (
+        len(image_bytes) >= 12
+        and image_bytes.startswith(b"RIFF")
+        and image_bytes[8:12] == b"WEBP"
+    ):
+        detected_extension = "webp"
+    else:
+        raise ValueError("screenshot must be a supported image")
+    if extension != detected_extension:
+        raise ValueError("screenshot image format does not match its data")
+    return image_bytes, detected_extension
 
 
 def _save_screenshot(assessment_id, image_bytes, extension):
     screenshots_dir = get_upload_subdirectory("violations", create=True)
+    existing = [
+        path
+        for path in screenshots_dir.glob(f"violation_{assessment_id}_*")
+        if path.is_file()
+    ]
+    existing_bytes = 0
+    for path in existing:
+        with contextlib.suppress(OSError):
+            existing_bytes += path.stat().st_size
+    if (
+        len(existing) >= MAX_SCREENSHOTS_PER_ASSESSMENT
+        or existing_bytes + len(image_bytes) > MAX_SCREENSHOT_TOTAL_BYTES
+    ):
+        raise ScreenshotQuotaExceeded("Assessment screenshot evidence quota reached")
     filename = f"violation_{assessment_id}_{uuid.uuid4().hex}.{extension}"
     filepath = screenshots_dir / filename
     # Exclusive creation prevents an accidental overwrite even under concurrency.
@@ -134,7 +169,7 @@ def report_violation(assessment_id):
             }), 400
         severity = severity.strip().lower()
 
-        screenshot_url = None
+        screenshot_storage_path = None
         screenshot_data = data.get("screenshot")
         if screenshot_data is not None:
             try:
@@ -142,8 +177,13 @@ def report_violation(assessment_id):
             except ValueError as exc:
                 return jsonify({"status": "error", "message": str(exc)}), 400
             try:
-                screenshot_url, screenshot_path = _save_screenshot(
+                screenshot_storage_path, screenshot_path = _save_screenshot(
                     assessment_id, image_bytes, extension
+                )
+            except ScreenshotQuotaExceeded:
+                logger.warning(
+                    "Screenshot evidence quota reached for assessment %s",
+                    assessment_id,
                 )
             except OSError:
                 # Recording the security event is more important than its optional image.
@@ -154,7 +194,7 @@ def report_violation(assessment_id):
             violation_type=violation_type,
             description=description,
             severity=severity,
-            screenshot_url=screenshot_url,
+            screenshot_path=screenshot_storage_path,
         )
         logger.info(
             "Violation recorded for assessment %s: %s (%s); total=%s",
@@ -169,7 +209,7 @@ def report_violation(assessment_id):
             "data": {
                 "violation_id": violation_id,
                 "total_violations": violation_count,
-                "screenshot_saved": screenshot_url is not None,
+                "screenshot_saved": screenshot_storage_path is not None,
             },
         }), 201
     except Exception:

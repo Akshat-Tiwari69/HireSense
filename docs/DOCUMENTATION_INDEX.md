@@ -223,8 +223,12 @@ Headers: Authorization: Bearer <token>
 ```bash
 POST /api/resume/upload
 Content-Type: multipart/form-data
-Body: file, name, email, phone
+Body: file, job_id, name, email, phone (optional)
 ```
+
+The public success response contains only `candidate_id`, `application_status`,
+and the selected job ID/title. Parsed resume and AI-review details remain private
+to authorized hiring staff.
 
 ### Interviewer Actions
 
@@ -245,10 +249,10 @@ Body: {"decision": "hire", "rationale": "..."}
 
 ```bash
 # Verify token
-GET /api/interviewee/assessment/verify/:token
+GET /api/interviewee/assessment/verify
 
 # Start assessment
-POST /api/interviewee/assessment/start-by-token/:token
+POST /api/interviewee/assessment/start
 
 # Submit MCQ answer
 POST /api/assessment/mcq/submit
