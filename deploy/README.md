@@ -32,6 +32,34 @@ accounts, and are validated before reuse. Caddy must be a member of the
 `hiresense-deploy` must use `NOPASSWD:NOSETENV` and name only
 `/usr/local/sbin/deploy-hiresense`.
 
+This host is shared with deployments that replace `/etc/caddy/Caddyfile`.
+Install `Caddyfile.root` as `/etc/caddy/Caddyfile.root`, install
+`caddy-hiresense-override.conf` under
+`/etc/systemd/system/caddy.service.d/`, and keep the HireSense site at
+`/etc/caddy/sites.d/hiresense.caddy`. The override makes Caddy load both the
+replaceable primary file and every independently managed site fragment, so one
+project cannot remove another project's virtual host during a reload.
+`Caddyfile.root` is the sole owner of the `sites.d` import; do not repeat that
+import in the replaceable `/etc/caddy/Caddyfile`. Validate
+`/etc/caddy/Caddyfile.root` after every primary-file change and before reloading
+the service. It is also the sole owner of Caddy's global-options block; the
+replaceable primary and site fragments must contain site blocks only.
+
+The stable entrypoint also moves Caddy's admin API from the TCP loopback port to
+`/run/caddy/admin.sock`. The service drop-in creates that runtime directory for
+the `caddy` user and all reloads target the permissioned socket, preventing
+unprivileged application accounts from replacing the proxy configuration.
+Require Caddy 2.6.1 or newer.
+
+Before installation, verify that `/etc/caddy`, the primary and root Caddyfiles,
+`sites.d`, and every imported fragment are root-owned, non-writable by group or
+others, regular paths with no symlinks. Validate the composite root file, install
+the drop-in, run `systemctl daemon-reload`, and use a one-time
+`systemctl restart caddy` to create the runtime directory and move the admin API
+to its socket. Verify that the socket exists, TCP port 2019 is closed, and every
+shared site is healthy. Subsequent changes use `systemctl reload caddy`; a direct
+reload of the replaceable primary file bypasses this shared-host protection.
+
 Production overrides must include:
 
 ```dotenv
