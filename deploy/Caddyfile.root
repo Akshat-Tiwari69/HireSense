@@ -1,0 +1,9 @@
+# Stable Caddy entrypoint for a host shared by multiple deployments.
+# Individual projects may replace /etc/caddy/Caddyfile without removing
+# independently managed sites under /etc/caddy/sites.d.
+{
+	admin unix//run/caddy/admin.sock|0600
+}
+
+import /etc/caddy/Caddyfile
+import /etc/caddy/sites.d/*.caddy
