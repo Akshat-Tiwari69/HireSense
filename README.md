@@ -98,11 +98,11 @@ App runs at `http://localhost:5173`
 
 ## Documentation
 
-All documentation lives in `docs/`. Start with the index:
+Start with the [GitHub Wiki](https://github.com/Akshat-Tiwari69/HireSense/wiki)
+or use the source documents in `docs/`:
 
 | Document | What it covers |
 |----------|----------------|
-| [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) | Full doc index + quick API reference |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flows, module responsibilities |
 | [docs/BACKEND_FLOW_MAP.md](docs/BACKEND_FLOW_MAP.md) | End-to-end request, database, lifecycle, and failure-boundary map |
 | [docs/BACKEND_FILE_REFERENCE.md](docs/BACKEND_FILE_REFERENCE.md) | Every backend Python file and its functions |
