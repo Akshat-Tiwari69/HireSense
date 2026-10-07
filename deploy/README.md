@@ -141,10 +141,22 @@ never touches non-demo staff, but treat every candidate record as public.
    seed command to restore a clean demo later.
 
 `/login` then offers one-click Admin, Interviewer, and Proctor sign-in, and
-email is written to the admin Email activity log instead of being sent. Re-run
-the seed command with `--reset` (for example nightly from cron) to restore a
-clean demo; it deletes every candidate, job, and assessment plus the demo
-accounts, and keeps all other staff accounts.
+email is written to the admin Email activity log instead of being sent.
+
+`--reset` deletes every candidate, job, and assessment plus the demo accounts,
+keeps all other staff accounts, and only removes resume and screenshot files
+inside the upload directory. To restore a clean demo every night at 03:30 India
+time, install the timer (an administrator change, like the other systemd units).
+The reset stops the API for its two-minute run and always starts it again:
+
+```bash
+sudo install -m 0644 -o root -g root deploy/hiresense-demo-reset.service deploy/hiresense-demo-reset.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hiresense-demo-reset.timer
+```
+
+Run a reset immediately with `sudo systemctl start hiresense-demo-reset.service`
+and read its output with `journalctl -u hiresense-demo-reset.service`.
 
 Suggested walkthrough: apply to a role from `/jobs` as a candidate, sign in as
 Interviewer, review the new applicant, schedule an assessment two minutes out,
