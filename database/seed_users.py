@@ -41,7 +41,7 @@ def _get_or_generate(env_key, label):
     if val:
         return val, False
     generated = _generate_password()
-    print(f"  INFO  {label}: no {env_key} env var set — generated a one-time password (shown below)")
+    print(f"  INFO  {label}: no {env_key} env var set - generated a one-time password (shown below)")
     return generated, True
 
 
@@ -104,7 +104,7 @@ print("\nConnecting to database...")
 try:
     conn = psycopg2.connect(db_url)
     cur = conn.cursor()
-    print("Connected ✓\n")
+    print("Connected.\n")
 except Exception as e:
     print(f"Connection failed: {e}")
     sys.exit(1)
@@ -155,4 +155,4 @@ conn.close()
 # ── Summary ────────────────────────────────────────────────────────────────────
 print(f"\nDone! Created {created} user(s), skipped {skipped} existing.")
 if created > 0:
-    print("\n⚠️  Store any generated passwords shown above — they will not be shown again.")
+    print("\nWARNING: Store any generated passwords shown above - they will not be shown again.")

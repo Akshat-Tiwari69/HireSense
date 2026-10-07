@@ -242,3 +242,31 @@ def test_injected_client_is_not_closed_by_analyzer():
 
     assert client.closed is False
     assert analyzer.client is client
+
+
+def test_local_extraction_finds_skills_in_a_real_docx(monkeypatch, tmp_path):
+    from docx import Document
+
+    from resume_parser import read_resume_text
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    document = Document()
+    for line in (
+        "Maya Rao",
+        "maya.rao@example.com",
+        "Technical Skills: Python, Flask | Docker",
+        "Built JavaScript dashboards backed by PostgreSQL.",
+        "B.Tech Computer Science",
+    ):
+        document.add_paragraph(line)
+    path = tmp_path / "resume.docx"
+    document.save(path)
+
+    result = ResumeAnalyzer().extract_resume_data(
+        read_resume_text(path), ["PostgreSQL", "Java", "C", "Kubernetes"]
+    )
+
+    assert result["name"] == "Maya Rao"
+    assert result["education"] == "B.Tech Computer Science"
+    # "Java" must not match "JavaScript"; "C" must not match inside other words.
+    assert result["skills"] == ["Python", "Flask", "Docker", "PostgreSQL"]

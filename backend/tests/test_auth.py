@@ -112,3 +112,32 @@ def test_slow_login_warning_records_components_without_email(monkeypatch, caplog
     assert "verify=0.200s" in caplog.text
     assert "total=2.500s" in caplog.text
     assert user["email"] not in caplog.text
+
+
+def test_demo_login_does_not_exist_unless_demo_mode_is_enabled(monkeypatch):
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+
+    response = app.test_client().post("/api/auth/demo-login", json={"role": "admin"})
+
+    assert response.status_code == 404
+
+
+def test_demo_login_only_issues_tokens_for_seeded_demo_accounts(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    looked_up = []
+    monkeypatch.setattr(
+        auth,
+        "get_user_by_email",
+        lambda email: looked_up.append(email) or {
+            "id": 9, "email": email, "role": "proctor", "name": "Demo", "sector_id": None,
+        },
+    )
+    monkeypatch.setattr(auth, "user_auth_version", lambda _user: "v1")
+    client = app.test_client()
+
+    assert client.post("/api/auth/demo-login", json={"role": "super_admin"}).status_code == 400
+    response = client.post("/api/auth/demo-login", json={"role": "proctor"})
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["access_token"]
+    assert looked_up == ["demo.proctor@hiresense.demo"]

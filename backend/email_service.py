@@ -1,6 +1,6 @@
 """
 Email Notification Service
-Handles all email communications for the CYGNUSA Elite-Hire system
+Handles all email communications for the HireSense system
 Supports Resend API (recommended for cloud) and SMTP fallback
 """
 
@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from demo_mode import demo_mode_enabled
 from email_db import log_email
 
 # Setup logger
@@ -245,6 +246,14 @@ class EmailService:
             )
             return False
 
+        if demo_mode_enabled():
+            # Demo visitors type arbitrary addresses; record the email, never send it.
+            self._safe_log_email(
+                recipient_email, recipient_name, email_type, subject, "sent",
+                "Demo mode: recorded, not delivered",
+            )
+            return True
+
         providers = self._provider_order()
         for provider_name in providers:
             if provider_name == "smtp":
@@ -369,7 +378,7 @@ class EmailService:
         Returns:
             bool: True if sent successfully
         """
-        subject = "Application Status - CYGNUSA Elite-Hire"
+        subject = "Application Status - HireSense"
         candidate_name = self._safe_display_name(candidate_name)
         candidate_name_html = escape(candidate_name)
         reason_text = str(reason).strip()[:4_000] if reason else None
@@ -400,7 +409,7 @@ class EmailService:
 <body>
     <div class="container">
         <div class="header">
-            <h1>CYGNUSA Elite-Hire</h1>
+            <h1>HireSense</h1>
         </div>
         <div class="content">
             <h2>Dear {candidate_name_html},</h2>
@@ -416,11 +425,11 @@ class EmailService:
             <p>We wish you the best in your job search and future career endeavors.</p>
             
             <p>Best regards,<br>
-            <strong>CYGNUSA Elite-Hire Team</strong></p>
+            <strong>HireSense Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
+            <p>&copy; 2026 HireSense. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -442,11 +451,11 @@ We appreciate the effort you put into your application. We encourage you to appl
 We wish you the best in your job search and future career endeavors.
 
 Best regards,
-CYGNUSA Elite-Hire Team
+HireSense Team
 
 ---
 This is an automated message. Please do not reply to this email.
-© 2026 CYGNUSA Elite-Hire. All rights reserved.
+© 2026 HireSense. All rights reserved.
 """
         
         return self._send_email(
@@ -481,7 +490,7 @@ This is an automated message. Please do not reply to this email.
         Returns:
             bool: True if sent successfully
         """
-        subject = "Assessment Invitation - CYGNUSA Elite-Hire"
+        subject = "Assessment Invitation - HireSense"
         candidate_name = self._safe_display_name(candidate_name)
         assessment_link = str(assessment_link or "").strip()
         if not self._is_valid_http_url(assessment_link):
@@ -577,11 +586,11 @@ This is an automated message. Please do not reply to this email.
             <p>Good luck! We're excited to see your skills in action.</p>
             
             <p>Best regards,<br>
-            <strong>CYGNUSA Elite-Hire Team</strong></p>
+            <strong>HireSense Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
+            <p>&copy; 2026 HireSense. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -622,11 +631,11 @@ If you need to reschedule or have any questions, please contact us as soon as po
 Good luck! We're excited to see your skills in action.
 
 Best regards,
-CYGNUSA Elite-Hire Team
+HireSense Team
 
 ---
 This is an automated message. Please do not reply to this email.
-© 2026 CYGNUSA Elite-Hire. All rights reserved.
+© 2026 HireSense. All rights reserved.
 """
         
         return self._send_email(
@@ -669,7 +678,7 @@ This is an automated message. Please do not reply to this email.
         next_steps_html = escape(next_steps_text) if next_steps_text else None
         is_hired = str(decision or "").strip().lower() in {"hire", "hired", "selected"}
         
-        subject = f"{'Congratulations' if is_hired else 'Assessment Results'} - CYGNUSA Elite-Hire"
+        subject = f"{'Congratulations' if is_hired else 'Assessment Results'} - HireSense"
         
         if is_hired:
             # Positive decision email
@@ -696,7 +705,7 @@ This is an automated message. Please do not reply to this email.
             <h2>Dear {candidate_name_html},</h2>
             
             <div class="success-box">
-                <h3>We are delighted to offer you a position with CYGNUSA!</h3>
+                <h3>We are delighted to offer you a position with us!</h3>
             </div>
             
             <p>We were impressed by your performance in the assessment and believe you will be a valuable addition to our team.</p>
@@ -711,11 +720,11 @@ This is an automated message. Please do not reply to this email.
             <p>Welcome to the team! We look forward to working with you.</p>
             
             <p>Best regards,<br>
-            <strong>CYGNUSA Elite-Hire Team</strong></p>
+            <strong>HireSense Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
+            <p>&copy; 2026 HireSense. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -758,11 +767,11 @@ This is an automated message. Please do not reply to this email.
             <p>We wish you the best in your job search and future career endeavors.</p>
             
             <p>Best regards,<br>
-            <strong>CYGNUSA Elite-Hire Team</strong></p>
+            <strong>HireSense Team</strong></p>
         </div>
         <div class="footer">
             <p>This is an automated message. Please do not reply to this email.</p>
-            <p>&copy; 2026 CYGNUSA Elite-Hire. All rights reserved.</p>
+            <p>&copy; 2026 HireSense. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -776,7 +785,7 @@ This is an automated message. Please do not reply to this email.
 
 Dear {candidate_name},
 
-We are delighted to offer you a position with CYGNUSA!
+We are delighted to offer you a position with us!
 
 We were impressed by your performance in the assessment and believe you will be a valuable addition to our team.
 
@@ -790,7 +799,7 @@ Next Steps:
 Welcome to the team! We look forward to working with you.
 
 Best regards,
-CYGNUSA Elite-Hire Team
+HireSense Team
 """
         else:
             text_body = f"""
@@ -811,7 +820,7 @@ We encourage you to continue developing your skills and apply for future opportu
 We wish you the best in your job search and future career endeavors.
 
 Best regards,
-CYGNUSA Elite-Hire Team
+HireSense Team
 """
         
         return self._send_email(

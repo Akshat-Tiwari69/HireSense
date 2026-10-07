@@ -263,7 +263,7 @@ def get_latest_completed_assessment_by_candidate_id(candidate_id):
                    a.proctoring_violations, a.status,
                    a.started_at, a.completed_at,
                    COALESCE(m.score, 0) as mcq_score,
-                   COALESCE(c.score, 0) as coding_score,
+                   c.score as coding_score,  -- NULL: no coding section was taken
                    a.scheduled_assessment_id, a.recommended_next_step
             FROM assessments a
             LEFT JOIN (
@@ -1106,7 +1106,31 @@ def reject_scheduled_candidate(candidate_id, interviewer_id):
             )
             row = cursor.fetchone()
             if row is None:
-                return None
+                # Resume screening: reject an applicant nobody has scheduled yet.
+                cursor.execute(
+                    """
+                    UPDATE candidates c
+                    SET status = 'rejected', updated_at = CURRENT_TIMESTAMP
+                    WHERE c.id = %s
+                      AND c.status IN ('applied', 'pending', 'absence_of_details')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM scheduled_assessments sa
+                          WHERE sa.candidate_id = c.id
+                      )
+                    RETURNING c.name, c.email
+                    """,
+                    (candidate_id,),
+                )
+                unclaimed = cursor.fetchone()
+                if unclaimed is None:
+                    return None
+                conn.commit()
+                return {
+                    'candidate_id': candidate_id,
+                    'candidate_name': unclaimed[0],
+                    'candidate_email': unclaimed[1],
+                    'should_notify': True,
+                }
 
             candidate_name, candidate_email, candidate_status, schedule_id, schedule_status = row
             if candidate_status == 'rejected' and schedule_status == 'cancelled':

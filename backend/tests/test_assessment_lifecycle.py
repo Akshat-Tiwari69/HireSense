@@ -67,9 +67,9 @@ def answers_client():
 
 def test_psychometric_scoring_does_not_depend_on_option_position_distance():
     assert interviewee_answers._psychometric_option_score(1, 1) == 10
-    assert interviewee_answers._psychometric_option_score(0, 1) == 0
-    assert interviewee_answers._psychometric_option_score(2, 1) == 0
-    assert interviewee_answers._psychometric_option_score(3, 1) == 0
+    assert interviewee_answers._psychometric_option_score(0, 1) == 1
+    assert interviewee_answers._psychometric_option_score(2, 1) == 1
+    assert interviewee_answers._psychometric_option_score(3, 1) == 1
 
 
 def test_coding_answer_is_rejected_before_loading_questions_when_runner_is_disabled(

@@ -7,6 +7,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { useAuth } from '../contexts/AuthContext';
+import { useDemoMode } from '../hooks/useDemoMode';
 import { useToast } from '../hooks/use-toast';
 import { api } from '../services/api';
 
@@ -15,6 +16,12 @@ const routeForRole = (role) => {
   if (role === 'proctor') return '/proctor';
   return '/dashboard';
 };
+
+const DEMO_ROLES = [
+  { role: 'interviewer', label: 'Interviewer', hint: 'Screen applicants, schedule an assessment, and record the hiring decision.' },
+  { role: 'admin', label: 'Admin', hint: 'Manage open roles, staff, resume imports, analytics, and the audit trail.' },
+  { role: 'proctor', label: 'Proctor', hint: 'Monitor assessment sessions and review integrity flags.' },
+];
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -27,6 +34,8 @@ const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [loginError, setLoginError] = useState('');
+  const [demoLoading, setDemoLoading] = useState('');
+  const demoMode = useDemoMode();
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -44,18 +53,11 @@ const LoginPage = () => {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleLogin = async (event) => {
-    event.preventDefault();
-    if (!validateForm()) return;
-
-    setLoading(true);
+  const startSession = async (request) => {
     setLoginError('');
     signOut();
     try {
-      const response = await api.post('/api/auth/login', {
-        email: email.trim(),
-        password,
-      });
+      const response = await request();
       const token = response?.data?.data?.access_token;
       const authenticatedUser = response?.data?.data?.user;
       if (!token || !authenticatedUser?.role) throw new Error('Invalid login response');
@@ -67,9 +69,21 @@ const LoginPage = () => {
       signOut();
       const message = error?.response?.data?.message || 'We could not sign you in with those credentials.';
       setLoginError(message);
-    } finally {
-      setLoading(false);
     }
+  };
+
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    if (!validateForm()) return;
+    setLoading(true);
+    await startSession(() => api.post('/api/auth/login', { email: email.trim(), password }));
+    setLoading(false);
+  };
+
+  const handleDemoLogin = async (role) => {
+    setDemoLoading(role);
+    await startSession(() => api.post('/api/auth/demo-login', { role }));
+    setDemoLoading('');
   };
 
   const accessMessage = loginError || (location.state?.accessDenied
@@ -112,6 +126,31 @@ const LoginPage = () => {
           {accessMessage && (
             <div role="alert" className="mb-5 rounded-lg border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">
               {accessMessage}
+            </div>
+          )}
+
+          {demoMode && (
+            <div className="mb-8 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+              <p className="text-sm font-semibold text-emerald-950">Explore the live demo</p>
+              <p className="mt-1 text-xs leading-5 text-emerald-900">Sample data only. Pick a workspace, no password needed.</p>
+              <div className="mt-3 grid gap-2">
+                {DEMO_ROLES.map(({ role, label, hint }) => (
+                  <Button
+                    key={role}
+                    type="button"
+                    variant="outline"
+                    className="h-auto justify-start whitespace-normal bg-white py-2.5 text-left"
+                    disabled={Boolean(demoLoading) || loading}
+                    onClick={() => handleDemoLogin(role)}
+                  >
+                    {demoLoading === role && <Loader2 className="animate-spin" />}
+                    <span>
+                      <span className="block font-medium">Continue as {label}</span>
+                      <span className="block text-xs font-normal text-muted-foreground">{hint}</span>
+                    </span>
+                  </Button>
+                ))}
+              </div>
             </div>
           )}
 

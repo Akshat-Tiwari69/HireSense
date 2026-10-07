@@ -26,7 +26,7 @@ def test_health_endpoint():
     response = app.test_client().get("/api/health")
 
     assert response.status_code == 200
-    assert response.get_json() == {"status": "ok"}
+    assert response.get_json() == {"status": "ok", "demo_mode": False}
 
 
 def test_removed_legacy_assessment_route_is_not_registered():

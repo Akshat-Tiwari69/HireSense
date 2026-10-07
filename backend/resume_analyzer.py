@@ -140,6 +140,21 @@ def _email(value: Any) -> Optional[str]:
     return match.group(0).lower() if match else None
 
 
+def _skills_in_text(text: str, known_skills: Any = ()) -> list[str]:
+    """Skills listed on a "Skills:" line plus known job skills the resume names verbatim."""
+    found = []
+    for line in text.splitlines():
+        heading, separator, items = line.partition(":")
+        if separator and len(heading) <= 40 and "skill" in heading.casefold():
+            found.extend(re.split(r"[,|;•]", items))
+    lowered = text.casefold()
+    for skill in _string_list(known_skills, limit=100, item_length=80):
+        # Token-ish boundaries so "Java" does not match "JavaScript" nor "C" match "C++".
+        if re.search(rf"(?<![\w+#]){re.escape(skill.casefold())}(?![\w+#])", lowered):
+            found.append(skill)
+    return _string_list(found, limit=30, item_length=80)
+
+
 class ResumeAnalyzer:
     """Extract and evaluate resume data with deterministic local fallbacks."""
 
@@ -459,7 +474,9 @@ and areas_for_improvement (up to 3 strings). Do not penalize unrelated skills.
             "areas_for_improvement": cons[:2],
         }
 
-    def _fallback_extract_resume_data(self, resume_text: str) -> dict[str, Any]:
+    def _fallback_extract_resume_data(
+        self, resume_text: str, known_skills: Any = ()
+    ) -> dict[str, Any]:
         text = _clean_text(resume_text, maximum=MAX_RESUME_CHARS)
         email_match = _EMAIL_RE.search(text)
         phone_match = _PHONE_RE.search(text)
@@ -487,7 +504,7 @@ and areas_for_improvement (up to 3 strings). Do not penalize unrelated skills.
             "name": name,
             "email": email_match.group(0).lower() if email_match else None,
             "phone": _phone(phone_match.group(0)) if phone_match else None,
-            "skills": [],
+            "skills": _skills_in_text(text, known_skills),
             "experience": _number(
                 max(experience_values, default=0), minimum=0, maximum=80
             ),
@@ -495,9 +512,11 @@ and areas_for_improvement (up to 3 strings). Do not penalize unrelated skills.
             "summary": "",
         }
 
-    def extract_resume_data(self, resume_text: str) -> dict[str, Any]:
+    def extract_resume_data(
+        self, resume_text: str, known_skills: Any = ()
+    ) -> dict[str, Any]:
         text = _clean_text(resume_text, maximum=MAX_RESUME_CHARS)
-        fallback = self._fallback_extract_resume_data(text)
+        fallback = self._fallback_extract_resume_data(text, known_skills)
         if not text or self.client is None:
             return fallback
 
@@ -532,7 +551,13 @@ Return a JSON object with name, email, phone, skills (max 20), experience_years
             "name": _single_line(payload.get("name"), maximum=150) or fallback["name"],
             "email": _email(payload.get("email")) or fallback["email"],
             "phone": _phone(payload.get("phone")) or fallback["phone"],
-            "skills": _string_list(payload.get("skills"), limit=20, item_length=80),
+            # Keep verbatim job-skill evidence the model may have omitted.
+            "skills": _string_list(
+                _string_list(payload.get("skills"), limit=20, item_length=80)
+                + fallback["skills"],
+                limit=30,
+                item_length=80,
+            ),
             "experience": _number(
                 payload.get("experience_years", payload.get("experience")),
                 default=fallback["experience"],

@@ -283,3 +283,21 @@ def test_get_candidate_emails_releases_connection_on_success_and_failure():
 
     failed_cursor.close.assert_called_once()
     failed_return.assert_called_once_with(failed_conn)
+
+
+def test_demo_mode_records_email_without_contacting_any_provider(monkeypatch):
+    service = _smtp_service()
+    monkeypatch.setenv("DEMO_MODE", "true")
+
+    with (
+        patch.object(service, "_send_via_smtp") as smtp_send,
+        patch.object(service, "_send_via_resend") as resend_send,
+        patch("email_service.log_email") as log_email,
+    ):
+        result = service._send_email("visitor@example.test", "Visitor", "Subject", "<p>Body</p>")
+
+    assert result is True
+    smtp_send.assert_not_called()
+    resend_send.assert_not_called()
+    assert log_email.call_args.kwargs["status"] == "sent"
+    assert "not delivered" in log_email.call_args.kwargs["error_message"]

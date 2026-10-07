@@ -15,6 +15,7 @@ import { Link } from 'react-router-dom';
 import Logo from '../components/Logo';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import { useDemoMode } from '../hooks/useDemoMode';
 
 const workflow = [
   {
@@ -55,7 +56,9 @@ const principles = [
   },
 ];
 
-const LandingPage = () => (
+const LandingPage = () => {
+  const demoMode = useDemoMode();
+  return (
   <div className="min-h-screen bg-background text-foreground">
     <section className="relative isolate overflow-hidden bg-[#0b1220] text-white">
       <div
@@ -95,7 +98,12 @@ const LandingPage = () => (
           <p className="mt-7 max-w-2xl text-balance text-lg leading-8 text-slate-300 sm:text-xl">
             HireSense brings applications, assessments, evidence, and final decisions into one secure hiring workspace—so teams can move quickly without losing judgment.
           </p>
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            {demoMode && (
+              <Button asChild size="lg" className="bg-emerald-500 text-white hover:bg-emerald-400">
+                <Link to="/login">Try the live demo <ArrowRight /></Link>
+              </Button>
+            )}
             <Button asChild size="lg" className="bg-primary text-white">
               <Link to="/jobs">Explore open roles <ArrowRight /></Link>
             </Button>
@@ -252,6 +260,7 @@ const LandingPage = () => (
       </div>
     </footer>
   </div>
-);
+  );
+};
 
 export default LandingPage;

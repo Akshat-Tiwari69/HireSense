@@ -434,7 +434,7 @@ def get_candidates():
 @interviewer_bp.route('/candidates/<int:candidate_id>', methods=['GET'])
 @jwt_required()
 @require_interviewer_role
-@require_candidate_assignment
+@require_candidate_schedule_access
 def get_candidate_details(candidate_id):
     """
     Get detailed information for a specific candidate
@@ -491,7 +491,7 @@ def get_candidate_details(candidate_id):
 @interviewer_bp.route('/candidates/<int:candidate_id>/resume', methods=['GET'])
 @jwt_required()
 @require_interviewer_role
-@require_candidate_assignment
+@require_candidate_schedule_access
 def download_resume(candidate_id):
     """
     Download resume file for a candidate
@@ -539,7 +539,7 @@ def download_resume(candidate_id):
 @interviewer_bp.route('/candidates/<int:candidate_id>/reject', methods=['POST'])
 @jwt_required()
 @require_interviewer_role
-@require_candidate_assignment
+@require_candidate_schedule_access
 def reject_candidate(candidate_id):
     """
     Reject a candidate after resume review

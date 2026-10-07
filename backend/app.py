@@ -9,13 +9,16 @@ from pathlib import Path
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from storage_config import get_upload_root
 from code_runner_config import code_runner_enabled
+from demo_mode import demo_mode_enabled
 
 # Load environment variables
 # Priority: local.env (for local development) > .env (for production)
 
-# Check if local.env exists and load it first
+# Tests (APP_ENV=test) must not inherit a developer's local settings.
 local_env_path = Path(__file__).parent / 'local.env'
-if local_env_path.exists():
+if os.environ.get('APP_ENV') == 'test':
+    loaded_env_file = 'environment only'
+elif local_env_path.exists():
     load_dotenv(local_env_path)
     loaded_env_file = local_env_path.name
 else:
@@ -271,8 +274,8 @@ def root():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Liveness check: verifies that the API process can serve requests."""
-    return jsonify({"status": "ok"})
+    """Liveness check; also tells the frontend whether to offer demo sign-in."""
+    return jsonify({"status": "ok", "demo_mode": demo_mode_enabled()})
 
 
 @app.route('/api/health/ready', methods=['GET'])

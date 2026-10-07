@@ -207,7 +207,7 @@ const CandidateDetailsModal = ({
                       <div>
                         <p className="text-xs text-slate-500">Coding</p>
                         <p className="mt-1 font-semibold tabular-nums text-slate-950">
-                          {Math.round(clampScore(assessmentDetails.coding_score))}%
+                          {assessmentDetails.coding_score == null ? '—' : `${Math.round(clampScore(assessmentDetails.coding_score))}%`}
                         </p>
                       </div>
                     </div>

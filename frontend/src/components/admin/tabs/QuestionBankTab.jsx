@@ -73,7 +73,7 @@ const QuestionBankTab = ({
                 }}
               >
                 <Label>Question document</Label>
-                <p className="mt-1 text-sm text-muted-foreground">PDF or DOCX files only.</p>
+                <p className="mt-1 text-sm text-muted-foreground">PDF or DOCX files only. Number each question, list options as A) to D), and end with a line like "Answer: B".</p>
                 <input
                   ref={fileInputRef}
                   id="question-bank-file"

@@ -68,6 +68,7 @@ def init_rate_limiting(app):
 
     # Auth endpoints - stricter limits
     _limit_if_present(limiter, app, 'auth.login', "10 per minute")
+    _limit_if_present(limiter, app, 'auth.demo_login', "20 per minute")
 
     # File upload - limited
     _limit_if_present(limiter, app, 'resume.upload_resume', "10 per hour")
