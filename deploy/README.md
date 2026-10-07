@@ -129,13 +129,15 @@ never touches non-demo staff, but treat every candidate record as public.
    ```bash
    sudo systemd-run --pipe --wait --quiet --uid=hiresense --gid=hiresense \
      -p EnvironmentFile=/etc/hiresense/hiresense.env \
+     -p UnsetEnvironment=DATABASE_ADMIN_URL \
      -p WorkingDirectory=/opt/hiresense/current \
      -E PYTHONDONTWRITEBYTECODE=1 \
      /opt/hiresense/current/.venv/bin/python database/seed_demo.py
    ```
 
    `systemd-run` reads the environment file exactly as the service does; sourcing
-   it with bash breaks on the `&` inside `DATABASE_URL`. Add `--reset` to the
+   it with bash breaks on the `&` inside `DATABASE_URL`. Like the service unit, it
+   drops `DATABASE_ADMIN_URL` so the seeder never holds the administrator credential. Add `--reset` to the
    seed command to restore a clean demo later.
 
 `/login` then offers one-click Admin, Interviewer, and Proctor sign-in, and
