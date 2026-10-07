@@ -91,7 +91,8 @@ def _psychometric_option_score(selected_option, optimal_choice):
         optimal_index = int(optimal_choice)
     except (TypeError, ValueError) as exc:
         raise ValueError("Psychometric scoring data is invalid") from exc
-    return 10 if selected_option == optimal_index else 0
+    # psychometric_responses.score is constrained to the 1-10 scale; 0 is rejected.
+    return 10 if selected_option == optimal_index else 1
 
 
 @interviewee_answers_bp.route('/assessment/<int:assessment_id>/submit-answer', methods=['POST'])

@@ -38,8 +38,16 @@ def _normalize_candidate_email(email):
     return email.strip().lower()
 
 
+def _shortlist_for_score(score):
+    """Bucket a 0-100 match score; thresholds mirror the dashboard's score colors."""
+    if score >= 70:
+        return 'High Match'
+    return 'Potential' if score >= 40 else 'Reject'
+
+
 def _candidate_values(name, email, phone, resume_path, parsed_data, pros, cons, status):
     skills = parsed_data.get('skills', [])
+    match_score = parsed_data.get('match_score', 0)
     return (
         name,
         _normalize_candidate_email(email),
@@ -48,8 +56,8 @@ def _candidate_values(name, email, phone, resume_path, parsed_data, pros, cons, 
         json.dumps(skills),
         parsed_data.get('experience', 0),
         parsed_data.get('education', ''),
-        parsed_data.get('match_score', 0),
-        parsed_data.get('shortlist_status', 'Potential'),
+        match_score,
+        parsed_data.get('shortlist_status', _shortlist_for_score(match_score or 0)),
         _serialize_lines(pros),
         _serialize_lines(cons),
         status,

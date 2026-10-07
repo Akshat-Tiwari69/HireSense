@@ -19,6 +19,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.utils import secure_filename
 from db_config import db_connection, get_connection, return_connection
 from candidate_db import get_candidate_by_email, insert_candidate_application
+from resume_parser import job_skill_list
 from admin_middleware import require_admin_role
 from storage_config import get_upload_root, get_upload_subdirectory
 
@@ -187,18 +188,11 @@ def _fetch_job_for_bulk(job_id):
         )
         row = cursor.fetchone()
         if row:
-            skills = set()
-            for skills_val in (row[3], row[4]):
-                if skills_val:
-                    with contextlib.suppress(ValueError, TypeError):
-                        parsed = _json.loads(skills_val)
-                        if isinstance(parsed, list):
-                            skills.update(s.strip() for s in parsed if s.strip())
-                            continue
-                    skills.update(s.strip() for s in str(skills_val).split(',') if s.strip())
+            # Preferred skills inform evidence but must not count as missing requirements.
+            skills, preferred = (job_skill_list(value) for value in (row[3], row[4]))
             min_exp = row[5] or 0
             job_info = {'id': row[0], 'title': row[1], 'department': row[2]}
-            return {'skills': list(skills), 'min_experience': min_exp, 'title': row[1], 'department': row[2]}, job_info
+            return {'skills': skills, 'preferred_skills': preferred, 'min_experience': min_exp, 'title': row[1], 'department': row[2]}, job_info
     except Exception as e:
         logger.warning(f"[BULK] Could not load job posting {job_id}: {e}")
     finally:
@@ -208,7 +202,7 @@ def _fetch_job_for_bulk(job_id):
 
 
 def _process_single_resume(filepath, filename, job_description, job_info, job_id):
-    from resume_parser import parse_resume, calculate_match_score
+    from resume_parser import calculate_match_score, parse_resume, read_resume_text
     from resume_analyzer import analyze_resume, ResumeAnalyzer
 
     result = {
@@ -221,15 +215,7 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
     try:
         parsed_data = parse_resume(filepath, job_description)
 
-        with open(filepath, 'rb') as f:
-            if filepath.lower().endswith('.pdf'):
-                from pypdf import PdfReader
-                pdf = PdfReader(f)
-                resume_text = " ".join([page.extract_text() or '' for page in pdf.pages])
-            else:
-                from docx import Document
-                doc = Document(f)
-                resume_text = " ".join([para.text for para in doc.paragraphs])
+        resume_text = read_resume_text(filepath)
 
         if not resume_text or len(resume_text.strip()) < 50:
             result['missing'] = ['name', 'email']
@@ -258,7 +244,10 @@ def _process_single_resume(filepath, filename, job_description, job_info, job_id
 
         try:
             analyzer = ResumeAnalyzer()
-            if ai_data := analyzer.extract_resume_data(resume_text):
+            if ai_data := analyzer.extract_resume_data(
+                resume_text,
+                job_description["skills"] + job_description["preferred_skills"],
+            ):
                 _merge_ai_data_to_parsed(parsed_data, ai_data)
                 parsed_data['match_score'] = calculate_match_score(
                     parsed_data.get('skills', []), parsed_data.get('experience', 0),
@@ -386,6 +375,33 @@ def _extract_text_from_file(filepath):
     return "\n".join(chunks).strip()
 
 
+_MCQ_QUESTION_RE = re.compile(r"^(?:Q\s*)?\d+\s*[.)]\s*(.+)$", re.IGNORECASE)
+_MCQ_OPTION_RE = re.compile(r"^\(?([A-Da-d])[.)]\s*(.+)$")
+_MCQ_ANSWER_RE = re.compile(r"^(?:correct\s+)?answer\s*[:\-]\s*\(?([A-Da-d])(?![A-Za-z])", re.IGNORECASE)
+
+
+def _parse_mcq_blocks(text):
+    """Parse '1. Question / A) .. D) options / Answer: B' blocks without an AI provider."""
+    questions, current = [], None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if current is not None and (match := _MCQ_ANSWER_RE.match(line)):
+            index = "ABCD".index(match.group(1).upper())
+            if index < len(current['options']):
+                current['correct_answer'] = current['options'][index]
+        elif current is not None and (match := _MCQ_OPTION_RE.match(line)):
+            current['options'].append(match.group(2).strip())
+        elif match := _MCQ_QUESTION_RE.match(line):
+            current = {'question': match.group(1).strip(), 'options': [], 'correct_answer': None,
+                       'category': 'custom', 'difficulty': 'medium'}
+            questions.append(current)
+        elif current is not None and not current['options']:
+            current['question'] += ' ' + line  # question text wrapped onto the next line
+    return [q for q in questions if len(q['options']) == 4 and q['correct_answer']]
+
+
 def _parse_questions_from_text(text):
     questions = []
 
@@ -428,6 +444,10 @@ Return ONLY valid JSON, no markdown."""},
         return questions
     except Exception as ai_err:
         logger.warning(f"[CUSTOM QB] AI parsing failed: {ai_err}, falling back to regex")
+
+    if mcq_questions := _parse_mcq_blocks(text):
+        logger.info(f"[CUSTOM QB] Parsed {len(mcq_questions)} multiple-choice questions without AI")
+        return mcq_questions
 
     q_pattern = re.compile(r'(?:^|\n)\s*(\d+)\s*[.)]\s*(.+?)(?=\n\s*\d+\s*[.)]|\n*$)', re.DOTALL)
     matches = q_pattern.findall(text)

@@ -3,6 +3,30 @@ Basic resume parsing functions (minimal stubs)
 Main parsing now handled by resume_analyzer.py with AI
 """
 
+import contextlib
+import json
+
+
+def job_skill_list(skills_val):
+    """Parse a stored JSON-array or comma-separated skill column."""
+    if not skills_val:
+        return []
+    with contextlib.suppress(ValueError, TypeError):
+        parsed = json.loads(skills_val)
+        if isinstance(parsed, list):
+            return [s.strip() for s in parsed if isinstance(s, str) and s.strip()]
+    return [s.strip() for s in str(skills_val).split(',') if s.strip()]
+
+
+def read_resume_text(filepath):
+    """Return PDF/DOCX text with line breaks kept; the local extractor reads it line by line."""
+    with open(filepath, 'rb') as f:
+        if str(filepath).lower().endswith('.pdf'):
+            from pypdf import PdfReader
+            return "\n".join(page.extract_text() or '' for page in PdfReader(f).pages)
+        from docx import Document
+        return "\n".join(para.text for para in Document(f).paragraphs)
+
 def parse_resume(filepath, job_description=None):
     """
     Basic fallback parser - returns minimal data structure

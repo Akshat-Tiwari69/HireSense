@@ -124,6 +124,8 @@ const InterviewerDashboardPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [rejectingCandidateId, setRejectingCandidateId] = useState(null);
   const [schedulingLoading, setSchedulingLoading] = useState(false);
+  const [includeCoding, setIncludeCoding] = useState(false);
+  const [codingAvailable, setCodingAvailable] = useState(false);
 
   const stats = useMemo(() => realtimeCandidates.reduce((totals, candidate) => {
     if (candidate.aiMatchScore >= 85) totals.highMatch += 1;
@@ -179,16 +181,24 @@ const InterviewerDashboardPage = () => {
     fetchCandidates();
   }, [fetchCandidates]);
 
+  useEffect(() => {
+    // The readiness probe reports whether an isolated code runner is configured.
+    api.get('/api/health/ready')
+      .then(({ data }) => setCodingAvailable(data?.code_runner === 'enabled'))
+      .catch(() => setCodingAvailable(false));
+  }, []);
+
   const handleDownloadResume = useCallback(async (candidateId) => {
     try {
       const response = await api.get(`/api/interviewer/candidates/${candidateId}/resume`, {
         responseType: 'blob'
       });
 
+      const isDocx = String(response.headers?.['content-type'] || '').includes('wordprocessingml');
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `resume_${candidateId}.pdf`);
+      link.setAttribute('download', `resume_${candidateId}.${isDocx ? 'docx' : 'pdf'}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -239,13 +249,15 @@ const InterviewerDashboardPage = () => {
   const handleReject = useCallback(async (candidateId) => {
     setRejectingCandidateId(candidateId);
     try {
-      await api.post(`/api/interviewer/candidates/${candidateId}/reject`, { reason: '' });
+      const response = await api.post(`/api/interviewer/candidates/${candidateId}/reject`, { reason: '' });
       setRealtimeCandidates(prev => prev.map(c =>
         c.id === candidateId ? { ...c, status: 'Rejected' } : c
       ));
       toast({
         title: 'Candidate rejected',
-        description: 'Rejection email sent',
+        description: response?.data?.data?.email_sent
+          ? 'The candidate was notified by email.'
+          : 'The rejection email could not be delivered.',
       });
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to reject candidate';
@@ -268,18 +280,26 @@ const InterviewerDashboardPage = () => {
     setSchedulingLoading(true);
     const scheduledDateTime = `${scheduleDate}T${scheduleTime}:00`;
     try {
-      await api.post(`/api/interviewer/candidates/${selectedCandidate.id}/schedule`, {
+      const response = await api.post(`/api/interviewer/candidates/${selectedCandidate.id}/schedule`, {
         scheduled_time: scheduledDateTime,
-        is_technical_role: false,
+        is_technical_role: codingAvailable && includeCoding,
       });
       setRealtimeCandidates(prev => prev.map(c =>
         c.id === selectedCandidate.id
-          ? { ...c, status: 'Scheduled', assessmentScheduled: scheduledDateTime, isTechnicalRole: false }
+          ? { ...c, status: 'Scheduled', assessmentScheduled: scheduledDateTime, isTechnicalRole: codingAvailable && includeCoding }
           : c
       ));
+      const assessmentLink = response?.data?.data?.assessment_link;
       toast({
         title: 'Assessment scheduled',
-        description: `Candidate will receive email with assessment link for ${scheduleDate} at ${scheduleTime}`,
+        description: `Invitation sent for ${scheduleDate} at ${scheduleTime}. You can also share the link directly.`,
+        duration: 30_000,
+        ...(assessmentLink && {
+          action: {
+            label: 'Copy link',
+            onClick: () => navigator.clipboard?.writeText(assessmentLink),
+          },
+        }),
       });
     } catch (err) {
       const message = err?.response?.data?.message || 'Failed to schedule assessment';
@@ -289,9 +309,10 @@ const InterviewerDashboardPage = () => {
       setScheduleModalOpen(false);
       setScheduleDate('');
       setScheduleTime('');
+      setIncludeCoding(false);
       setSelectedCandidate(null);
     }
-  }, [scheduleDate, scheduleTime, selectedCandidate, setRealtimeCandidates, toast]);
+  }, [codingAvailable, includeCoding, scheduleDate, scheduleTime, selectedCandidate, setRealtimeCandidates, toast]);
 
   const handleOpenDetails = useCallback(async (candidate) => {
     const shouldLoadAssessment = ['Completed', 'Hired', 'Rejected'].includes(candidate.status);
@@ -528,6 +549,9 @@ const InterviewerDashboardPage = () => {
         setScheduleTime={setScheduleTime}
         schedulingLoading={schedulingLoading}
         onSchedule={handleSchedule}
+        codingAvailable={codingAvailable}
+        includeCoding={includeCoding}
+        setIncludeCoding={setIncludeCoding}
       />
 
       {/* Candidate Details Modal */}

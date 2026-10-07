@@ -31,6 +31,9 @@ const ScheduleModal = ({
   setScheduleTime,
   schedulingLoading,
   onSchedule,
+  codingAvailable = false,
+  includeCoding = false,
+  setIncludeCoding = () => {},
 }) => {
   const now = new Date();
   const today = getLocalDateInputValue(now);
@@ -106,9 +109,8 @@ const ScheduleModal = ({
             </div>
           </div>
 
-          <div
-            aria-labelledby="assessment-format-label"
-            aria-describedby="assessment-format-description"
+          <label
+            htmlFor="assessment-include-coding"
             className="flex w-full items-center justify-between gap-4 rounded-xl border bg-card p-4 text-left"
           >
             <span className="flex min-w-0 items-center gap-3">
@@ -116,16 +118,25 @@ const ScheduleModal = ({
                 <Code className="h-5 w-5" aria-hidden="true" />
               </span>
               <span className="min-w-0">
-                <span id="assessment-format-label" className="block text-sm font-semibold text-foreground">
-                  Knowledge and workstyle assessment
+                <span className="block text-sm font-semibold text-foreground">
+                  Include a coding exercise
                 </span>
-                <span id="assessment-format-description" className="mt-0.5 block text-xs text-muted-foreground">
-                  Coding exercises are paused on this deployment; the standard assessment is ready.
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {codingAvailable
+                    ? 'Adds a role-specific coding problem to the knowledge and workstyle sections.'
+                    : 'Unavailable: this deployment has no code runner configured.'}
                 </span>
               </span>
             </span>
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Ready</span>
-          </div>
+            <input
+              id="assessment-include-coding"
+              type="checkbox"
+              className="h-5 w-5 shrink-0 accent-primary"
+              checked={codingAvailable && includeCoding}
+              disabled={!codingAvailable || schedulingLoading}
+              onChange={(event) => setIncludeCoding(event.target.checked)}
+            />
+          </label>
 
           {hasValidSchedule && scheduledDateTime ? (
             <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4" aria-live="polite">

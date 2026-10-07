@@ -8,13 +8,12 @@ import os
 import re
 import uuid
 import logging
-import contextlib
 import stat
 import zipfile
 from pathlib import PurePosixPath
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
-from resume_parser import parse_resume
+from resume_parser import job_skill_list, parse_resume, read_resume_text
 from resume_analyzer import analyze_resume
 from candidate_db import get_candidate_by_email, insert_candidate_application
 from db_config import db_connection
@@ -164,7 +163,6 @@ def _duplicate_application_response():
 
 def _get_job_description_for_id(job_id):
     try:
-        import json as _json
         with db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -175,17 +173,10 @@ def _get_job_description_for_id(job_id):
             )
             row = cursor.fetchone()
         if row:
-            skills = set()
-            for skills_val in (row[3], row[4]):
-                if skills_val:
-                    with contextlib.suppress(ValueError, TypeError):
-                        parsed = _json.loads(skills_val)
-                        if isinstance(parsed, list):
-                            skills.update(s.strip() for s in parsed if s.strip())
-                            continue
-                    skills.update(s.strip() for s in str(skills_val).split(',') if s.strip())
+            # Preferred skills inform evidence but must not count as missing requirements.
+            skills, preferred = (job_skill_list(value) for value in (row[3], row[4]))
             job_info = {'id': row[0], 'title': row[1], 'department': row[2]}
-            return {'skills': list(skills), 'min_experience': row[5] or 0,
+            return {'skills': skills, 'preferred_skills': preferred, 'min_experience': row[5] or 0,
                     'title': row[1], 'department': row[2]}, job_info
     except Exception as e:
         logger.warning(f"[MATCH] Could not load job posting {job_id}: {e}")
@@ -282,20 +273,15 @@ def upload_resume():
     try:
         parsed_data = parse_resume(filepath, job_description)
 
-        with open(filepath, 'rb') as f:
-            if extension == 'pdf':
-                from pypdf import PdfReader
-                pdf = PdfReader(f)
-                resume_text = " ".join([page.extract_text() or '' for page in pdf.pages])
-            else:
-                from docx import Document
-                doc = Document(f)
-                resume_text = " ".join([para.text for para in doc.paragraphs])
+        resume_text = read_resume_text(filepath)
 
         try:
             from resume_analyzer import ResumeAnalyzer
             analyzer = ResumeAnalyzer()
-            if ai_extracted_data := analyzer.extract_resume_data(resume_text):
+            if ai_extracted_data := analyzer.extract_resume_data(
+                resume_text,
+                job_description["skills"] + job_description["preferred_skills"],
+            ):
                 for field in ('skills', 'education', 'name', 'email', 'phone'):
                     if ai_extracted_data.get(field):
                         parsed_data[field] = ai_extracted_data[field]

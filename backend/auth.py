@@ -16,6 +16,7 @@ import logging
 from time import perf_counter
 from functools import lru_cache
 from werkzeug.security import generate_password_hash, check_password_hash
+from demo_mode import DEMO_ACCOUNTS, demo_mode_enabled
 from user_db import (
     get_user_by_email,
     get_user_by_id,
@@ -75,6 +76,33 @@ def _record_login_timing(request_started, lookup_seconds, verify_seconds):
             lookup_seconds,
             verify_seconds,
         )
+
+
+def _session_response(user):
+    """Issue a staff JWT carrying the role/sector claims used for RBAC."""
+    access_token = create_access_token(
+        identity=str(user['id']),  # JWT requires a string identity
+        additional_claims={
+            'role': user['role'],
+            'name': user['name'],
+            'sector_id': user.get('sector_id'),
+            'user_auth_version': user_auth_version(user),
+        },
+    )
+    return jsonify({
+        'status': 'success',
+        'message': 'Login successful',
+        'data': {
+            'access_token': access_token,
+            'user': {
+                'id': user['id'],
+                'email': user['email'],
+                'role': user['role'],
+                'name': user['name'],
+                'sector_id': user.get('sector_id')
+            }
+        }
+    }), 200
 
 
 @auth_bp.route('/login', methods=['POST'])
@@ -142,37 +170,9 @@ def login():
                 'message': 'Invalid email or password'
             }), 401
         
-        # Create JWT token with user info (includes sector for RBAC)
-        additional_claims = {
-            'role': user['role'],
-            'name': user['name'],
-            'sector_id': user.get('sector_id'),
-            'user_auth_version': user_auth_version(user),
-        }
-        
-        access_token = create_access_token(
-            identity=str(user['id']),  # Convert to string - JWT requires string identity
-            additional_claims=additional_claims
-        )
-
         _record_login_timing(request_started, lookup_seconds, verify_seconds)
-        
         logger.info("[AUTH] Login succeeded for user %s with role %s", user['id'], user['role'])
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Login successful',
-            'data': {
-                'access_token': access_token,
-                'user': {
-                    'id': user['id'],
-                    'email': user['email'],
-                    'role': user['role'],
-                    'name': user['name'],
-                    'sector_id': user.get('sector_id')
-                }
-            }
-        }), 200
+        return _session_response(user)
 
     except Exception:
         logger.exception("[ERROR] Login failed")
@@ -180,6 +180,31 @@ def login():
             'status': 'error',
             'message': 'Login failed. Please try again later.'
         }), 500
+
+
+@auth_bp.route('/demo-login', methods=['POST'])
+def demo_login():
+    """Sign in as the seeded demo account for a role. Exists only when DEMO_MODE=true."""
+    if not demo_mode_enabled():
+        return jsonify({'status': 'error', 'message': 'Not Found'}), 404
+    data = request.get_json(silent=True)
+    email = DEMO_ACCOUNTS.get(data.get('role') if isinstance(data, dict) else None)
+    if not email:
+        return jsonify({
+            'status': 'error',
+            'message': f"role must be one of: {', '.join(DEMO_ACCOUNTS)}",
+        }), 400
+    try:
+        user = get_user_by_email(email)
+    except Exception:
+        logger.exception("[ERROR] Demo login failed")
+        return jsonify({'status': 'error', 'message': 'Demo is temporarily unavailable.'}), 503
+    if not user:
+        return jsonify({
+            'status': 'error',
+            'message': 'Demo accounts are not set up. Run database/seed_demo.py.',
+        }), 503
+    return _session_response(user)
 
 
 @auth_bp.route('/me', methods=['GET'])

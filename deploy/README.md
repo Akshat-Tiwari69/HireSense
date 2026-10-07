@@ -114,3 +114,31 @@ The single Eventlet worker is intentional on the one-vCPU host and preserves
 in-process Socket.IO room state. Public WebRTC currently uses STUN only; a TURN
 service is still required for reliable proctor video across restrictive or
 symmetric NAT networks.
+
+## Public demo deployment
+
+Demo mode gives every visitor admin, interviewer, or proctor access to all
+hiring data. Staff accounts stay read-only for demo visitors, and the seeder
+never touches non-demo staff, but treat every candidate record as public.
+
+1. Back up any data you need to keep.
+2. Add `DEMO_MODE=true` (and ideally `OPENAI_API_KEY`, so assessment questions
+   match each role) to `/etc/hiresense/hiresense.env`, then restart the service.
+3. Seed as the service user so resume files land in the upload directory:
+
+   ```bash
+   sudo -u hiresense bash -c 'set -a; . /etc/hiresense/hiresense.env; cd /opt/hiresense/current && .venv/bin/python database/seed_demo.py --reset'
+   ```
+
+`/login` then offers one-click Admin, Interviewer, and Proctor sign-in, and
+email is written to the admin Email activity log instead of being sent. Re-run
+the seed command (for example nightly from cron) to restore a clean demo;
+`--reset` deletes every candidate, job, and assessment plus the demo accounts,
+and keeps all other staff accounts.
+
+Suggested walkthrough: apply to a role from `/jobs` as a candidate, sign in as
+Interviewer, review the new applicant, schedule an assessment two minutes out,
+use **Copy link** on the confirmation and open it in a private window to take
+the assessment, then return to record the decision. Rohan Mehta and Meera Nair
+are pre-seeded as completed assessments awaiting a decision.
+

@@ -206,3 +206,21 @@ def test_question_bank_persists_one_canonical_filename(monkeypatch, tmp_path):
     assert "(original_filename, file_path" in connection.cursor_instance.query
     assert "(filename, original_filename" not in connection.cursor_instance.query
     assert len(connection.cursor_instance.params) == 7
+
+
+def test_question_bank_mcqs_parse_without_an_ai_provider():
+    questions = admin_content._parse_mcq_blocks(
+        "1. What does CRM stand for\nin sales?\n"
+        "a. Customer Relationship Management\nb. Client Revenue Model\n"
+        "c. Cost Reduction Method\nd. Contract Review Meeting\nCorrect answer: (a)\n"
+        "2. An open question without options?\n"
+    )
+
+    assert questions == [{
+        "question": "What does CRM stand for in sales?",
+        "options": ["Customer Relationship Management", "Client Revenue Model",
+                    "Cost Reduction Method", "Contract Review Meeting"],
+        "correct_answer": "Customer Relationship Management",
+        "category": "custom",
+        "difficulty": "medium",
+    }]

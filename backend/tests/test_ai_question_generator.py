@@ -344,3 +344,25 @@ def test_singleton_closes_old_client_when_api_key_changes():
     first.close.assert_called_once()
     generator_module._generator_instance = None
     generator_module._generator_api_key = None
+
+
+def test_offline_questions_use_uploaded_bank_then_fit_the_role():
+    generator = _generator_without_provider()
+    uploaded = [
+        {"question": "Free-form question?", "options": None, "correct_answer": None},
+        {"question": "Best channel for an urgent client issue?",
+         "options": ["Newsletter", "Phone call", "Report", "Post"], "correct_answer": "B"},
+    ]
+
+    with patch.object(generator, "_get_custom_questions", return_value=uploaded):
+        sales = generator.generate_mcq_questions(
+            ["Lead Generation"], count=10, job_title="Sales Development Representative"
+        )
+    with patch.object(generator, "_get_custom_questions", return_value=[]):
+        backend = generator.generate_mcq_questions(["Python"], count=3, job_title="Backend Engineer")
+
+    assert sales[0]["question"] == "Best channel for an urgent client issue?"
+    assert sales[0]["correct_answer"] == "Phone call"
+    assert len(sales) == 10
+    assert not any("binary search" in q["question"] for q in sales)
+    assert "binary search" in backend[0]["question"]
