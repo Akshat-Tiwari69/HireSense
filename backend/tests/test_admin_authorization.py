@@ -271,3 +271,19 @@ def test_assigned_staff_account_cannot_be_deleted(monkeypatch):
         "Reassign this user's active hiring work before deleting the account"
     )
     assert connection.rollbacks == 1
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("post", "/api/admin/users"), ("put", "/api/admin/users/2"), ("delete", "/api/admin/users/2")],
+)
+def test_demo_visitors_cannot_change_staff_accounts(monkeypatch, method, path):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    with app.app_context():
+        token = create_access_token(identity="7", additional_claims={"role": "admin", "name": "Demo"})
+
+    response = getattr(app.test_client(), method)(
+        path, headers={"Authorization": f"Bearer {token}"}, json={"password": "new-password-123"}
+    )
+
+    assert response.status_code == 403

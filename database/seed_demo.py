@@ -1,14 +1,15 @@
 """
 HireSense demo data seeder.
 
-Fills a dedicated demo database with demo staff accounts, open roles, and
-candidates at every hiring stage. It drives the real API through Flask's test
+Adds demo staff accounts, open roles, and candidates at every hiring stage.
+Existing (non-demo) staff accounts are never modified or removed. It drives the real API through Flask's test
 client, so resume parsing, scoring, assessments, and decisions all run through
 the application's own code paths.
 
 Usage (repository root, backend environment configured as for the server):
-    python database/seed_demo.py           # seed an empty demo database
-    python database/seed_demo.py --reset   # delete existing demo data, then seed
+    python database/seed_demo.py           # add the demo accounts and data
+    python database/seed_demo.py --reset   # delete ALL hiring data and demo accounts
+                                           # (real staff accounts stay), then seed
 
 On a server, run it as the backend service user so resume files land in
 UPLOAD_FOLDER. Pair the deployment with DEMO_MODE=true.
@@ -42,7 +43,7 @@ DEMO_TABLES = (
     "audit_log", "email_logs", "custom_question_bank", "candidate_job_matches",
     "proctoring_violations", "mcq_responses", "coding_submissions",
     "psychometric_responses", "assessments", "scheduled_assessments",
-    "candidates", "job_descriptions", "users",
+    "candidates", "job_descriptions",
 )
 
 STAFF = {
@@ -150,25 +151,23 @@ class Api:
 def reset():
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT email FROM users WHERE email NOT LIKE %s", (f"%{DEMO_EMAIL_SUFFIX}",))
-        if cursor.fetchone():
-            raise SystemExit("Refusing to reset: this database has non-demo staff accounts.")
         cursor.execute("SELECT resume_path FROM candidates")
         resume_paths = [row[0] for row in cursor.fetchall()]
         for table in DEMO_TABLES:
             cursor.execute(f"DELETE FROM {table}")  # noqa: S608 - fixed table names
+        cursor.execute("DELETE FROM users WHERE email LIKE %s", (f"%{DEMO_EMAIL_SUFFIX}",))
         conn.commit()
     for path in resume_paths:
         Path(path).unlink(missing_ok=True)
-    print(f"Reset: removed demo data and {len(resume_paths)} resume files.")
+    print(f"Reset: removed hiring data, demo accounts, and {len(resume_paths)} resume files.")
 
 
 def create_staff():
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM users LIMIT 1")
+        cursor.execute("SELECT 1 FROM users WHERE email LIKE %s", (f"%{DEMO_EMAIL_SUFFIX}",))
         if cursor.fetchone():
-            raise SystemExit("The database already has staff accounts. Use --reset on a demo database.")
+            raise SystemExit("Demo data is already seeded. Use --reset to start over.")
         for role, email in DEMO_ACCOUNTS.items():
             # Demo accounts sign in through /api/auth/demo-login; nobody knows this password.
             cursor.execute(

@@ -117,9 +117,11 @@ symmetric NAT networks.
 
 ## Public demo deployment
 
-A demo needs its own database: demo mode gives every visitor staff access.
+Demo mode gives every visitor admin, interviewer, or proctor access to all
+hiring data. Staff accounts stay read-only for demo visitors, and the seeder
+never touches non-demo staff, but treat every candidate record as public.
 
-1. Point `DATABASE_URL` at a dedicated demo database and apply the schema.
+1. Back up any data you need to keep.
 2. Add `DEMO_MODE=true` (and ideally `OPENAI_API_KEY`, so assessment questions
    match each role) to `/etc/hiresense/hiresense.env`, then restart the service.
 3. Seed as the service user so resume files land in the upload directory:
@@ -131,7 +133,8 @@ A demo needs its own database: demo mode gives every visitor staff access.
 `/login` then offers one-click Admin, Interviewer, and Proctor sign-in, and
 email is written to the admin Email activity log instead of being sent. Re-run
 the seed command (for example nightly from cron) to restore a clean demo;
-`--reset` refuses to run against a database with non-demo staff accounts.
+`--reset` deletes every candidate, job, and assessment plus the demo accounts,
+and keeps all other staff accounts.
 
 Suggested walkthrough: apply to a role from `/jobs` as a candidate, sign in as
 Interviewer, review the new applicant, schedule an assessment two minutes out,

@@ -9,10 +9,19 @@ from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from db_config import get_connection, return_connection
 from auth import VALID_ROLES, hash_password, validate_email
 from admin_middleware import require_admin_role
+from demo_mode import demo_mode_enabled
 
 logger = logging.getLogger(__name__)
 
 admin_users_bp = Blueprint('admin_users', __name__)
+
+
+@admin_users_bp.before_request
+def staff_accounts_are_read_only_in_demo():
+    # Every demo visitor is an admin; they must not take over or delete real staff.
+    if demo_mode_enabled() and request.method != 'GET':
+        return jsonify({'status': 'error', 'message': 'Staff accounts are read-only in the demo.'}), 403
+    return None
 
 _PRIVILEGED_ROLES = {'admin', 'super_admin'}
 _SECTOR_SCOPED_ROLES = {'recruiter', 'sector_admin'}
