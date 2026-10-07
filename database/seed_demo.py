@@ -37,6 +37,7 @@ from assessment_db import get_assessment_questions  # noqa: E402
 from db_config import db_connection  # noqa: E402
 from demo_mode import DEMO_ACCOUNTS  # noqa: E402
 from interviewee_answers import _resolve_correct_answer  # noqa: E402
+from storage_config import is_within_upload_root  # noqa: E402
 
 DEMO_EMAIL_SUFFIX = "@hiresense.demo"
 # Deleted children-first so foreign keys never block the reset.
@@ -158,9 +159,11 @@ def reset():
             cursor.execute(f"DELETE FROM {table}")  # noqa: S608 - fixed table names
         cursor.execute("DELETE FROM users WHERE email LIKE %s", (f"%{DEMO_EMAIL_SUFFIX}",))
         conn.commit()
-    for path in resume_paths:
-        Path(path).unlink(missing_ok=True)
-    print(f"Reset: removed hiring data, demo accounts, and {len(resume_paths)} resume files.")
+    # Imported rows can carry paths from other machines; only touch our own uploads.
+    own_files = [Path(path) for path in resume_paths if is_within_upload_root(path)]
+    for path in own_files:
+        path.unlink(missing_ok=True)
+    print(f"Reset: removed hiring data, demo accounts, and {len(own_files)} resume files.")
 
 
 def create_staff():

@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly HireSense public demo reset
+
+[Timer]
+# 03:30 India time: the quietest hour for an India-facing demo.
+OnCalendar=*-*-* 03:30:00 Asia/Kolkata
+Persistent=true
+
+[Install]
+WantedBy=timers.target

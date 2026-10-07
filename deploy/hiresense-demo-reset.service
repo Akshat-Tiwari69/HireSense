@@ -1,0 +1,30 @@
+[Unit]
+Description=Reset HireSense public demo data
+After=network-online.target hiresense.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hiresense
+Group=hiresense
+WorkingDirectory=/opt/hiresense/current
+EnvironmentFile=/etc/hiresense/hiresense.env
+UnsetEnvironment=DATABASE_ADMIN_URL
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/hiresense/current/.venv/bin/python database/seed_demo.py --reset
+TimeoutStartSec=20min
+UMask=0077
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hiresense/uploads
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
