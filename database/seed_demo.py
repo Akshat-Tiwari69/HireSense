@@ -37,7 +37,7 @@ from assessment_db import get_assessment_questions  # noqa: E402
 from db_config import db_connection  # noqa: E402
 from demo_mode import DEMO_ACCOUNTS  # noqa: E402
 from interviewee_answers import _resolve_correct_answer  # noqa: E402
-from storage_config import is_within_upload_root  # noqa: E402
+from storage_config import get_upload_root  # noqa: E402
 
 DEMO_EMAIL_SUFFIX = "@hiresense.demo"
 # Deleted children-first so foreign keys never block the reset.
@@ -150,20 +150,46 @@ class Api:
         return self.call("post", "/api/auth/demo-login", json={"role": role})["access_token"]
 
 
+def upload_entry(stored_path):
+    """The upload-directory entry a stored path names, or None if it lives anywhere else.
+
+    Imported rows can carry paths from other machines. Only the parent directory is
+    resolved, so a symlink is judged by where it sits, never by where it points.
+    """
+    if not isinstance(stored_path, str) or not stored_path.strip():
+        return None
+    root = get_upload_root()
+    path = Path(stored_path.removeprefix("/uploads/"))  # screenshots are stored as /uploads/...
+    if not path.is_absolute():
+        path = root / path
+    try:
+        entry = path.parent.resolve() / path.name
+    except (OSError, RuntimeError):  # unreadable directory or symlink loop
+        return None
+    return entry if root in entry.parents else None
+
+
 def reset():
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT resume_path FROM candidates")
-        resume_paths = [row[0] for row in cursor.fetchall()]
+        cursor.execute(
+            "SELECT resume_path FROM candidates "
+            "UNION ALL SELECT screenshot_path FROM proctoring_violations"
+        )
+        stored_paths = [row[0] for row in cursor.fetchall()]
         for table in DEMO_TABLES:
             cursor.execute(f"DELETE FROM {table}")  # noqa: S608 - fixed table names
         cursor.execute("DELETE FROM users WHERE email LIKE %s", (f"%{DEMO_EMAIL_SUFFIX}",))
         conn.commit()
-    # Imported rows can carry paths from other machines; only touch our own uploads.
-    own_files = [Path(path) for path in resume_paths if is_within_upload_root(path)]
-    for path in own_files:
-        path.unlink(missing_ok=True)
-    print(f"Reset: removed hiring data, demo accounts, and {len(own_files)} resume files.")
+    # The rows are gone, so file cleanup is best effort: a bad path must never stop the reseed.
+    removed = 0
+    for entry in filter(None, map(upload_entry, stored_paths)):
+        try:
+            entry.unlink(missing_ok=True)
+            removed += 1
+        except OSError as error:
+            print(f"  could not remove {entry.name}: {error.strerror}")
+    print(f"Reset: removed hiring data, demo accounts, and {removed} uploaded files.")
 
 
 def create_staff():

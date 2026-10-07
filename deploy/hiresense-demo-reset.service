@@ -1,6 +1,6 @@
 [Unit]
 Description=Reset HireSense public demo data
-After=network-online.target hiresense.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -12,7 +12,12 @@ EnvironmentFile=/etc/hiresense/hiresense.env
 UnsetEnvironment=DATABASE_ADMIN_URL
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
+# Pause the public API (about two minutes at 03:30) so no request sees a half-seeded
+# demo and no upload lands between the reset and the reseed. The seeder runs the app
+# in-process, and ExecStopPost restarts the API even if seeding fails.
+ExecStartPre=+/usr/bin/systemctl stop hiresense.service
 ExecStart=/opt/hiresense/current/.venv/bin/python database/seed_demo.py --reset
+ExecStopPost=+/usr/bin/systemctl start hiresense.service
 TimeoutStartSec=20min
 UMask=0077
 
