@@ -7,7 +7,8 @@ client, so resume parsing, scoring, assessments, and decisions all run through
 the application's own code paths.
 
 Usage (repository root, backend environment configured as for the server):
-    python database/seed_demo.py           # add the demo accounts and data
+    python database/seed_demo.py           # add the demo accounts and data; safe to
+                                           # re-run, it resumes where a run stopped
     python database/seed_demo.py --reset   # delete ALL hiring data and demo accounts
                                            # (real staff accounts stay), then seed
 
@@ -165,14 +166,12 @@ def reset():
 def create_staff():
     with db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM users WHERE email LIKE %s", (f"%{DEMO_EMAIL_SUFFIX}",))
-        if cursor.fetchone():
-            raise SystemExit("Demo data is already seeded. Use --reset to start over.")
         for role, email in DEMO_ACCOUNTS.items():
             # Demo accounts sign in through /api/auth/demo-login; nobody knows this password.
             cursor.execute(
-                "INSERT INTO users (email, password_hash, role, name) VALUES (%s, %s, %s, %s)",
-                (email, generate_password_hash(secrets.token_urlsafe(32)), role, STAFF[role]),
+                "INSERT INTO users (email, password_hash, role, name) "
+                "SELECT %s, %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = %s)",
+                (email, generate_password_hash(secrets.token_urlsafe(32)), role, STAFF[role], email),
             )
         conn.commit()
 
@@ -224,6 +223,13 @@ def take_assessment(api, access_token, accuracy, violations):
     return assessment_id
 
 
+def existing_row(query, params):
+    with db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        return cursor.fetchone()
+
+
 def seed():
     for limiter in app.extensions.get("limiter", ()):
         limiter.enabled = False  # seeding is a burst of legitimate requests
@@ -234,19 +240,34 @@ def seed():
     sectors = {sector["name"]: sector["id"] for sector in api.call("get", "/api/jobs/sectors")}
     job_ids = []
     for job in JOBS:
+        existing = existing_row(
+            "SELECT jd.id FROM job_descriptions jd JOIN users u ON u.id = jd.created_by "
+            "WHERE u.email = %s AND jd.title = %s",
+            (DEMO_ACCOUNTS["admin"], job["title"]),
+        )
+        if existing:
+            job_ids.append(existing[0])
+            continue
         payload = {key: value for key, value in job.items() if key != "sector"}
         payload["sector_id"] = sectors.get(job["sector"])
         job_ids.append(api.call("post", "/api/jobs/postings", token=admin, json=payload)["id"])
 
-    now = datetime.now(timezone.utc)
-    tomorrow = (now + timedelta(days=1)).replace(hour=5, minute=0, second=0, microsecond=0)  # 10:30 IST
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+        hour=5, minute=0, second=0, microsecond=0)  # 10:30 IST
     for index, (name, job_index, skills, years, education, stage, accuracy, violations) in enumerate(CANDIDATES):
         email = f"{name.lower().replace(' ', '.')}@example.com"
-        resume = resume_docx(name, email, skills, years, education, JOBS[job_index]["title"])
-        candidate_id = api.call("post", "/api/resume/upload", data={
-            "file": (resume, f"{name.replace(' ', '_')}_Resume.docx"),
-            "job_id": str(job_ids[job_index]), "name": name, "email": email,
-        }, content_type="multipart/form-data")["candidate_id"]
+        existing = existing_row("SELECT id, status FROM candidates WHERE LOWER(email) = %s", (email,))
+        if existing and (existing[1] != "applied" or stage == "applied"):
+            print(f"  {'(done)':<13} {name}")
+            continue  # an earlier run already took this candidate to its stage
+        if existing:
+            candidate_id = existing[0]
+        else:
+            resume = resume_docx(name, email, skills, years, education, JOBS[job_index]["title"])
+            candidate_id = api.call("post", "/api/resume/upload", data={
+                "file": (resume, f"{name.replace(' ', '_')}_Resume.docx"),
+                "job_id": str(job_ids[job_index]), "name": name, "email": email,
+            }, content_type="multipart/form-data")["candidate_id"]
 
         if stage == "screen_reject":
             api.call("post", f"/api/interviewer/candidates/{candidate_id}/reject", token=interviewer,
@@ -259,7 +280,8 @@ def seed():
                      json={"scheduled_assessment_id": schedule["scheduled_assessment_id"]})
         elif stage in {"completed", "hired", "no_hire"}:
             schedule = api.call("post", f"/api/interviewer/candidates/{candidate_id}/schedule", token=interviewer,
-                                json={"scheduled_time": (now + timedelta(minutes=1)).isoformat(),
+                                json={"scheduled_time": (datetime.now(timezone.utc)
+                                                         + timedelta(minutes=1)).isoformat(),
                                       "is_technical_role": False})
             api.call("post", "/api/proctor/assign-assessment", token=proctor,
                      json={"scheduled_assessment_id": schedule["scheduled_assessment_id"]})

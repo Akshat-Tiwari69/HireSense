@@ -127,14 +127,24 @@ never touches non-demo staff, but treat every candidate record as public.
 3. Seed as the service user so resume files land in the upload directory:
 
    ```bash
-   sudo -u hiresense bash -c 'set -a; . /etc/hiresense/hiresense.env; cd /opt/hiresense/current && .venv/bin/python database/seed_demo.py --reset'
+   sudo systemd-run --pipe --wait --quiet --uid=hiresense --gid=hiresense \
+     -p EnvironmentFile=/etc/hiresense/hiresense.env \
+     -p UnsetEnvironment=DATABASE_ADMIN_URL \
+     -p WorkingDirectory=/opt/hiresense/current \
+     -E PYTHONDONTWRITEBYTECODE=1 \
+     /opt/hiresense/current/.venv/bin/python database/seed_demo.py
    ```
+
+   `systemd-run` reads the environment file exactly as the service does; sourcing
+   it with bash breaks on the `&` inside `DATABASE_URL`. Like the service unit, it
+   drops `DATABASE_ADMIN_URL` so the seeder never holds the administrator credential. Add `--reset` to the
+   seed command to restore a clean demo later.
 
 `/login` then offers one-click Admin, Interviewer, and Proctor sign-in, and
 email is written to the admin Email activity log instead of being sent. Re-run
-the seed command (for example nightly from cron) to restore a clean demo;
-`--reset` deletes every candidate, job, and assessment plus the demo accounts,
-and keeps all other staff accounts.
+the seed command with `--reset` (for example nightly from cron) to restore a
+clean demo; it deletes every candidate, job, and assessment plus the demo
+accounts, and keeps all other staff accounts.
 
 Suggested walkthrough: apply to a role from `/jobs` as a candidate, sign in as
 Interviewer, review the new applicant, schedule an assessment two minutes out,
