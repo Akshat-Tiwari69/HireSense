@@ -1,5 +1,7 @@
 # HireSense — AI-Powered Recruitment Platform
 
+**Case study:** [tiwaribabu.in/projects/hiresense](https://tiwaribabu.in/projects/hiresense)
+
 > **Team:** Akshat (Backend) | Shaivi (Frontend) | Prashanth (Database)
 
 HireSense is a full-stack AI-enabled hiring platform that handles the complete recruitment pipeline — from resume submission and AI analysis through technical assessments with live proctoring to final hiring decisions.
