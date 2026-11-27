@@ -1,332 +1,200 @@
 # Backend File Reference
 
-Complete reference for all backend Python files and their functions.
+Reference for every backend Python file and its main functions. Line counts are
+approximate (November 2026).
 
 ---
 
 ## File Overview
 
-### Route Files
+### Application and Routes
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `app.py` | ~1,080 | Main Flask application, blueprints, resume endpoints |
-| `auth.py` | ~390 | JWT authentication blueprint |
-| `admin_routes.py` | ~1,815 | Admin dashboard API (users, jobs, sectors, analytics) |
-| `interviewer_routes.py` | ~770 | Interviewer dashboard API |
-| `interviewee_routes.py` | ~1,220 | Candidate assessment API |
-| `proctor_routes.py` | ~340 | Proctoring API |
-| `job_routes.py` | ~660 | Job listings and matching API |
+| `app.py` | ~300 | Flask app setup, JWT config and revocation, blueprint registration, error handlers, health routes |
+| `run.py` | ~20 | Development server entry point (`python run.py`) |
+| `websocket_server.py` | ~470 | Socket.IO server for authenticated WebRTC signaling; exposes `app_with_socketio` |
+| `auth.py` | ~290 | Login, demo login, current user, token verification |
+| `resume_routes.py` | ~390 | Public application upload (`POST /api/resume/upload`) |
+| `interviewer_routes.py` | ~950 | Hiring review API (interviewer, recruiter, sector admin) |
+| `job_routes.py` | ~1,290 | Sectors, job postings, candidate-job matching, audit log |
+| `proctor_routes.py` | ~630 | Proctor dashboard API, violations, evidence, statistics |
+| `admin_routes.py` | ~30 | Parent admin blueprint that registers the four admin sub-blueprints |
+| `admin_users.py` | ~330 | Staff user CRUD |
+| `admin_candidates.py` | ~340 | Candidate list/edit/delete, status reset, missing details |
+| `admin_content.py` | ~890 | Bulk ZIP upload, AI enhance, question banks |
+| `admin_analytics.py` | ~140 | Analytics, database stats, email logs |
+| `admin_middleware.py` | ~40 | `require_admin_role`, `require_super_admin_role` |
+| `interviewee_routes.py` | ~30 | Parent candidate blueprint that registers the three sub-blueprints |
+| `interviewee_session.py` | ~430 | Token verification, start/resume, remaining time |
+| `interviewee_answers.py` | ~590 | Answer submission, code runs, completion and scoring |
+| `interviewee_monitoring.py` | ~270 | Violation reports (with screenshot evidence) and time sync |
 
 ### Database Layer
 
 > **Note:** The former `db_helpers.py` was split into focused domain modules. Callers now import those modules directly.
 
-| File | Functions | Purpose |
-|------|-----------|---------|
-| `user_db.py` | 3 | User auth queries (`create_user`, `get_user_by_email`, `get_user_by_id`) |
-| `candidate_db.py` | 6 | Candidate CRUD (`insert_candidate`, `get_candidate_by_id`, `get_all_candidates`, etc.) |
-| `assessment_db.py` | 25 | Assessments, responses, scoring, scheduling, token access |
-| `proctoring_db.py` | 4 | Violation recording (`record_proctoring_violation`, `count_violations_for_assessment`, etc.) |
-| `email_db.py` | 2 | Email log reads/writes (`log_email`, `get_candidate_emails`) |
-| `db_config.py` | — | PostgreSQL connection via `DATABASE_URL` |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `db_config.py` | ~310 | `ThreadedConnectionPool`, TLS and production role checks, statement timeout |
+| `user_db.py` | ~100 | User queries (`create_user`, `get_user_by_email`, `get_user_by_id`, `user_auth_version`) |
+| `candidate_db.py` | ~310 | Candidate CRUD (`insert_candidate`, `get_candidate_by_id`, `get_all_candidates`, etc.) |
+| `assessment_db.py` | ~1,520 | Assessments, responses, scoring, scheduling, token access |
+| `proctoring_db.py` | ~220 | Violation recording and counts |
+| `email_db.py` | ~100 | Email log reads/writes (`log_email`, `get_candidate_emails`) |
 
-### Services & Utilities
+### Services and Utilities
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `resume_analyzer.py` | ~545 | OpenAI resume analysis (pros/cons, match scoring) |
-| `resume_parser.py` | ~150 | PDF/DOCX text extraction (pypdf, python-docx) |
-| `email_service.py` | ~800 | Email notifications (Resend API + SMTP fallback) |
-| `ai_question_generator.py` | ~810 | GPT-4o-mini question generation for assessments |
-| `job_matcher.py` | ~400 | Rule-based + AI job-candidate matching |
-| `questions_bank.py` | ~200 | Static fallback question bank |
-| `websocket_server.py` | ~350 | Socket.IO signaling server for WebRTC proctoring |
-| `rate_limiter.py` | — | Per-endpoint rate limiting (Flask-Limiter) |
-| `security_headers.py` | — | HTTP security header middleware |
-| `request_logger.py` | — | Request logging middleware |
+| `resume_analyzer.py` | ~640 | OpenAI resume analysis (pros/cons, match scoring) with rule-based fallback |
+| `resume_parser.py` | ~80 | PDF/DOCX text extraction (pypdf, python-docx) |
+| `email_service.py` | ~910 | Email notifications (Resend API or SMTP, chosen by `EMAIL_PROVIDER`) |
+| `ai_question_generator.py` | ~1,060 | OpenAI question generation for assessments |
+| `job_matcher.py` | ~460 | Rule-based scoring plus AI re-ranking of the top 5 matches |
+| `questions_bank.py` | ~170 | Static fallback question bank |
+| `code_runner_config.py` | ~35 | `code_runner_enabled()`, `code_runner_endpoint()` (Piston) |
+| `storage_config.py` | ~70 | Private upload root (`get_upload_root`, `get_upload_subdirectory`, `is_within_upload_root`) |
+| `demo_mode.py` | ~20 | `demo_mode_enabled()` and the demo account emails |
+| `datetime_utils.py` | ~20 | `parse_client_datetime()` for timezone-aware input |
+| `rate_limiter.py` | ~110 | Per-endpoint limits (Flask-Limiter, Redis when `REDIS_URL` is set) |
+| `security_headers.py` | ~160 | HTTP security headers and CORS origin validation |
+| `request_logger.py` | ~90 | Request logging with timing |
+
+### Scripts
+
+| File | Purpose |
+|------|---------|
+| `scripts/run_migration.py` | Apply the fresh schema (`--schema`) or reconcile an existing database (`--reconcile`) |
+| `scripts/send_test_email.py` | Manual check that email delivery is configured |
+| `scripts/_bootstrap.py` | Adds `backend/` to `sys.path` for the scripts |
 
 ---
 
 ## app.py
 
-Main Flask application entry point.
+Creates the Flask app, loads `local.env` (if present) or `.env`, and configures:
 
-### Initialization
-
-```python
-from flask import Flask
-from flask_cors import CORS
-from flask_jwt_extended import JWTManager
-
-app = Flask(__name__)
-CORS(app)
-jwt = JWTManager(app)
-```
+- **JWT:** `JWT_SECRET_KEY` (required, validated), HS256, header-only tokens,
+  lifetime from `JWT_ACCESS_TOKEN_MINUTES` (default 60). `_is_staff_token_revoked()`
+  rejects tokens whose user was deleted, changed role, or was updated since login.
+- **Middleware:** CORS, security headers, request logging, rate limiting.
+- **Body limit:** 11 MB (`MAX_REQUEST_BODY_MB`), rejected early by `reject_oversized_request()`.
 
 ### Blueprint Registration
 
 ```python
-from auth import auth_bp
-from interviewer_routes import interviewer_bp
-from interviewee_routes import interviewee_bp
-from admin_routes import admin_bp
-from proctor_routes import proctor_bp
-
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(interviewer_bp, url_prefix='/api/interviewer')
 app.register_blueprint(interviewee_bp, url_prefix='/api/interviewee')
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
 app.register_blueprint(proctor_bp, url_prefix='/api/proctor')
+app.register_blueprint(jobs_bp, url_prefix='/api/jobs')
+app.register_blueprint(resume_bp, url_prefix='/api')
 ```
 
-### Key Routes
+### Routes
 
 | Route | Method | Function | Description |
 |-------|--------|----------|-------------|
-| `/api/health` | GET | `health_check()` | Server health status |
-| `/api/resume/upload` | POST | `upload_resume()` | Upload resume with AI analysis |
-| `/api/interviewee/assessment/verify` | GET | `verify_assessment_token()` | Verify the `X-Assessment-Token` header |
-| `/api/interviewee/assessment/start` | POST | `start_assessment_with_token()` | Start or resume with the token header |
-| `/api/interviewee/assessment/<id>/submit-answer` | POST | `submit_answer()` | Save a token-authorized answer |
-| `/api/interviewee/assessment/<id>/complete` | POST | `complete_assessment()` | Complete and score an assessment |
-
-### Resume Upload Function
-
-```python
-@app.route('/api/resume/upload', methods=['POST'])
-def upload_resume():
-    """Handle resume upload with AI analysis"""
-    # 1. Validate file
-    file = request.files.get('file')
-    
-    # 2. Save file
-    filename = secure_filename(file.filename)
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(file_path)
-    
-    # 3. Extract text
-    resume_text = extract_text_from_file(file_path)
-    
-    # 4. Parse resume data
-    parsed_data = parse_resume(resume_text)
-    
-    # 5. AI analysis
-    ai_analysis = analyze_resume(resume_text, parsed_data)
-    
-    # 6. Save to database
-    candidate_id = create_candidate(...)
-    
-    return jsonify({...})
-```
+| `/` | GET | `root()` | API info |
+| `/api/health` | GET | `health_check()` | Liveness and `demo_mode` flag |
+| `/api/health/ready` | GET | `readiness_check()` | PostgreSQL readiness and code-runner status |
 
 ---
 
 ## auth.py
 
-JWT authentication blueprint.
+| Route | Method | Function | Auth |
+|-------|--------|----------|------|
+| `/api/auth/login` | POST | `login()` | No |
+| `/api/auth/demo-login` | POST | `demo_login()` | No (only when `DEMO_MODE=true`) |
+| `/api/auth/me` | GET | `get_current_user()` | JWT |
+| `/api/auth/verify` | GET | `verify_token()` | JWT |
 
-### Routes
+Passwords are hashed with Werkzeug (`hash_password()`, `verify_password()`).
+`login()` compares against a dummy hash for unknown emails so response time does
+not reveal whether an account exists. There is no registration route; admins
+create users through `admin_users.py`.
 
-| Route | Method | Function | Auth Required |
-|-------|--------|----------|---------------|
-| `/register` | POST | `register()` | No |
-| `/login` | POST | `login()` | No |
-| `/me` | GET | `get_current_user()` | Yes |
-| `/verify` | GET | `verify_token()` | Yes |
+---
 
-### Key Functions
+## resume_routes.py
 
-```python
-@auth_bp.route('/register', methods=['POST'])
-def register():
-    """Register new user"""
-    data = request.json
-    
-    # Validate
-    if not all([data.get('email'), data.get('password'), 
-                data.get('role'), data.get('name')]):
-        return error_response('Missing fields', 400)
-    
-    # Hash password
-    password_hash = bcrypt.hashpw(
-        data['password'].encode('utf-8'),
-        bcrypt.gensalt()
-    ).decode('utf-8')
-    
-    # Create user
-    user_id = create_user(
-        email=data['email'],
-        password_hash=password_hash,
-        role=data['role'],
-        name=data['name']
-    )
-    
-    return success_response({'user_id': user_id}, 201)
+| Route | Method | Function | Description |
+|-------|--------|----------|-------------|
+| `/api/resume/upload` | POST | `upload_resume()` | Validate and store a PDF/DOCX (max 10 MB), parse it, run AI analysis, and create the candidate |
 
-@auth_bp.route('/login', methods=['POST'])
-def login():
-    """Authenticate user and return JWT"""
-    data = request.json
-    
-    # Get user
-    user = get_user_by_email(data['email'])
-    if not user:
-        return error_response('Invalid credentials', 401)
-    
-    # Verify password
-    if not bcrypt.checkpw(data['password'].encode(), 
-                          user['password_hash'].encode()):
-        return error_response('Invalid credentials', 401)
-    
-    # Create token with claims
-    access_token = create_access_token(
-        identity=user['id'],
-        additional_claims={
-            'role': user['role'],
-            'name': user['name']
-        }
-    )
-    
-    return success_response({
-        'access_token': access_token,
-        'user': {...}
-    })
-```
+The public response contains only the candidate ID, application status, and
+the selected job; the analysis is visible to hiring staff only.
 
 ---
 
 ## interviewer_routes.py
 
-Interviewer dashboard API.
-
-### Routes
+All routes require a hiring-review role (`interviewer`, `recruiter`,
+`sector_admin`) via `require_interviewer_role`, plus an assignment or sector
+check.
 
 | Route | Method | Function | Description |
 |-------|--------|----------|-------------|
-| `/candidates` | GET | `get_candidates()` | List all candidates |
-| `/candidates/<id>` | GET | `get_candidate()` | Candidate details |
-| `/candidates/<id>/reject` | POST | `reject_candidate()` | Reject candidate |
-| `/candidates/<id>/schedule` | POST | `schedule_assessment()` | Schedule assessment |
-| `/assessments/<id>` | GET | `get_assessment()` | Assessment results |
-| `/assessments/<id>/final-decision` | POST | `final_decision()` | Make hiring decision |
+| `/candidates` | GET | `get_candidates()` | List candidates the reviewer can see |
+| `/candidates/<id>` | GET | `get_candidate_details()` | Candidate details |
+| `/candidates/<id>/resume` | GET | `download_resume()` | Download the stored resume |
+| `/candidates/<id>/reject` | POST | `reject_candidate()` | Reject and send email |
+| `/candidates/<id>/schedule` | POST | `schedule_assessment()` | Schedule, generate questions, email the link |
+| `/assessments/<candidate_id>` | GET | `get_assessment_results()` | Assessment results |
+| `/assessments/<id>/final-decision` | POST | `make_final_decision()` | Record hire/no-hire and email the candidate |
 
-### Key Functions
-
-```python
-@interviewer_bp.route('/candidates/<int:id>/schedule', methods=['POST'])
-@jwt_required()
-def schedule_assessment(id):
-    """Schedule assessment for candidate"""
-    claims = get_jwt()
-    if claims.get('role') != 'interviewer':
-        return error_response('Access denied', 403)
-    
-    data = request.json
-    scheduled_time = data.get('scheduled_time')
-    
-    # Create scheduled assessment with token
-    token = secrets.token_urlsafe(32)
-    scheduled_id = create_scheduled_assessment(
-        candidate_id=id,
-        interviewer_id=get_jwt_identity(),
-        scheduled_time=scheduled_time,
-        assessment_token=token
-    )
-    
-    # Update candidate status
-    update_candidate_status(id, 'under_review')
-    
-    # Send invitation email
-    candidate = get_candidate_by_id(id)
-    send_assessment_invitation(
-        candidate_email=candidate['email'],
-        candidate_name=candidate['name'],
-        assessment_link=f"{FRONTEND_URL}/assessment#token={token}",
-        scheduled_time=scheduled_time
-    )
-    
-    return success_response({
-        'scheduled_assessment_id': scheduled_id,
-        'assessment_token': token
-    }, 201)
-```
+`_generate_assessment_questions()` generates MCQ, coding (technical roles only),
+and psychometric questions in parallel. Scheduling a technical assessment fails
+while `code_runner_enabled()` is false.
 
 ---
 
-## interviewee_routes.py
+## interviewee_session.py, interviewee_answers.py, interviewee_monitoring.py
 
-Candidate assessment API.
+Registered under `/api/interviewee` by `interviewee_routes.py`. Every route
+authenticates with the `X-Assessment-Token` header.
 
-### Routes
+| Route | Method | Function | File |
+|-------|--------|----------|------|
+| `/assessment/verify` | GET | `verify_assessment_token()` | `interviewee_session.py` |
+| `/assessment/start` | POST | `start_assessment_with_token()` | `interviewee_session.py` |
+| `/assessment/<id>/remaining-time` | GET | `get_remaining_time()` | `interviewee_session.py` |
+| `/assessment/<id>/submit-answer` | POST | `submit_answer()` | `interviewee_answers.py` |
+| `/run-code` | POST | `run_code()` | `interviewee_answers.py` |
+| `/assessment/<id>/complete` | POST | `complete_assessment()` | `interviewee_answers.py` |
+| `/assessment/<id>/violation` | POST | `report_violation()` | `interviewee_monitoring.py` |
+| `/assessment/<id>/sync-time` | POST | `sync_assessment_time()` | `interviewee_monitoring.py` |
 
-| Route | Method | Function | Description |
-|-------|--------|----------|-------------|
-| `/assessment/verify` | GET | `verify_assessment_token()` | Verify token header validity |
-| `/assessment/start` | POST | `start_assessment_with_token()` | Start by token header |
-| `/assessment/<id>/submit-answer` | POST | `submit_answer()` | Save an assessment answer |
-| `/assessment/<id>/complete` | POST | `complete_assessment()` | Complete assessment |
-| `/assessment/<id>/violation` | POST | `report_violation()` | Report a token-authorized proctoring event |
+Starting is allowed within ±30 minutes of the scheduled time. Scores are
+computed server-side: MCQ answers against stored keys, coding by running the
+stored test cases through Piston, and psychometric traits from the stored
+scenarios.
 
-### Key Functions
+---
 
-```python
-@interviewee_bp.route('/assessment/verify', methods=['GET'])
-def verify_assessment_token(token):
-    """Verify assessment token and time window"""
-    # Get scheduled assessment
-    scheduled = get_scheduled_assessment_by_token(token)
-    if not scheduled:
-        return error_response('Invalid token', 404)
-    
-    # Check time window
-    current_time = datetime.utcnow()
-    scheduled_time = datetime.fromisoformat(scheduled['scheduled_time'])
-    
-    window_start = scheduled_time - timedelta(minutes=30)
-    window_end = scheduled_time + timedelta(minutes=30)
-    
-    can_start = window_start <= current_time <= window_end
-    
-    return success_response({
-        'valid': True,
-        'can_start': can_start,
-        'scheduled_time': scheduled['scheduled_time'],
-        'candidate_name': scheduled['candidate_name']
-    })
+## Admin sub-blueprints
 
-@interviewee_bp.route('/assessment/start', methods=['POST'])
-def start_by_token(token):
-    """Start assessment using token"""
-    # Verify token
-    scheduled = get_scheduled_assessment_by_token(token)
-    if not scheduled:
-        return error_response('Invalid token', 404)
-    
-    # Check time window
-    is_valid, _, message = check_assessment_time_valid(
-        scheduled['candidate_id'],
-        datetime.utcnow().isoformat()
-    )
-    
-    if not is_valid:
-        return error_response(message, 403)
-    
-    # Create assessment
-    assessment_id = create_assessment(scheduled['candidate_id'])
-    
-    # Get questions
-    mcq_questions = get_random_mcq_questions(10)
-    coding_problem = get_random_coding_problem()
-    psychometric_scenarios = get_psychometric_scenarios()
-    
-    return success_response({
-        'assessment_id': assessment_id,
-        'mcq_questions': mcq_questions,
-        'coding_problem': coding_problem,
-        'psychometric_scenarios': psychometric_scenarios
-    }, 201)
-```
+Registered under `/api/admin` by `admin_routes.py`; all require
+`require_admin_role`.
+
+| File | Routes |
+|------|--------|
+| `admin_users.py` | `GET/POST /users`, `PUT/DELETE /users/<id>` (privileged accounts need `super_admin`) |
+| `admin_candidates.py` | `GET /candidates`, `PUT/DELETE /candidates/<id>`, `POST /reset-candidate-status/<id>`, `GET /absence-of-details` |
+| `admin_content.py` | `POST /bulk-upload`, `POST /ai-enhance`, `POST /question-bank/upload`, `GET /question-bank`, `GET/DELETE /question-bank/<id>`, `PATCH /question-bank/<id>/toggle` |
+| `admin_analytics.py` | `GET /analytics`, `GET /db/stats`, `GET /email-logs` |
+
+---
+
+## job_routes.py and proctor_routes.py
+
+See [API.md](API.md) for the full route lists. `job_routes.py` defines
+`ROLE_HIERARCHY` and `require_role(min_role)`; `proctor_routes.py` restricts
+every route to the `proctor` role and to assessments assigned to the proctor
+or still unassigned.
 
 ---
 

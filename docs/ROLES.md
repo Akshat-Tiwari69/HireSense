@@ -1,239 +1,206 @@
 # HireSense — User Roles & Permissions
 
-This document defines the four primary user roles in HireSense, what each role can do, and how they interact within the hiring pipeline.
+This document describes each role in HireSense, what it can do, and how the
+roles work together in the hiring pipeline.
 
 ---
 
-## Role Hierarchy
+## Roles at a Glance
 
-```
-Admin (highest)
-  └── Interviewer
-  └── Proctor
-  └── Candidate (no login — token-based access)
-```
+| Role | Login | Workspace | Purpose |
+|------|-------|-----------|---------|
+| **Super Admin** (`super_admin`) | Email + password | Admin Dashboard (`/admin`) | Full system control, including admin accounts |
+| **Admin** (`admin`) | Email + password | Admin Dashboard (`/admin`) | Full system management |
+| **Sector Admin** (`sector_admin`) | Email + password | Hiring dashboard (`/dashboard`) | Hiring review and job management within one sector |
+| **Recruiter** (`recruiter`) | Email + password | Hiring dashboard (`/dashboard`) | Hiring review and job postings within one sector |
+| **Interviewer** (`interviewer`) | Email + password | Hiring dashboard (`/dashboard`) | Evaluate assigned candidates and make hiring decisions |
+| **Proctor** (`proctor`) | Email + password | Proctor Dashboard (`/proctor`) | Monitor live assessments |
+| **Candidate** | None (token link) | Assessment page (`/assessment`) | Apply and take the assessment |
 
-| Role | Login Required | Dashboard | Purpose |
-|------|---------------|-----------|---------|
-| **Admin** | ✅ Email + Password | Admin Dashboard | Full system management |
-| **Interviewer** | ✅ Email + Password | Interviewer Dashboard | Candidate evaluation & hiring decisions |
-| **Proctor** | ✅ Email + Password | Proctor Dashboard | Live assessment monitoring |
-| **Candidate** | ❌ Token-based link | Assessment Page | Takes assessments |
+`sector_admin` and `recruiter` accounts must have a `sector_id`; the database
+enforces this. For job and sector permissions the backend treats `admin` as
+`super_admin` and uses this order: `super_admin` (100) > `admin` (90) >
+`sector_admin` (70) > `recruiter` (50) > `interviewer` (30) > `proctor` (20).
+
+Each workspace is limited to its own roles. Admins use the Admin Dashboard only;
+the hiring dashboard is for interviewers, recruiters, and sector admins; the
+Proctor Dashboard is for proctors only.
 
 ---
 
-## 🔴 Admin
+## 🔴 Admin and Super Admin
 
-The **Admin** has full control over the entire HireSense system. They manage users, candidates, job postings, system settings, and have access to analytics.
+Admins manage users, candidates, job postings, and content, and see
+system-wide analytics and logs.
 
-### User Management
-- View all users (admins, interviewers, proctors)
-- Create new users with any role
-- Update user details (name, email, role, password)
-- Delete users
+### User Management (Users tab)
+- View, create, edit, and delete staff accounts
+- Only a super admin can create, edit, or delete `admin` and `super_admin` accounts
 
-### Candidate Management
+### Candidate Management (Candidates tab)
 - View all candidates with AI analysis, match scores, and status
-- Edit candidate details (name, email, phone, status)
-- Delete candidates and all related data
-- Reset candidate status back to "Applied"
-- View candidates with missing information ("Absence of Details")
+- Edit candidate details and delete candidates with their related data
+- Reset a candidate's status back to "Applied"
+- **Absence of Details** tab: find candidates missing key information
 
-### Job Postings
-- Create new job postings with required/preferred skills, salary range, experience level
-- Edit existing job postings
-- Delete job postings
-- Use **AI Enhance** to polish job descriptions automatically
+### Job Postings and Sectors (Job Postings tab)
+- Create, edit, and delete job postings (skills, experience range, work mode,
+  employment type, salary range, closing date)
+- Use **AI Enhance** to rewrite a job description and suggest skills
+- Create, edit, and delete sectors
 
-### Sector Management
-- Create, update, and delete sectors (departments/divisions)
-- Assign sectors to users and job postings
+### Bulk Resume Upload (Bulk Upload tab)
+- Upload a ZIP archive (up to 100 PDF/DOCX resumes) for a selected job posting
+- Resumes are parsed and scored concurrently in a worker pool
+- Results show match scores, AI recommendations, missing details, duplicates, and errors
 
-### Bulk Resume Upload
-- Upload a ZIP/RAR archive containing multiple PDF/DOCX resumes
-- All resumes are processed in parallel by multiple AI agents
-- Each resume is scored against a selected job posting
-- View detailed results: match scores, AI recommendations, missing info, duplicates, errors
+### Custom Question Bank (Question Bank tab)
+- Upload PDF/DOCX files of questions; AI extracts the questions
+- Toggle question banks active/inactive, or delete them
+- Active question banks are blended into newly generated assessments
 
-### Custom Question Bank
-- Upload PDF/DOCX files containing custom questions
-- AI parses and extracts questions automatically
-- Toggle question banks active/inactive
-- Delete question banks
-- Active question banks blend into future assessments
+### Analytics, Email Logs, and Audit Log
+- **Analytics:** candidate, assessment, and score statistics
+- **Email Logs:** every email sent, with recipient, time, and delivery status
+- **Audit Log:** who did what and when
 
-### Database Management
-- View all database tables and their contents
-- View database statistics (row counts, table sizes)
-
-### System Settings
-- View status of environment variables (API keys, SMTP config)
-- A `super_admin` may update allowlisted variables only in local development
-  when `APP_ENV=development` and `ALLOW_RUNTIME_ENV_MUTATION=true`
-- Production configuration is read-only in the application and must be changed
-  through the hosting platform or deployment secret store
-
-### Analytics
-- System-wide statistics: total candidates, assessments, hiring rates
-- Candidate status distribution (applied, under review, hired, rejected)
-- Assessment completion rates and average scores
-
-### Email Logs
-- View all sent emails with timestamps, recipients, and delivery status
-
-### Audit Log
-- View all system actions (who did what and when)
+Production configuration is not editable in the application. It is changed
+through the host's secret file (see [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)).
 
 ---
 
-## 🟢 Interviewer
+## 🟢 Interviewer, Recruiter, and Sector Admin (Hiring Review)
 
-The **Interviewer** manages the candidate evaluation pipeline — from reviewing resumes to making final hiring decisions.
+These three roles share the hiring dashboard at `/dashboard`. Interviewers see
+the candidates assigned to them; recruiters and sector admins see candidates in
+their sector.
 
 ### Candidate Review
-- View all candidates with:
-  - AI-generated match scores
-  - Parsed skills, experience, and education
-  - AI pros/cons analysis and recommendation (Strong Match, Good Match, Moderate Match, Weak Match)
-- Filter candidates by status (pending, under review, rejected, hired)
-- Sort candidates by name, date, or match score
-- View detailed candidate profiles
-
-### Resume Management
-- Download original resume files (PDF/DOCX)
+- View candidates with AI match score, parsed skills, experience, and education
+- Read the AI pros/cons analysis and recommendation
+- Search, filter by status, and filter by match score
+- Download the original resume (PDF/DOCX)
+- Dashboard metrics: total candidates, high match, scheduled, completed, hired
 
 ### Assessment Scheduling
-- Schedule assessments for candidates at a specific date/time
-- Choose between **Technical** (MCQ + Coding + Psychometric) and **Non-Technical** (MCQ + Psychometric only) assessments
-- AI automatically generates tailored questions based on the candidate's resume and the job requirements
-- Candidate receives an email with a unique assessment link
+- Schedule an assessment at a specific date and time
+- Choose **Technical** (MCQ + Coding + Psychometric) or **Non-Technical**
+  (MCQ + Psychometric). Technical assessments need the code runner, which is
+  disabled in production
+- AI generates tailored questions from the candidate's resume and the job
+- The candidate receives an email with a unique assessment link
 
-### Candidate Decisions
-- **Reject** a candidate with an optional reason/feedback
-  - Candidate automatically receives a rejection email
-- View assessment results after a candidate completes their assessment:
-  - MCQ scores
-  - Coding scores (if technical)
-  - Psychometric trait scores
-  - Overall score and AI recommendation
+### Live Monitoring
+- Open **Monitor** on a candidate with an assessment to watch the live
+  proctoring video
 
-### Final Hiring Decision
-- Make a **Hire** or **No-Hire** decision after reviewing assessment results
-- Add rationale and next steps
-- Candidate automatically receives a decision email with next steps
+### Decisions
+- **Reject** a candidate with an optional reason; a rejection email is sent
+- Review assessment results: MCQ, coding (if technical), psychometric traits,
+  overall score, and the automated recommendation
+- Record a final **Hire** or **No-Hire** decision with rationale and next
+  steps; the candidate receives a decision email
 
-### Dashboard Statistics
-- Total candidates count
-- Candidates by status breakdown
-- Average match scores
-
-### Candidate Notes
-- Add and view notes for individual candidates (for internal team communication)
+### Jobs and Matching (Recruiter and Sector Admin)
+- Create, edit, and delete job postings in their sector through the jobs API
+- Run AI candidate-to-job matching and confirm or reject matches
 
 ---
 
 ## 🟡 Proctor
 
-The **Proctor** monitors assessments in real-time to ensure integrity and fairness during candidate evaluations.
+The proctor monitors assessments in real time.
 
 ### Assessment Monitoring
-- View all **scheduled** assessments (upcoming)
-- View all **active** assessments (currently in-progress)
-- View all **completed** assessments (finished)
+- **Scheduled**, **Active**, and **Completed** assessment lists
+- Claim an unassigned assessment to proctor it
+- The dashboard refreshes every 30 seconds while the tab is visible
 
-### Live Proctoring (Real-Time)
-- Watch candidate's live video stream via WebRTC
-- See real-time connection status (connected, streaming)
-- Monitor multiple assessments simultaneously
+### Live Proctoring
+- Watch the candidate's camera through WebRTC
+- See whether the candidate's stream is connected
 
-### Violation Management
-- View all proctoring violations for any assessment
-- Violations are automatically detected and reported by the candidate's browser:
-  - **No face detected** — candidate leaves camera view
-  - **Multiple faces** — someone else is in frame
-  - **Tab switch** — candidate switches browser tabs
-  - Other suspicious behavior
-- Each violation includes: type, description, severity level, timestamp, and optional screenshot
+### Violation Review
+- View every violation recorded for an assessment, with type, description,
+  severity, time, and screenshot evidence where captured
+- Violations are detected and reported by the candidate's browser:
+  - **Tab hidden**: the candidate switched tabs or minimised the window
+  - **Window focus lost**: the candidate moved focus to another window
+  - **Copy, cut, or paste** inside the assessment
+  - **No face detected**: the candidate left the camera view
+  - **Multiple faces**: someone else is in frame
+  - **Camera interrupted**: the camera stream stopped
 
-### Proctoring Statistics
-- Total scheduled assessments
-- Active assessments count
-- Completed assessments count
-- Total violations recorded
-- Violations by severity breakdown
+### Dashboard Summary
+- Scheduled assessments (upcoming today)
+- Active sessions
+- Assessments completed today
+- Violation events today
 
 ---
 
 ## 🔵 Candidate
 
-The **Candidate** does not have a traditional login. Instead, they interact with the system through a unique, time-limited assessment link sent via email.
+Candidates do not have an account. They apply from the public job listings and
+take the assessment through an emailed, time-limited link.
 
-### Resume Submission
-- Upload a PDF or DOCX resume (max 10MB)
-- Resume is automatically parsed by AI to extract:
-  - Name, email, phone
-  - Skills and qualifications
-  - Years of experience
-  - Education
-- AI scores the resume against the applied job posting
-- AI generates pros, cons, and a recommendation
+### Application
+- Browse open roles at `/jobs` and apply at `/apply/:jobId`
+- Upload a PDF or DOCX resume (max 10 MB) with name, email, and optional phone
+- The resume is parsed and scored against the job; the candidate only sees a
+  confirmation, while the AI review is visible to hiring staff
 
 ### Assessment Access
-- Receive an assessment link via email
-- **Time-validated access**: Assessment can only be started within a ±30 minute window of the scheduled time
-- Verify assessment token to see status and time remaining
+- The assessment link carries its token in the URL fragment (`#token=…`)
+- The assessment can only be started within ±30 minutes of the scheduled time
 
 ### Taking the Assessment
-- **MCQ Section**: Multiple-choice questions tailored to the job role
-- **Coding Section** (technical roles only): Code editor with syntax highlighting, run test cases
-- **Psychometric Section**: Scenario-based questions evaluating behavioral traits
-- Submit answers individually with time tracking
-- Complete the assessment to trigger automatic scoring
+- **MCQ section:** multiple-choice questions for the role
+- **Coding section** (technical roles only): a plain code editor with
+  Python or JavaScript, and test runs through the code runner
+- **Psychometric section:** scenario-based questions on behavioural traits
+- Answers are saved as the candidate goes, and time is synced with the server
 
-### Proctoring (During Assessment)
+### Proctoring During the Assessment
 - Camera access for live video monitoring
-- Browser activity monitoring (tab switches, focus loss)
-- Face detection (no face, multiple faces)
-- Violations are automatically reported to proctors
-- Time sync — progress is saved periodically
+- Browser monitoring for tab switches, window focus loss, and copy/paste
+- In-browser face detection (no face, multiple faces)
+- Violations are reported to proctors automatically
 
-### Assessment Results
-- Final scores are calculated automatically:
-  - Technical score: 60% MCQ + 40% Coding
-  - Psychometric score: average of trait scores
-  - Overall score: 70% Technical + 30% Psychometric
-- AI generates a preliminary hiring recommendation
-- Candidate receives an email with the final hiring decision
+### Scoring
+- Technical score: 60% MCQ + 40% coding
+- Overall score: 70% technical + 30% psychometric
+- The system produces an automated recommendation; the hiring reviewer makes
+  the final decision, which is emailed to the candidate
 
 ---
 
 ## Role Comparison Matrix
 
-| Feature | Admin | Interviewer | Proctor | Candidate |
-|---------|:-----:|:-----------:|:-------:|:---------:|
-| Login with email/password | ✅ | ✅ | ✅ | ❌ |
-| Manage users (CRUD) | ✅ | ❌ | ❌ | ❌ |
-| View all candidates | ✅ | ✅ | ❌ | ❌ |
-| Upload resumes (single) | ❌ | ❌ | ❌ | ✅ |
-| Bulk upload resumes (ZIP) | ✅ | ❌ | ❌ | ❌ |
-| Manage job postings | ✅ | ❌ | ❌ | ❌ |
-| Schedule assessments | ❌ | ✅ | ❌ | ❌ |
-| Take assessments | ❌ | ❌ | ❌ | ✅ |
-| Make hiring decisions | ❌ | ✅ | ❌ | ❌ |
-| Monitor live assessments | ❌ | ❌ | ✅ | ❌ |
-| View violations | ❌ | ❌ | ✅ | ❌ |
-| View analytics | ✅ | ✅ | ✅ | ❌ |
-| Manage system settings | ✅ | ❌ | ❌ | ❌ |
-| View database tables | ✅ | ❌ | ❌ | ❌ |
-| Manage question banks | ✅ | ❌ | ❌ | ❌ |
-| View email logs | ✅ | ❌ | ❌ | ❌ |
-| View audit log | ✅ | ❌ | ❌ | ❌ |
+| Feature | Admin / Super Admin | Interviewer | Recruiter / Sector Admin | Proctor | Candidate |
+|---------|:-----:|:-----:|:-----:|:-----:|:-----:|
+| Login with email/password | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Manage staff users | ✅ | ❌ | ❌ | ❌ | ❌ |
+| View candidates | ✅ all | ✅ assigned | ✅ own sector | ❌ | ❌ |
+| Submit an application | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Bulk upload resumes (ZIP) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Manage job postings | ✅ | ❌ | ✅ own sector | ❌ | ❌ |
+| Manage sectors | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Schedule assessments | ❌ | ✅ | ✅ | ❌ | ❌ |
+| Make hiring decisions | ❌ | ✅ | ✅ | ❌ | ❌ |
+| Watch live assessments | ❌ | ✅ | ✅ | ✅ | ❌ |
+| Review violations | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Take assessments | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Analytics | ✅ | ❌ | ❌ | Dashboard summary | ❌ |
+| Question banks | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Email logs | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Audit log | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 ---
 
 ## Seed Accounts
 
-When seeding the database with `database/seed_users.py`, the following accounts are created:
+`database/seed_users.py` creates these accounts:
 
 | Role | Email | Password source |
 |------|-------|-----------------|
@@ -242,5 +209,9 @@ When seeding the database with `database/seed_users.py`, the following accounts 
 | Proctor | `proctor@hiresense.com` | `SEED_PROCTOR_PASSWORD` or a generated initial password |
 
 The seed script has no fixed default passwords. Generated passwords are shown
-once at seed time; store them in an approved secret manager and rotate them
-before production use. Never commit seed passwords to the repository.
+once at seed time; store them in a password manager and rotate them before
+production use. Never commit seed passwords to the repository.
+
+With `DEMO_MODE=true`, `database/seed_demo.py` adds separate demo accounts and
+`/login` offers one-click Admin, Interviewer, and Proctor sign-in (see
+[deploy/README.md](../deploy/README.md)).

@@ -1,532 +1,162 @@
 # Deployment Guide
 
-Complete guide for deploying HireSense to production environments.
+How HireSense is built, deployed, and operated in production. Host-level setup
+(users, Caddy, systemd, secrets, the public demo) is covered step by step in
+[deploy/README.md](../deploy/README.md); this guide explains the overall shape
+and the day-to-day release flow.
 
 ---
 
-## Deployment Options
+## Production Topology
 
-| Platform | Frontend | Backend | Database | Best For |
-|----------|----------|---------|----------|----------|
-| Railway | N/A | Flask | PostgreSQL | Backend + DB |
-| Render | N/A | Flask | PostgreSQL | Backend + DB |
-| Vercel | React/Vite | N/A | N/A | Frontend only |
-| Netlify | React/Vite | N/A | N/A | Frontend only |
-| Heroku | Both | Flask | PostgreSQL | Full stack |
-| AWS | Both | EC2/Lambda | RDS | Enterprise |
+```
+Browser ──HTTPS──▶ Caddy ──┬── static files: compiled React app (frontend/dist)
+                           └── /api, /socket.io ──▶ Gunicorn (1 eventlet worker, 127.0.0.1:5000)
+                                                        │
+                                                        ├── PostgreSQL (Supabase pooler, TLS verify-full)
+                                                        ├── OpenAI (optional, deterministic fallbacks)
+                                                        ├── Resend or SMTP (email)
+                                                        └── Piston code runner (disabled in production)
+```
 
-**Recommended Setup:**
-- Frontend: Vercel or Netlify
-- Backend: Railway or Render
-- Database: Managed PostgreSQL
+- **Host:** a single 1-vCPU VPS shared with other sites.
+- **Frontend:** built with `npm run build` and served directly by Caddy. There is
+  no Node process in production.
+- **Backend:** `hiresense.service` runs
+  `gunicorn --worker-class eventlet --workers 1 app:app_with_socketio`. One worker
+  is deliberate: Socket.IO room state lives in that process.
+- **Database:** Supabase PostgreSQL through its IPv4 pooler. The runtime connects
+  as the restricted `hiresense_app` role; schema changes use a separate
+  administrator URL that the service never receives.
+- **Uploads:** resumes and proctoring screenshots are written to the private
+  directory `/var/lib/hiresense/uploads` (`UPLOAD_FOLDER`), never a public path.
+- **Secrets:** `/etc/hiresense/hiresense.env` (`0600`, root-owned).
+
+The systemd unit, Caddy site, and deployment scripts live in [`deploy/`](../deploy/).
 
 ---
 
-## Backend Deployment
+## Release Flow
 
-### Railway Deployment
+1. A pull request runs the **Quality and deploy** workflow
+   (`.github/workflows/quality-and-deploy.yml`):
+   - backend: `ruff check backend`, `pytest`, `python database/validate_schema.py`,
+     and a syntax check of the deploy scripts (Python 3.12)
+   - frontend: `npm ci` and `npm run check` (tests, lint, dead-code check, build) on Node 24
+2. Merging to `main` runs the same checks. When both pass, the `deploy` job
+   connects over SSH as the restricted `hiresense-deploy` account and runs
+   `deploy <commit-sha>`.
+3. On the host, `/usr/local/sbin/deploy-hiresense` builds an immutable release
+   under `/opt/hiresense/releases`, switches `/opt/hiresense/current` atomically,
+   restarts the service, waits for `/api/health/ready`, and rolls back if the new
+   release does not become ready.
 
-#### 1. Prepare Project
+Automatic deploys ship application code only. Changes to Caddy, systemd units,
+the deployment command, or the database schema are separate administrator
+installs (see [deploy/README.md](../deploy/README.md)). In particular, the
+deploy script does not install `deploy/Caddyfile.hiresense`: after a change to
+it (for example the CSP), copy it to `/etc/caddy/sites.d/hiresense.caddy`,
+validate, and reload Caddy by hand.
 
-Ensure these files exist in `backend/`:
+---
 
-```
-backend/
-├── app.py
-├── requirements.txt
-├── Procfile
-├── runtime.txt
-└── nixpacks.toml
-```
+## Database Changes
 
-**Procfile:**
-```
-web: gunicorn --worker-class eventlet --workers 1 app:app_with_socketio --bind 0.0.0.0:$PORT --timeout 90
-```
-
-**runtime.txt:**
-```
-python-3.11.9
-```
-
-**nixpacks.toml:**
-```toml
-[phases.setup]
-nixPkgs = ["python311Full", "gcc", "postgresql"]
-nixLibs = ["postgresql"]
-
-[phases.install]
-commands = [
-  "python -m ensurepip --upgrade || true",
-  "python -m pip install -r requirements.txt"
-]
-
-[start]
-cmd = "LD_LIBRARY_PATH=/nix/var/nix/profiles/default/lib:$LD_LIBRARY_PATH gunicorn --worker-class eventlet --workers 1 app:app_with_socketio --bind 0.0.0.0:$PORT --timeout 90"
-```
-
-#### 2. Deploy to Railway
+Run migrations by hand from an administrator shell with both
+`DATABASE_ADMIN_URL` and the runtime `DATABASE_URL` set:
 
 ```bash
-# Install Railway CLI
-npm install -g @railway/cli
+# Fresh, empty database
+python backend/scripts/run_migration.py --schema
 
-# Login
-railway login
-
-# Initialize project
-cd backend
-railway init
-
-# Add PostgreSQL
-railway add --plugin postgresql
-
-# Deploy
-railway up
+# Existing HireSense database
+python backend/scripts/run_migration.py --reconcile
 ```
 
-#### 3. Configure Environment Variables
+In production the runner requires the administrator URL. It also creates or
+rotates the `hiresense_app` login, installs RLS policies and the limited grants,
+and verifies the role. See [database/README.md](../database/README.md) for the
+schema contract and [DATABASE.md](DATABASE.md) for the data model.
 
-In Railway dashboard, add:
+### First Staff Accounts
 
-```
-APP_ENV=production
-ALLOW_RUNTIME_ENV_MUTATION=false
-JWT_SECRET_KEY=<generated-64-character-random-value>
-JWT_ACCESS_TOKEN_MINUTES=60
-DATABASE_URL=postgresql://... (auto-set by Railway)
-OPENAI_API_KEY=sk-your-openai-key
-RESEND_API_KEY=re_your-resend-key
-FRONTEND_URL=https://your-frontend-domain.com
-CORS_ORIGINS=https://your-frontend-domain.com
-TRUST_PROXY_HOPS=1
-UPLOAD_FOLDER=/data/uploads
-```
-
-#### Persistent Upload Storage
-
-Resumes and proctoring screenshots contain private candidate data. The default
-`backend/uploads` directory is intended for local development only; ephemeral
-containers can erase it during a restart or redeploy. In production, set
-`UPLOAD_FOLDER` to a private persistent mounted volume (for example,
-`/data/uploads`) or replace local storage with a durable object-store adapter.
-
-Do not expose the upload root as a public/static directory. Restrict access,
-encrypt and back it up as appropriate, and define a retention/deletion policy
-that matches your hiring and privacy requirements. If an existing deployment
-already has uploads, copy them before changing `UPLOAD_FOLDER` because database
-records retain their stored file paths.
-
----
-
-### Render Deployment
-
-#### 1. Create render.yaml
-
-```yaml
-# render.yaml
-services:
-  - type: web
-    name: elite-hire-backend
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --worker-class eventlet --workers 1 app:app_with_socketio --bind 0.0.0.0:$PORT --timeout 90
-    envVars:
-      - key: APP_ENV
-        value: production
-      - key: ALLOW_RUNTIME_ENV_MUTATION
-        value: false
-      - key: JWT_SECRET_KEY
-        generateValue: true
-      - key: JWT_ACCESS_TOKEN_MINUTES
-        value: 60
-      - key: FRONTEND_URL
-        value: https://your-frontend-domain.com
-      - key: CORS_ORIGINS
-        value: https://your-frontend-domain.com
-      - key: TRUST_PROXY_HOPS
-        value: 1
-      - key: DATABASE_URL
-        fromDatabase:
-          name: elite-hire-db
-          property: connectionString
-
-databases:
-  - name: elite-hire-db
-    plan: free
-```
-
-#### 2. Deploy
-
-1. Push code to GitHub
-2. Connect Render to repository
-3. Render auto-deploys on push
-
----
-
-## Frontend Deployment
-
-### Vercel Deployment
-
-#### 1. Configure Build
-
-Create `vercel.json` in frontend/:
-
-```json
-{
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "framework": "vite",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
-}
-```
-
-#### 2. Set Environment Variables
+Create the first admin, interviewer, and proctor with the seeder, then manage
+everyone else from the Admin Dashboard:
 
 ```bash
-# In Vercel dashboard or CLI
-VITE_API_BASE_URL=https://your-backend-url.railway.app
+SEED_ADMIN_PASSWORD=... SEED_INTERVIEWER_PASSWORD=... SEED_PROCTOR_PASSWORD=... \
+  python database/seed_users.py --db-url "$DATABASE_ADMIN_URL"
 ```
 
-#### 3. Deploy
+Any password variable you leave out is generated and printed once.
+
+---
+
+## Production Environment
+
+The full list of variables is in `backend/.env.example`; [SETUP.md](SETUP.md)
+describes them. Production must set at least:
+
+| Variable | Value / purpose |
+|----------|-----------------|
+| `APP_ENV` | `production` (enables the strict startup checks) |
+| `DATABASE_URL` | `hiresense_app` pooler URL with `sslmode=verify-full` and `sslrootcert` |
+| `JWT_SECRET_KEY` | Random secret, 32+ characters |
+| `FRONTEND_URL` / `CORS_ORIGINS` | The public site origin |
+| `TRUST_PROXY_HOPS` | `1` (Caddy) |
+| `UPLOAD_FOLDER` | `/var/lib/hiresense/uploads` |
+| `ALLOW_INSECURE_DEV_SECRET` / `ALLOW_RUNTIME_ENV_MUTATION` | `false` |
+| `DB_POOL_MIN` / `DB_POOL_MAX` | `1` / `8` |
+| `CODE_RUNNER_ENABLED` | `false` until an isolated Piston runner is available |
+
+Optional: `OPENAI_API_KEY`, `RESEND_API_KEY` or `SMTP_*`, `REDIS_URL` (shared
+rate-limit storage), `DEMO_MODE`.
+
+Generate a JWT secret with:
 
 ```bash
-# Install Vercel CLI
-npm install -g vercel
-
-# Deploy
-cd frontend
-vercel
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 ---
 
-### Netlify Deployment
+## Health Checks
 
-#### 1. Configure Build
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/health` | Liveness. Returns `{"status": "ok", "demo_mode": <bool>}` |
+| `GET /api/health/ready` | Readiness. Checks PostgreSQL; returns `503` with `"database": "unavailable"` when it is unreachable, and reports `code_runner: enabled/disabled` |
 
-Create `netlify.toml` in frontend/:
-
-```toml
-[build]
-  command = "npm run build"
-  publish = "dist"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-```
-
-#### 2. Deploy
-
-```bash
-# Install Netlify CLI
-npm install -g netlify-cli
-
-# Deploy
-cd frontend
-netlify deploy --prod
-```
+Logs go to the systemd journal: `journalctl -u hiresense.service`.
 
 ---
 
-## Database Setup
+## Known Limitations
 
-### PostgreSQL Migration
-
-#### 1. Create Production Database
-
-Railway/Render automatically provision PostgreSQL.
-
-For manual setup:
-```sql
-CREATE DATABASE elite_hire_prod;
-CREATE USER elite_hire_user WITH PASSWORD 'secure_password';
-GRANT ALL PRIVILEGES ON DATABASE elite_hire_prod TO elite_hire_user;
-```
-
-#### 2. Run Schema Migration
-
-```bash
-# Set DATABASE_URL
-export DATABASE_URL="postgresql://user:pass@host:5432/elite_hire_prod"
-
-# Initialize a fresh, empty database
-cd backend
-python scripts/run_migration.py --schema
-
-# For an existing HireSense database, use the reconciliation path instead:
-python scripts/run_migration.py --reconcile
-
-# Direct SQL alternative for a fresh database (run from repository root):
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/schema_postgres.sql
-```
-
-The runner deliberately refuses fresh-schema mode when HireSense core tables
-already exist. Back up an existing database before reconciliation and review
-PostgreSQL warnings for historical duplicate data that may prevent optional
-unique indexes from being created.
-
-#### 3. Create Initial Admin
-
-```python
-# seed_production.py
-import bcrypt
-from user_db import create_user
-
-password_hash = bcrypt.hashpw(
-    'your-secure-admin-password'.encode('utf-8'),
-    bcrypt.gensalt()
-).decode('utf-8')
-
-create_user(
-    email='admin@yourcompany.com',
-    password_hash=password_hash,
-    role='admin',
-    name='Admin User'
-)
-```
+- **Code runner:** the ARM host has no safe Piston runtime, so technical
+  assessments (with a coding section) cannot be scheduled in production.
+- **TURN:** WebRTC uses public STUN servers only. Proctor video can fail across
+  restrictive or symmetric NAT networks until a TURN server is added.
+- **Single worker:** scaling out needs a shared Socket.IO message queue and
+  sticky sessions before adding Gunicorn workers or hosts.
 
 ---
 
-## Environment Configuration
-
-### Production Environment Variables
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `APP_ENV` | Application environment; use `production` for hosted deployments | `production` |
-| `ALLOW_RUNTIME_ENV_MUTATION` | Local admin `.env` editing opt-in; keep disabled in production | `false` |
-| `JWT_SECRET_KEY` | JWT signing key | `random-64-char-string` |
-| `JWT_ACCESS_TOKEN_MINUTES` | Staff bearer-token lifetime (5-480 minutes) | `60` |
-| `DATABASE_URL` | PostgreSQL connection | `postgresql://user:pass@host/db` |
-| `OPENAI_API_KEY` | OpenAI API key | `sk-...` |
-| `RESEND_API_KEY` | Resend email API key | `re_...` |
-| `FRONTEND_URL` | Canonical frontend base URL used in invitations | `https://frontend.com` |
-| `CORS_ORIGINS` | Comma-separated HTTPS browser origins; required in production | `https://frontend.com` |
-| `TRUST_PROXY_HOPS` | Exact reverse-proxy count (`0` without a proxy, `1` on Railway/Render) | `1` |
-| `UPLOAD_FOLDER` | Private persistent storage path for resumes and evidence | `/data/uploads` |
-
-### Generate Secure Keys
-
-```bash
-# Generate JWT secret
-python -c "import secrets; print(secrets.token_hex(32))"
-
-# Or using openssl
-openssl rand -hex 32
-```
-
----
-
-## CORS Configuration
-
-### Production CORS Setup
-
-Set `CORS_ORIGINS` to the exact HTTPS origins that host the frontend, without
-paths, queries, fragments, credentials, or wildcards. The same validated list
-protects HTTP and Socket.IO. Startup fails outside development if the variable
-is missing or unsafe.
-
-```text
-CORS_ORIGINS=https://hire.example.com,https://admin.hire.example.com
-```
-
-Do not add the API origin unless it also serves a browser client. Local HTTP
-origins are accepted only when `APP_ENV` is `dev`, `development`, `local`, or
-`test`.
-
----
-
-## SSL/HTTPS
-
-### Railway/Render
-
-SSL is automatically provided for all deployments.
-
-### Custom Domain
-
-1. Add custom domain in platform dashboard
-2. Update DNS records:
-   ```
-   CNAME api.yourdomain.com -> your-app.railway.app
-   ```
-3. SSL certificate auto-provisioned
-
----
-
-## Monitoring
-
-### Health Check Endpoint
-
-```python
-@app.route('/api/health')
-def health_check():
-    return jsonify({
-        'status': 'healthy',
-        'version': '1.0.0',
-        'database': check_db_connection()
-    })
-```
-
-### Logging Configuration
-
-```python
-import logging
-from logging.handlers import RotatingFileHandler
-
-if os.environ.get('APP_ENV') == 'production':
-    handler = RotatingFileHandler(
-        'logs/app.log',
-        maxBytes=10000000,
-        backupCount=5
-    )
-    handler.setLevel(logging.INFO)
-    app.logger.addHandler(handler)
-```
-
----
-
-## Deployment Checklist
-
-### Pre-Deployment
-
-- [ ] All tests passing
-- [ ] Environment variables documented
-- [ ] Database schema up to date
-- [ ] Static files built (`npm run build`)
-- [ ] Dependencies locked (`pip freeze > requirements.txt`)
-
-### Backend
-
-- [ ] `APP_ENV=production`
-- [ ] `ALLOW_RUNTIME_ENV_MUTATION=false`
-- [ ] JWT_SECRET_KEY is secure (64+ chars)
-- [ ] `JWT_ACCESS_TOKEN_MINUTES` is set to the intended staff session length
-- [ ] DATABASE_URL configured
-- [ ] `FRONTEND_URL` and `CORS_ORIGINS` use the exact production HTTPS frontend origin
-- [ ] `TRUST_PROXY_HOPS` matches the deployment proxy topology (`1` on Railway/Render)
-- [ ] OpenAI API key configured
-- [ ] Email service configured (Resend or SMTP)
-- [ ] Gunicorn as WSGI server
-
-### Frontend
-
-- [ ] VITE_API_BASE_URL points to production backend
-- [ ] Build successful (`npm run build`)
-- [ ] SPA routing configured (redirects)
-
-### Database
-
-- [ ] PostgreSQL provisioned
-- [ ] Schema migrated
-- [ ] Initial admin user created
-- [ ] Backup strategy in place
-
-### Security
-
-- [ ] HTTPS enabled
-- [ ] Secure headers configured
-- [ ] Rate limiting enabled
-- [ ] Input validation active
-- [ ] Error messages sanitized
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-#### "ModuleNotFoundError"
-
-```bash
-# Ensure all dependencies in requirements.txt
-pip freeze > requirements.txt
-```
-
-#### "Database connection failed"
-
-1. Check DATABASE_URL format
-2. Verify PostgreSQL is running
-3. Check network/firewall rules
-
-#### "CORS error"
-
-1. Verify CORS_ORIGINS matches frontend URL
-2. Check for trailing slashes
-3. Ensure preflight requests handled
-
-#### "JWT token invalid"
-
-1. Ensure JWT_SECRET_KEY same across restarts
-2. Check token expiration
-3. Verify Authorization header format
-
----
-
-## Scaling
-
-### Horizontal Scaling
-
-Railway/Render support scaling:
-```bash
-# Railway
-railway scale web=3
-
-# Render: Configure in dashboard
-```
-
-### Database Connection Pooling
-
-```python
-# For production PostgreSQL
-from psycopg2 import pool
-
-connection_pool = pool.ThreadedConnectionPool(
-    minconn=5,
-    maxconn=20,
-    dsn=DATABASE_URL
-)
-```
-
-### Caching
-
-Consider adding Redis for:
-- Session storage
-- API response caching
-- Rate limiting
-
----
-
-## Backup & Recovery
-
-### Database Backup
-
-```bash
-# Manual backup
-pg_dump $DATABASE_URL > backup_$(date +%Y%m%d).sql
-
-# Automated (cron)
-0 2 * * * pg_dump $DATABASE_URL > /backups/daily_$(date +\%Y\%m\%d).sql
-```
-
-### Restore
-
-```bash
-psql $DATABASE_URL < backup_20260125.sql
-```
+## Other Platforms
+
+`backend/Procfile`, `backend/nixpacks.toml`, and `backend/runtime.txt` are left
+over from an earlier Railway setup. They are not used or tested by the current
+deployment, and `nixpacks.toml` still pins Python 3.11 while `runtime.txt` and
+CI use 3.12. If you deploy to a PaaS, run the same Gunicorn command, serve
+`frontend/dist` as static files with `/api` and `/socket.io` proxied to the
+backend (or set `VITE_API_BASE_URL` at build time), use a persistent private
+volume for `UPLOAD_FOLDER`, and apply the same environment rules as above.
 
 ---
 
 ## Related Documentation
 
-- [SETUP.md](SETUP.md) - Setup and environment variables
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
-- [DATABASE.md](DATABASE.md) - Database structure and migration modes
-
----
-
-*Last Updated: May 2026*
+- [deploy/README.md](../deploy/README.md) — host installation and the public demo
+- [SETUP.md](SETUP.md) — local development and environment variables
+- [ARCHITECTURE.md](ARCHITECTURE.md) — system design
+- [database/README.md](../database/README.md) — schema contract and migrations
