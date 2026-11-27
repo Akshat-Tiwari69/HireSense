@@ -15,26 +15,33 @@ Proctor accounts are created through the Admin Dashboard — no scripts needed.
 
 ---
 
-## Creating a Proctor via SQL (Direct DB Access)
+## Creating the First Proctor Without the Admin UI
 
-If you need to bootstrap a proctor before the admin UI is available, use Python to generate a bcrypt hash and insert directly:
+If no admin exists yet, run the seeder from the repository root. It creates
+`admin@hiresense.com`, `interviewer@hiresense.com`, and `proctor@hiresense.com`:
+
+```bash
+SEED_PROCTOR_PASSWORD='choose-a-strong-password' python database/seed_users.py
+```
+
+To insert a single proctor directly, hash the password with Werkzeug, which is
+what the backend uses to verify logins:
 
 ```python
-import bcrypt, psycopg2, os
+import os
+import psycopg2
+from werkzeug.security import generate_password_hash
 
 email = "proctor@yourcompany.com"
 password = "choose-a-strong-password"   # change this
 name = "Proctor Name"
 
-hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
 conn = psycopg2.connect(os.environ["DATABASE_URL"])
-cur = conn.cursor()
-cur.execute(
-    "INSERT INTO users (email, password_hash, role, name) VALUES (%s, %s, 'proctor', %s)",
-    (email, hash, name)
-)
-conn.commit()
+with conn, conn.cursor() as cur:
+    cur.execute(
+        "INSERT INTO users (email, password_hash, role, name) VALUES (%s, %s, 'proctor', %s)",
+        (email, generate_password_hash(password), name),
+    )
 conn.close()
 print(f"Created proctor: {email}")
 ```
@@ -45,36 +52,42 @@ Never commit real credentials to the repository.
 
 ## Proctor Dashboard Features
 
+### Summary
+- Scheduled assessments today, active sessions, assessments completed today,
+  and violation events today
+- The dashboard refreshes every 30 seconds while the browser tab is visible
+
 ### Scheduled Tab
-- View all upcoming assessments
-- Candidate name, email, scheduled time
-- Time until assessment starts
+- Upcoming assessments with candidate and scheduled time
+- Claim an unassigned assessment to proctor it
 
 ### Active Tab
-- Monitor ongoing assessments in real-time
-- Current violation count per candidate
-- Auto-refreshes every 10 seconds
+- Ongoing assessments with their current violation count
+- Open the live WebRTC video for a session
 
 ### Completed Tab
-- Review finished assessments
-- Check violation counts and scores
+- Your finished assessments with violation counts and scores
 
 ### Violation Details (Per Assessment)
 Click **View Details** on any assessment to see:
 - All violations with timestamps
 - Violation type and severity
 - Detailed descriptions
+- Screenshot evidence, where the browser captured it (opened in a new tab)
+
+Violation types reported by the candidate's browser: tab hidden, window focus
+lost, copy/cut/paste, no face detected, multiple faces, and camera interrupted.
 
 ---
 
 ## Role Permissions
 
-| Action | Admin | Interviewer | Proctor |
+| Action | Admin | Interviewer / Recruiter / Sector Admin | Proctor |
 |--------|-------|-------------|---------|
-| View proctor dashboard | Yes | No | Yes |
-| Monitor live assessments | Yes | No | Yes |
-| Review violation records | Yes | Yes | Yes |
-| Schedule assessments | Yes | Yes | No |
+| Open the Proctor Dashboard | No | No | Yes |
+| Watch live assessment video | No | Yes (from the hiring dashboard) | Yes |
+| Review violation records | No | No | Yes |
+| Schedule assessments | No | Yes | No |
 | Manage users | Yes | No | No |
 
 ---
@@ -98,6 +111,10 @@ UPDATE users SET role = 'admin' WHERE email = 'proctor@yourcompany.com';
 UPDATE users SET role = 'interviewer' WHERE email = 'proctor@yourcompany.com';
 ```
 
+A role change signs the user out: existing tokens stop working because their
+role no longer matches the account. `sector_admin` and `recruiter` also need a
+`sector_id`.
+
 ### Remove a proctor
 ```sql
 DELETE FROM users WHERE email = 'proctor@yourcompany.com' AND role = 'proctor';
@@ -120,5 +137,6 @@ DELETE FROM users WHERE email = 'proctor@yourcompany.com' AND role = 'proctor';
 |-------|----------|
 | "Access Denied" on /proctor | Verify the user has `role = 'proctor'` in the database |
 | Dashboard not loading | Check browser console and verify backend is running |
-| No assessments showing | Verify assessments exist and have `proctoring_enabled = true` |
-| Auto-refresh not working | Check for JavaScript errors in browser console |
+| No assessments showing | The Scheduled tab lists future assessments within the next few days that are unassigned or assigned to this proctor; check the schedule time and assignment |
+| Auto-refresh not working | Refresh pauses while the tab is hidden; check the browser console for errors |
+| Live video never connects | Check camera permission on the candidate side; restrictive NATs need a TURN server, which is not configured |

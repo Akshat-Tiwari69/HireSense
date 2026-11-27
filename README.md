@@ -27,10 +27,11 @@ HireSense is a full-stack AI-enabled hiring platform that handles the complete r
 |---------|-------------|
 | Resume Parsing & AI Analysis | Extracts skills/experience, generates pros/cons and match scores |
 | Job Matching | Rule-based + AI re-ranking of candidate-to-job fit |
-| Assessment Engine | MCQ, coding challenges (multi-language), psychometric tests |
-| Live Proctoring | WebRTC video stream with violation detection (face, tab-switch, copy-paste) |
-| Role-Based Dashboards | Admin, Sector Admin, Interviewer, Proctor, Candidate |
+| Assessment Engine | MCQ, coding challenges (Python and JavaScript, run through a Piston code runner), psychometric scenarios |
+| Live Proctoring | WebRTC video stream to a proctor, with violation detection (face, tab-switch, window focus, copy-paste, camera loss) |
+| Role-Based Dashboards | Admin, hiring review (Interviewer, Recruiter, Sector Admin), Proctor, and a token-based candidate assessment page |
 | Email Automation | Assessment invitations, rejections, final decisions |
+| Public Demo Mode | Optional `DEMO_MODE` with one-click staff sign-in and a nightly reset |
 
 ---
 
@@ -38,13 +39,13 @@ HireSense is a full-stack AI-enabled hiring platform that handles the complete r
 
 | Role | Access |
 |------|--------|
-| Admin | Full system — users, candidates, jobs, sectors, analytics |
-| Super Admin | Admin access plus privileged user and development-setting controls |
+| Admin | Full system — users, candidates, jobs, sectors, question banks, analytics, email and audit logs |
+| Super Admin | Admin access, plus creating, editing, and deleting admin and super admin accounts |
 | Sector Admin | Scoped to their sector's jobs and candidates |
-| Recruiter | Candidate and job workflow access without system administration |
-| Interviewer | Candidate review, assessment scheduling, final decisions |
-| Proctor | Live session monitoring, violation reporting |
-| Candidate | Job listings, application submission, assessment |
+| Recruiter | Hiring review and job postings within their sector |
+| Interviewer | Candidate review, assessment scheduling, final decisions for assigned candidates |
+| Proctor | Live session monitoring and violation review |
+| Candidate | No account: job listings, application submission, and an emailed assessment link |
 
 ---
 
@@ -52,8 +53,8 @@ HireSense is a full-stack AI-enabled hiring platform that handles the complete r
 
 ### Prerequisites
 
-- Python 3.9+
-- Node.js 20
+- Python 3.12 (CI and production; 3.10 is the minimum)
+- Node.js 20–24 and npm 10+
 - PostgreSQL 15+ (or a Supabase project)
 - OpenAI API key (optional; deterministic fallbacks are built in)
 
@@ -75,6 +76,9 @@ cp .env.example .env        # then fill in values
 # Initialize a fresh database. For an existing installation, use --reconcile.
 python scripts/run_migration.py --schema
 
+# Create the first admin, interviewer, and proctor accounts
+python ../database/seed_users.py
+
 # Start server (development)
 python run.py
 ```
@@ -94,7 +98,8 @@ cp .env.example .env.local
 npm run dev
 ```
 
-App runs at `http://localhost:5173`
+App runs at `http://localhost:5173`. The Vite dev server proxies `/api` and
+`/socket.io` to the backend on port 5000.
 
 ---
 
@@ -110,45 +115,45 @@ All documentation lives in `docs/`. Start with the index:
 | [docs/BACKEND_FILE_REFERENCE.md](docs/BACKEND_FILE_REFERENCE.md) | Every backend Python file and its functions |
 | [docs/DATABASE.md](docs/DATABASE.md) | All tables, relationships, indexes |
 | [docs/API.md](docs/API.md) | Complete REST API reference with examples |
-| [docs/PROCTOR_USER_SETUP.md](docs/PROCTOR_USER_SETUP.md) | WebRTC proctoring, face detection, violations |
+| [docs/PROCTOR_USER_SETUP.md](docs/PROCTOR_USER_SETUP.md) | Proctor accounts and the proctor dashboard |
 | [docs/ROLES.md](docs/ROLES.md) | Role definitions, permissions, access control |
-| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | Railway / Render / Vercel deployment |
+| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | How production is built and deployed (VPS, Caddy, GitHub Actions) |
+| [deploy/README.md](deploy/README.md) | Host setup, secrets, Caddy, and the public demo |
+| [database/README.md](database/README.md) | Schema contract, migrations, and validation |
 | [docs/SETUP.md](docs/SETUP.md) | All environment variables and local setup |
 
 ---
 
-## Refactoring and Hardening Status
+## Production
 
-The whole-project cleanup is complete on the current review branch:
+Production runs on a single VPS: Caddy serves the built React app and proxies
+`/api` and `/socket.io` to one Gunicorn/eventlet worker. Pushes to `main` run
+the quality checks in GitHub Actions and, when they pass, deploy an immutable
+release over SSH. See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md).
 
-- Database access is split into focused user, candidate, assessment, proctoring, and email modules.
-- Admin and interviewee routes are composed from smaller domain blueprints.
-- The PostgreSQL schema, dated reconciliation migration, and application field usage share one canonical contract.
-- Assessment scheduling, scoring, completion, and final decisions use transaction and concurrency guards.
-- Resume/archive/question ingestion is bounded and validates real file/container structure.
-- JWT role changes, assessment capability tokens, private uploads, and proctor evidence are protected end to end.
-- Frontend lint, dead-code analysis, dependency audit, and production build are part of `npm run check`.
-- The backend regression suite covers route contracts, transactions, provider fallbacks, and security boundaries.
+Known limits of the current deployment:
 
-Live PostgreSQL, email, AI-provider, Piston, and WebRTC checks still require valid external services; readiness remains 503 when PostgreSQL is unavailable.
+- The code runner (Piston) is disabled in production, so technical assessments
+  with a coding section cannot be scheduled there. Non-technical assessments work.
+- WebRTC uses public STUN servers only. Without a TURN server, proctor video can
+  fail across restrictive or symmetric NAT networks.
+- Live PostgreSQL, email, OpenAI, Piston, and WebRTC behaviour needs real
+  external services; `/api/health/ready` returns 503 when PostgreSQL is unreachable.
 
 ---
 
 ## Branch Strategy
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Production-stable code only |
-| `dev` | Integration branch — all features and refactoring go here first |
-
-PRs from `dev` → `main` are reviewed before merging.
+`main` is the only long-lived branch and is deployed automatically. Work happens
+on short-lived feature branches that are merged into `main` through pull
+requests once the GitHub Actions checks pass.
 
 ---
 
 ## Quality Checks
 
 ```bash
-# Frontend: lint, dead-code analysis, and production build
+# Frontend: unit tests, lint, dead-code analysis, and production build
 cd frontend
 npm run check
 npm audit
@@ -159,6 +164,10 @@ pip install -r requirements-dev.txt
 pytest
 ruff check .
 python -m compileall -q .
+
+# Database: static schema contract check (no database needed)
+cd ..
+python database/validate_schema.py
 ```
 
 ---

@@ -25,7 +25,8 @@ Complete documentation for the AI-Powered Recruitment Platform.
 - [Proctor Setup](PROCTOR_USER_SETUP.md) - Proctor account and monitoring setup
 
 ### Deployment
-- [Deployment Guide](DEPLOYMENT_GUIDE.md) - Production deployment (Railway, Render, Vercel)
+- [Deployment Guide](DEPLOYMENT_GUIDE.md) - How production is built and deployed (VPS, Caddy, GitHub Actions)
+- [Host Setup](../deploy/README.md) - Server installation, secrets, and the public demo
 - [Environment Configuration](SETUP.md) - Canonical environment variables
 
 ---
@@ -41,10 +42,11 @@ HireSense is a full-stack AI-enabled hiring platform that covers the complete re
 | AI Resume Analysis | OpenAI GPT-4o-mini pros/cons generation and match scoring |
 | Job Matching | Rule-based + AI re-ranking of candidate-to-job fit |
 | Multi-Role System | Super Admin, Admin, Sector Admin, Recruiter, Interviewer, Proctor, Candidate roles |
-| Assessment Engine | MCQ, Coding challenges (multi-language), Psychometric tests |
-| Live Proctoring | WebRTC video with face detection and violation tracking |
+| Assessment Engine | MCQ, coding challenges (Python and JavaScript), psychometric scenarios |
+| Live Proctoring | WebRTC video with in-browser face detection and violation tracking (tab, focus, copy/paste, camera) |
 | Email Automation | Assessment invitations, rejections, final decisions |
 | Time-Windowed Access | ±30 minute assessment access windows |
+| Public Demo Mode | Optional one-click staff sign-in with a nightly data reset |
 
 ### Technology Stack
 
@@ -53,9 +55,11 @@ HireSense is a full-stack AI-enabled hiring platform that covers the complete re
 | Frontend | React 18, Vite, Tailwind CSS, shadcn/ui, Socket.IO client |
 | Backend | Flask 3.0, Flask-JWT-Extended, Flask-Limiter, Flask-CORS, Socket.IO |
 | Database | PostgreSQL 15 (Supabase compatible) |
-| AI | OpenAI GPT-4o-mini |
+| AI | OpenAI GPT-4o-mini (optional, deterministic fallbacks) |
 | Realtime | Socket.IO + WebRTC (simple-peer) |
 | Email | Resend API, SMTP fallback |
+| Code execution | Piston (disabled in production) |
+| Hosting | Single VPS: Caddy + Gunicorn/eventlet, Supabase PostgreSQL |
 
 ---
 
@@ -63,8 +67,8 @@ HireSense is a full-stack AI-enabled hiring platform that covers the complete re
 
 ### Prerequisites
 
-- Python 3.9+
-- Node.js 20
+- Python 3.12 (3.10 minimum)
+- Node.js 20–24
 - PostgreSQL 15+ (or Supabase)
 - OpenAI API key (optional; deterministic fallbacks are available)
 
@@ -85,6 +89,9 @@ cp .env.example .env
 
 # Initialize a fresh database. Use --reconcile for an existing installation.
 python scripts/run_migration.py --schema
+
+# Create the first admin, interviewer, and proctor accounts
+python ../database/seed_users.py
 
 # Start server
 python run.py
@@ -111,10 +118,10 @@ App runs at: `http://localhost:5173`
 
 ### 3. Test the Application
 
-1. Open `http://localhost:5173`
-2. Click "I'm a Candidate" → Apply with a resume
-3. Login as an interviewer using credentials created via the admin panel
-4. Review the candidate in the interviewer dashboard
+1. Open `http://localhost:5173/jobs` and apply to a role with a resume
+   (create a job posting first from the Admin Dashboard if none exist)
+2. Log in as the seeded interviewer
+3. Review the candidate in the hiring dashboard at `/dashboard`
 
 ---
 
@@ -139,9 +146,10 @@ App runs at: `http://localhost:5173`
 
 | Document | Description |
 |----------|-------------|
-| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Production deployment (Railway, Render, Vercel) |
+| [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Production topology, release flow, and environment |
+| [../deploy/README.md](../deploy/README.md) | Host installation and the public demo |
 | [SETUP.md](SETUP.md) | All environment variables and local setup |
-| [PROCTOR_USER_SETUP.md](PROCTOR_USER_SETUP.md) | Creating proctor accounts |
+| [PROCTOR_USER_SETUP.md](PROCTOR_USER_SETUP.md) | Proctor accounts and the proctor dashboard |
 
 ---
 
@@ -164,7 +172,7 @@ Landing Page → Apply → Upload Resume → Acknowledgement Email
 ### Interviewer Flow
 
 ```
-Login → Dashboard → Review Candidates
+Login → Hiring Dashboard → Review Candidates
                           ↓
             View AI Match Scores & Pros/Cons
                           ↓
@@ -184,10 +192,10 @@ Login → Admin Dashboard
                ↓
      ┌─────────┼──────────┐
      ↓         ↓          ↓
-User Mgmt  Job Mgmt   Analytics
+User Mgmt  Job Mgmt   Analytics, Email & Audit Logs
      ↓         ↓
-  CRUD       CRUD
-  Users      Jobs
+  CRUD       CRUD Jobs, Sectors,
+  Users      Bulk Upload, Question Banks
 ```
 
 ### Proctor Flow
@@ -197,9 +205,9 @@ Login → Proctor Dashboard
                ↓
    View Active Assessment Sessions
                ↓
-   Monitor Live Video Feeds
+   Claim a Session → Monitor Live Video
                ↓
-   Review & Record Violations
+   Review Violations and Screenshot Evidence
 ```
 
 ---
@@ -242,12 +250,14 @@ Body: {"scheduled_time": "2026-01-25T14:00:00"}
 
 # Make decision
 POST /api/interviewer/assessments/:id/final-decision
-Body: {"decision": "hire", "rationale": "..."}
+Body: {"decision": "hire", "rationale": "...", "next_steps": "..."}
 ```
 
 ### Assessment (Candidate)
 
 ```bash
+# All candidate calls send: X-Assessment-Token: <token from the link>
+
 # Verify token
 GET /api/interviewee/assessment/verify
 
@@ -255,12 +265,11 @@ GET /api/interviewee/assessment/verify
 POST /api/interviewee/assessment/start
 
 # Submit MCQ answer
-POST /api/assessment/mcq/submit
-Body: {"assessment_id": 1, "question_id": 1, "answer": 0}
+POST /api/interviewee/assessment/:id/submit-answer
+Body: {"type": "mcq", "questionId": 1, "answer": "A", "timeSpent": 30}
 
 # Complete assessment
-POST /api/assessment/complete
-Body: {"assessment_id": 1}
+POST /api/interviewee/assessment/:id/complete
 ```
 
 ---
@@ -272,12 +281,13 @@ Body: {"assessment_id": 1}
 ```bash
 DATABASE_URL=postgresql://user:pass@host:5432/dbname
 JWT_SECRET_KEY=<32+ character random string>
-OPENAI_API_KEY=sk-...
+APP_ENV=development            # unset means production rules
 ```
 
 ### Optional
 
 ```bash
+OPENAI_API_KEY=sk-...          # AI features (deterministic fallbacks without it)
 RESEND_API_KEY=re_...          # Email via Resend API
 SMTP_HOST=smtp.gmail.com       # Email via SMTP (fallback)
 CORS_ORIGINS=https://...       # Restrict CORS in production
@@ -294,10 +304,10 @@ and `frontend/.env.example` for the complete reference.
 |-------|----------|
 | CORS error | Check `CORS_ORIGINS` matches the frontend URL |
 | JWT invalid | Verify `JWT_SECRET_KEY` is set and matches between restarts |
-| AI not working | Check `OPENAI_API_KEY` is valid and has credits |
+| AI not working | Check `OPENAI_API_KEY` is valid and has credits; without it, rule-based fallbacks are used |
 | Email not sending | Configure either `RESEND_API_KEY` or SMTP variables |
 | DB connection failed | Verify `DATABASE_URL` format: `postgresql://user:pass@host/db` |
 
 ---
 
-*Last Updated: May 2026*
+*Last Updated: November 2026*

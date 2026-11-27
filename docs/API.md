@@ -24,17 +24,19 @@ All responses follow a standard envelope:
 Authorization: Bearer <access_token>
 ```
 
-Tokens expire after 24 hours. Obtain a token via the login endpoint.
+Tokens expire after `JWT_ACCESS_TOKEN_MINUTES` (default 60 minutes). A token
+is also rejected once the user's account is updated or deleted. Obtain a token
+via the login endpoint.
 
 ## Role hierarchy
 
-The platform uses role-based access control (RBAC) with the following
-hierarchy. Higher-level roles inherit access to lower-level endpoints.
+Job and sector endpoints use this minimum-level hierarchy. Other blueprints
+check an explicit set of roles instead (see each section).
 
 | Role | Level | Description |
 |------|-------|-------------|
 | `super_admin` | 100 | Full system control |
-| `admin` | 90 | Maps to super_admin internally |
+| `admin` | 90 | Treated as `super_admin` by job and sector endpoints |
 | `sector_admin` | 70 | Sector-scoped management |
 | `recruiter` | 50 | Job postings and matching |
 | `interviewer` | 30 | Candidate management |
@@ -45,23 +47,6 @@ hierarchy. Higher-level roles inherit access to lower-level endpoints.
 ## Authentication
 
 **Prefix:** `/api/auth`
-
-### Register
-
-```
-POST /api/auth/register
-```
-
-Create a new user account.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `email` | string | Yes | Valid email address |
-| `password` | string | Yes | User password |
-| `role` | string | Yes | `interviewer`, `admin`, `proctor`, `sector_admin`, or `recruiter` |
-| `name` | string | Yes | Display name |
-
-**Response:** `data.user_id`, `data.email`, `data.role`, `data.name`
 
 ### Login
 
@@ -77,6 +62,24 @@ Authenticate and receive a JWT token.
 | `password` | string | Yes |
 
 **Response:** `data.access_token`, `data.user.{id, email, role, name}`
+
+There is no public registration endpoint. Admins create staff accounts with
+`POST /api/admin/users`.
+
+### Demo login
+
+```
+POST /api/auth/demo-login
+```
+
+Signs in as a seeded demo account. Only exists when `DEMO_MODE=true`
+(otherwise 404).
+
+| Field | Type | Required |
+|-------|------|----------|
+| `role` | string | Yes; `admin`, `interviewer`, or `proctor` |
+
+**Response:** same as login.
 
 ### Get current user
 
@@ -102,7 +105,7 @@ Validate that the current JWT token is still valid. Requires JWT.
 
 ## Admin endpoints
 
-**Prefix:** `/api/admin` — Requires `admin` role
+**Prefix:** `/api/admin` — Requires `admin` or `super_admin`. Creating, editing, or deleting `admin`/`super_admin` accounts requires `super_admin`.
 
 ### User management
 
@@ -123,25 +126,11 @@ Validate that the current JWT token is still valid. Requires JWT.
 | `DELETE` | `/api/admin/candidates/:candidate_id` | Delete candidate and related data |
 | `POST` | `/api/admin/reset-candidate-status/:candidate_id` | Reset status to "Applied" |
 
-### Database management
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/admin/db/tables` | List all database tables |
-| `GET` | `/api/admin/db/tables/:table_name` | Get table data (max 100 rows) |
-| `GET` | `/api/admin/db/stats` | Aggregate database statistics |
-
-### System settings
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/admin/settings/env` | Get environment variable status (values masked) |
-| `POST` | `/api/admin/settings/env` | Development-only allowlisted update; requires `super_admin`, `APP_ENV=development`, and `ALLOW_RUNTIME_ENV_MUTATION=true` (production returns 403) |
-
 ### Analytics and logs
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/admin/db/stats` | Aggregate database statistics |
 | `GET` | `/api/admin/analytics` | System-wide analytics (candidates, assessments, scores) |
 | `GET` | `/api/admin/email-logs` | Email audit log (limit 100) |
 
@@ -151,12 +140,12 @@ Validate that the current JWT token is still valid. Requires JWT.
 POST /api/admin/bulk-upload
 ```
 
-Upload a ZIP or RAR archive containing multiple resumes. Processes all
-files concurrently against a specified job posting.
+Upload a ZIP archive (up to 100 PDF/DOCX resumes, 10 MB each) as
+`multipart/form-data`. Processes the files concurrently against a job posting.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `file` | file | Yes | ZIP or RAR archive |
+| `file` | file | Yes | ZIP archive |
 | `job_id` | string | Yes | Target job posting ID |
 
 **Response:** `summary.{total, success, duplicates, errors}`, `results[]`
@@ -179,17 +168,17 @@ Use AI to polish job or sector descriptions.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/api/admin/question-bank/upload` | `admin` / `interviewer` | Upload question bank (PDF/DOCX) |
-| `GET` | `/api/admin/question-bank` | `admin` / `interviewer` | List all question banks |
-| `GET` | `/api/admin/question-bank/:qb_id` | `admin` / `interviewer` | Get question bank with parsed questions |
+| `POST` | `/api/admin/question-bank/upload` | `admin` | Upload question bank (PDF/DOCX) |
+| `GET` | `/api/admin/question-bank` | `admin` | List all question banks |
+| `GET` | `/api/admin/question-bank/:qb_id` | `admin` | Get question bank with parsed questions |
 | `DELETE` | `/api/admin/question-bank/:qb_id` | `admin` | Delete question bank |
-| `PATCH` | `/api/admin/question-bank/:qb_id/toggle` | Any | Toggle active/inactive status |
+| `PATCH` | `/api/admin/question-bank/:qb_id/toggle` | `admin` | Toggle active/inactive status |
 
 ---
 
 ## Interviewer endpoints
 
-**Prefix:** `/api/interviewer` — Requires `interviewer` role
+**Prefix:** `/api/interviewer` — Requires `interviewer`, `recruiter`, or `sector_admin`. Interviewers only reach candidates assigned to them; recruiters and sector admins only reach their sector.
 
 ### Candidate operations
 
@@ -199,7 +188,6 @@ Use AI to polish job or sector descriptions.
 | `GET` | `/api/interviewer/candidates/:candidate_id` | Candidate detail with assessment data |
 | `GET` | `/api/interviewer/candidates/:candidate_id/resume` | Download resume file |
 | `POST` | `/api/interviewer/candidates/:candidate_id/reject` | Reject candidate and send email notification |
-| `GET/POST` | `/api/interviewer/candidates/:candidate_id/notes` | Get or add candidate notes |
 
 ### Assessment scheduling
 
@@ -212,7 +200,7 @@ Schedule an assessment and generate AI-tailored questions.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `scheduled_time` | string | Yes | ISO 8601 datetime |
-| `is_technical_role` | boolean | No | Default `true`. Disables coding section when `false` |
+| `is_technical_role` | boolean | No | Default `true`. Disables coding section when `false`. Returns an error while the code runner is disabled |
 | `additional_info` | string | No | Extra context for AI question generation |
 
 **Response:** `data.{scheduled_assessment_id, assessment_link, email_sent}`
@@ -250,6 +238,10 @@ notification to the candidate.
 |--------|------|-------------|
 | `GET` | `/api/interviewee/assessment/verify` | Verify the `X-Assessment-Token` header |
 | `POST` | `/api/interviewee/assessment/start` | Start or resume using the `X-Assessment-Token` header |
+| `GET` | `/api/interviewee/assessment/:assessment_id/remaining-time` | Server-calculated remaining time |
+
+The assessment can only be started within ±30 minutes of its scheduled time.
+All candidate endpoints authenticate with the `X-Assessment-Token` header.
 
 ### Answer submission
 
@@ -265,7 +257,7 @@ the expected payload:
 | Field | Type |
 |-------|------|
 | `type` | `"mcq"` |
-| `questionId` | string |
+| `questionId` | number |
 | `answer` | `"A"`, `"B"`, `"C"`, or `"D"` |
 | `timeSpent` | number (seconds) |
 
@@ -274,22 +266,37 @@ the expected payload:
 | Field | Type |
 |-------|------|
 | `type` | `"coding"` |
-| `questionId` | string |
-| `code` | string |
-| `language` | `"python"`, `"javascript"`, or `"java"` |
-| `testsPassed` | number |
-| `totalTests` | number |
+| `questionId` | number |
+| `code` | string (max 100 KB) |
+| `language` | `"python"` or `"javascript"` |
+
+The server runs the stored test cases itself; client-reported results are ignored.
 
 **Psychometric:**
 
 | Field | Type |
 |-------|------|
 | `type` | `"psychometric"` |
-| `questionId` | string |
-| `trait` | string |
-| `score` | number |
-| `selectedOption` | string |
-| `scenarioResponse` | string |
+| `questionId` | number |
+| `selectedOption` | number (option index) |
+
+The trait and score are looked up server-side from the stored scenario.
+
+### Run code
+
+```
+POST /api/interviewee/run-code
+```
+
+Run code against one stored test case. Returns 503 when the code runner is
+disabled.
+
+| Field | Type |
+|-------|------|
+| `language` | `"python"` or `"javascript"` |
+| `code` | string (max 100 KB) |
+| `problem_id` | number |
+| `test_case_index` | number |
 
 ### Assessment completion
 
@@ -309,11 +316,15 @@ Finalize the assessment and calculate scores.
 | `POST` | `/api/interviewee/assessment/:assessment_id/violation` | Report a proctoring violation (with optional base64 screenshot) |
 | `POST` | `/api/interviewee/assessment/:assessment_id/sync-time` | Sync elapsed time |
 
+The browser reports `violation_type` as `tab_hidden`, `focus_lost`, `copy_paste`, `no_face`,
+`multiple_faces`, or `camera_interrupted` (the backend accepts any short lowercase type name). Screenshot evidence is rate limited
+per assessment.
+
 ---
 
 ## Proctor endpoints
 
-**Prefix:** `/api/proctor` — Requires `proctor` or `admin` role
+**Prefix:** `/api/proctor` — Requires `proctor`. Results are limited to assessments assigned to the current proctor or still unassigned.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -324,6 +335,11 @@ Finalize the assessment and calculate scores.
 | `GET` | `/api/proctor/dashboard-stats` | Dashboard statistics scoped to the current proctor |
 | `GET` | `/api/proctor/violations/:violation_id/screenshot` | Retrieve authorized violation evidence |
 | `GET` | `/api/proctor/violations/flagged` | List flagged violations |
+| `GET` | `/api/proctor/violation-statistics` | Violation counts by type and severity over a period (`days`, default 30) |
+| `GET` | `/api/proctor/anomaly-detection` | Assessments whose violation counts or scores look unusual |
+| `GET` | `/api/proctor/quality-metrics` | Proctoring quality metrics |
+| `GET` | `/api/proctor/job-performance` | Scores and violation totals per job posting |
+| `GET` | `/api/proctor/shift-summary` | Today's assessments, scores, and violation totals for the current proctor |
 | `POST` | `/api/proctor/assign-assessment` | Claim an available assessment |
 
 ---
@@ -400,11 +416,13 @@ Requires `super_admin`. Returns audit trail entries with `user_email`,
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/` | API info and health status |
-| `GET` | `/api/health` | Health check |
+| `GET` | `/api/health` | Liveness: `{"status": "ok", "demo_mode": <bool>}` |
+| `GET` | `/api/health/ready` | Readiness: checks PostgreSQL (503 when unavailable) and reports `code_runner` |
 | `POST` | `/api/resume/upload` | Submit an application (`file`, `job_id`, `name`, `email`, optional `phone`); returns only the application ID, status, and selected job confirmation |
-| `GET` | `/api/dashboard/candidates` | List all candidates |
-| `POST` | `/api/dashboard/candidates/:candidate_id/shortlist` | Update shortlist status |
-| `GET` | `/uploads/:filename` | Serve uploaded files |
+
+Uploaded files are never served publicly. Resumes are downloaded through
+`/api/interviewer/candidates/:candidate_id/resume` and violation screenshots
+through `/api/proctor/violations/:violation_id/screenshot`.
 
 ---
 
@@ -414,12 +432,19 @@ Requires `super_admin`. Returns audit trail entries with `user_email`,
 
 The WebSocket server handles real-time WebRTC signaling for live proctoring.
 
+The connection itself is authenticated through the Socket.IO `auth` payload;
+unauthenticated connections are refused:
+
+- Candidate: `{role: "candidate", assessment_id, access_token}`
+- Staff: `{role: "staff", assessment_id, token: <JWT>}`. Allowed for the assigned
+  interviewer or proctor, and for recruiters and sector admins in the candidate's sector.
+
 ### Client to server
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `join_as_candidate` | `{assessment_id, access_token}` | Candidate joins proctoring room |
-| `join_as_interviewer` | `{assessment_id, user_id}` | Proctor joins to monitor |
+| `join_as_candidate` | `{assessment_id}` | Candidate joins proctoring room |
+| `join_as_interviewer` | `{assessment_id}` | Staff member joins to monitor |
 | `webrtc_offer` | `{assessment_id, offer}` | Forward SDP offer to interviewers |
 | `webrtc_answer` | `{assessment_id, answer}` | Forward SDP answer to candidate |
 | `ice_candidate` | `{assessment_id, candidate, target}` | Forward ICE candidate |

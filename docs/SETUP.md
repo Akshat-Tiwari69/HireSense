@@ -7,8 +7,8 @@ environment on your local machine.
 
 Before you begin, make sure you have the following installed:
 
-- **Python** 3.9 or higher
-- **Node.js** 16.0 or higher
+- **Python** 3.12 (CI and production use 3.12; 3.10 is the minimum)
+- **Node.js** 20–24 with npm 10 or newer
 - **PostgreSQL** 15 or higher (local instance or Supabase)
 - **Git** for version control
 
@@ -50,6 +50,9 @@ Optional (for AI features):
 
    The backend reads the names in `backend/.env.example`. At minimum, set
    `DATABASE_URL` and a random `JWT_SECRET_KEY` of at least 32 characters.
+   Keep `APP_ENV=development` from the template: when `APP_ENV` is unset the
+   backend assumes production and applies the strict production checks (for
+   example, it requires `sslmode=verify-full` on `DATABASE_URL`).
    `OPENAI_API_KEY` enables AI-backed features, while email can use either
    `RESEND_API_KEY` or the `SMTP_*` variables in the template.
 
@@ -81,6 +84,18 @@ Optional (for AI features):
    ```
 
    The API is now available at `http://localhost:5000`.
+
+7. Create the first staff accounts (run from the repository root):
+
+   ```bash
+   python database/seed_users.py
+   ```
+
+   This creates `admin@hiresense.com`, `interviewer@hiresense.com`, and
+   `proctor@hiresense.com`. Set `SEED_ADMIN_PASSWORD`,
+   `SEED_INTERVIEWER_PASSWORD`, and `SEED_PROCTOR_PASSWORD` to choose the
+   passwords; any you leave out are generated and printed once. Create further
+   users from the Admin Dashboard's **Users** tab.
 
 ## Frontend setup
 
@@ -125,9 +140,10 @@ cd backend && python run.py
 cd frontend && npm run dev
 ```
 
-The frontend auto-detects the backend URL. If you access the app from a
-network IP (for example, testing on another device), the frontend falls
-back to `http://<your-ip>:5000` automatically.
+In development the frontend calls the API on its own origin, and the Vite dev
+server proxies `/api` and `/socket.io` (including WebSockets) to
+`http://127.0.0.1:5000`. Leave `VITE_API_BASE_URL` empty unless the API is
+served from a different origin.
 
 ## Database migrations
 
@@ -137,44 +153,37 @@ database. Use `--reconcile` for an existing installation. Historical files in
 sequence; the dated `20260713` reconciliation migration is the supported legacy
 upgrade path.
 
-## Default user roles
+## User roles
 
-After database initialization, register users through the
-`POST /api/auth/register` endpoint. Available roles:
+There is no public registration endpoint. Staff accounts come from
+`database/seed_users.py` or the Admin Dashboard. Available roles:
 
 | Role | Description |
 |------|------------|
-| `admin` | Full system access (maps to super_admin internally) |
-| `interviewer` | Candidate management and assessment scheduling |
-| `proctor` | Live session monitoring and violation tracking |
-| `sector_admin` | Sector-scoped job and candidate management |
-| `recruiter` | Job postings and candidate matching |
+| `super_admin` | Full system access, including managing admin accounts |
+| `admin` | Full system access (treated as `super_admin` for job and sector rules) |
+| `sector_admin` | Hiring review and job management within one sector (requires `sector_id`) |
+| `recruiter` | Hiring review and job postings within one sector (requires `sector_id`) |
+| `interviewer` | Review assigned candidates, schedule assessments, record decisions |
+| `proctor` | Live session monitoring and violation review |
+
+Candidates never get an account; they use the emailed assessment link.
+See [ROLES.md](ROLES.md) for details.
 
 ## Production deployment
 
-The project includes configuration for cloud platforms such as Railway,
-Render, and Heroku.
+Production runs on a single VPS with Caddy and one Gunicorn/eventlet worker,
+deployed from `main` by GitHub Actions. See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
+and [deploy/README.md](../deploy/README.md).
 
-### Backend
-
-The backend uses Gunicorn as the production WSGI server. Deployment
-configuration:
-
-- `Procfile` — Gunicorn process definition
-- `nixpacks.toml` — Nixpacks build configuration
-- `runtime.txt` — Python version specification
-
-### Frontend
-
-Build the production bundle:
+To build the frontend locally:
 
 ```bash
 cd frontend
 npm run build
 ```
 
-The optimized output is generated in `frontend/dist/`. Deploy this
-directory to any static hosting provider.
+The output is written to `frontend/dist/`.
 
 ## Troubleshooting
 
@@ -187,4 +196,11 @@ directory to any static hosting provider.
 - **CORS errors** — Set `CORS_ORIGINS` to a comma-separated list of exact
   frontend origins. Do not use wildcard origins in production.
 - **WebSocket connection issues** — The Socket.IO server runs on the same
-  port as the Flask API (5000). Verify that eventlet is installed correctly.
+  port as the Flask API (5000). Verify that eventlet is installed correctly
+  and that you opened the app through the Vite dev server so `/socket.io`
+  is proxied.
+- **Coding questions fail to run** — Code execution needs a Piston runner.
+  In development the runner is enabled by default and expects Piston at
+  `http://127.0.0.1:2000/api/v2/execute`; set `CODE_RUNNER_URL` to use another
+  one. With `CODE_RUNNER_ENABLED=false`, technical assessments cannot be
+  scheduled and only non-technical ones are available.
