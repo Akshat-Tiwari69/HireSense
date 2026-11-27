@@ -671,7 +671,8 @@ const ProctorDashboardPage = () => {
             ) : (
               <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                 {selectedViolations.map((violation) => {
-                  const shouldShowScreenshot = ['no_face', 'multiple_faces', 'unknown_person'].includes(violation.violation_type);
+                  const shouldShowScreenshot = Boolean(violation.screenshot_url)
+                    || ['no_face', 'multiple_faces', 'unknown_person'].includes(violation.violation_type);
                   const severity = String(violation.severity || 'review').toLowerCase();
 
                   return (
