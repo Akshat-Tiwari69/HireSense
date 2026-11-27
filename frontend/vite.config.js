@@ -1,11 +1,41 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'fs'
 import path from 'path'
+
+// Face detection runs MediaPipe's wasm runtime, which must be served from our
+// own origin under the production CSP. Rather than committing ~15 MB of
+// binaries, serve them from node_modules in dev and copy them into the build.
+const MEDIAPIPE_WASM_DIR = path.resolve(__dirname, 'node_modules/@mediapipe/tasks-vision/wasm')
+const MEDIAPIPE_FILES = ['vision_wasm_internal.js', 'vision_wasm_internal.wasm']
+const MEDIAPIPE_PUBLIC_PATH = 'mediapipe'
+
+const mediapipeWasm = () => ({
+  name: 'hiresense-mediapipe-wasm',
+  configureServer(server) {
+    server.middlewares.use(`/${MEDIAPIPE_PUBLIC_PATH}`, (req, res, next) => {
+      const name = path.basename(new URL(req.url, 'http://localhost').pathname)
+      if (!MEDIAPIPE_FILES.includes(name)) return next()
+      res.setHeader('Content-Type', name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript')
+      fs.createReadStream(path.join(MEDIAPIPE_WASM_DIR, name)).pipe(res)
+    })
+  },
+  generateBundle() {
+    for (const name of MEDIAPIPE_FILES) {
+      this.emitFile({
+        type: 'asset',
+        fileName: `${MEDIAPIPE_PUBLIC_PATH}/${name}`,
+        source: fs.readFileSync(path.join(MEDIAPIPE_WASM_DIR, name)),
+      })
+    }
+  },
+})
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
+    mediapipeWasm(),
   ],
   server: {
     host: '0.0.0.0',

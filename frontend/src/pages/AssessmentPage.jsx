@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { useToast } from '../hooks/use-toast';
+import { useFaceDetection } from '../hooks/useFaceDetection';
 import { useProctorStream } from '../hooks/useProctorStream';
 import {
   finalizeAssessmentSubmission,
@@ -36,6 +37,7 @@ import {
   normalizeSavedPsychometricAnswers,
   resolveAssessmentToken,
 } from '../lib/assessment';
+import { createKeyedThrottle, describeClipboardEvent } from '../lib/proctoring';
 import { api } from '../services/api';
 
 const SECTION_META = {
@@ -43,6 +45,11 @@ const SECTION_META = {
   coding: { label: 'Practical exercise', icon: Code2 },
   workstyle: { label: 'Work style', icon: ShieldCheck },
 };
+
+// Browser activity events can fire in bursts (several pastes, focus flapping),
+// so each kind is reported at most once in this window.
+const ACTIVITY_REPORT_INTERVAL_MS = 10000;
+const FOCUS_LOSS_CHECK_DELAY_MS = 250;
 
 const getErrorMessage = (error, fallback) => error?.response?.data?.message || fallback;
 
@@ -56,6 +63,7 @@ const AssessmentPage = () => {
   const answerVersionRef = useRef(new Map());
   const questionStartedAtRef = useRef(new Map());
   const cameraErrorReportedRef = useRef('');
+  const activityThrottleRef = useRef(createKeyedThrottle(ACTIVITY_REPORT_INTERVAL_MS));
 
   const [accessToken] = useState(() => {
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -228,6 +236,69 @@ const AssessmentPage = () => {
     cameraErrorReportedRef.current = streamError;
     reportViolation('camera_interrupted', streamError, 'high');
   }, [assessmentId, reportViolation, streamError]);
+
+  const handleFaceEvent = useCallback((event) => {
+    reportViolation(event.type, event.description, event.severity, event.type !== 'face_detection_unavailable');
+  }, [reportViolation]);
+
+  const faceDetectionStatus = useFaceDetection(
+    videoRef,
+    Boolean(proctoringActive && mediaStream && assessmentId && !submitted),
+    handleFaceEvent,
+  );
+
+  useEffect(() => {
+    if (!assessmentId || submitted) return undefined;
+    const onClipboard = (event) => {
+      if (!activityThrottleRef.current(`clipboard:${event.type}`, Date.now())) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const location = target?.closest('textarea[aria-label="Code solution"]') ? 'code editor' : 'assessment page';
+      let textLength;
+      if (event.type === 'paste') {
+        textLength = event.clipboardData?.getData('text')?.length;
+      } else {
+        textLength = window.getSelection()?.toString().length;
+        if (!textLength && target && 'selectionStart' in target && typeof target.value === 'string') {
+          textLength = Math.abs((target.selectionEnd || 0) - (target.selectionStart || 0));
+        }
+      }
+      const violation = describeClipboardEvent(event.type, textLength, location);
+      reportViolation(violation.type, violation.description, violation.severity);
+    };
+    document.addEventListener('copy', onClipboard);
+    document.addEventListener('cut', onClipboard);
+    document.addEventListener('paste', onClipboard);
+    return () => {
+      document.removeEventListener('copy', onClipboard);
+      document.removeEventListener('cut', onClipboard);
+      document.removeEventListener('paste', onClipboard);
+    };
+  }, [assessmentId, reportViolation, submitted]);
+
+  useEffect(() => {
+    if (!assessmentId || submitted) return undefined;
+    let pending = null;
+    const onBlur = () => {
+      window.clearTimeout(pending);
+      // Switching tabs also blurs the window; that case is already reported
+      // as tab_hidden, so only report focus moving to another window or app
+      // while the assessment stays visible.
+      pending = window.setTimeout(() => {
+        if (document.visibilityState !== 'visible' || document.hasFocus()) return;
+        if (!activityThrottleRef.current('focus_lost', Date.now())) return;
+        reportViolation(
+          'focus_lost',
+          'The assessment window lost focus to another window or application while still visible.',
+          'low',
+        );
+      }, FOCUS_LOSS_CHECK_DELAY_MS);
+    };
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.clearTimeout(pending);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [assessmentId, reportViolation, submitted]);
 
   useEffect(() => {
     if (!assessmentId || submitted) return undefined;
@@ -592,7 +663,10 @@ const AssessmentPage = () => {
                   <span className={`h-2 w-2 rounded-full ${isStreaming ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                   {isStreaming ? 'Proctoring connected' : 'Connecting camera'}
                 </div>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Camera video and tab visibility are monitored during this session.</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Camera video, face presence, tab and window focus, and copy or paste actions are monitored during this session.</p>
+                {faceDetectionStatus === 'unavailable' && (
+                  <p className="mt-2 text-xs leading-5 text-amber-700">Face detection is unavailable in this browser. Your camera is still shared with the proctor.</p>
+                )}
                 {streamError && <p className="mt-2 text-xs leading-5 text-red-700">{streamError}</p>}
                 {violationCount > 0 && <p className="mt-2 text-xs text-slate-500">Session events recorded: {violationCount}</p>}
               </div>
